@@ -202,15 +202,15 @@ fn emit(event: &str, mut data: serde_json::Value) {
 /// id, subject, start and threads (ids, #612); None for one plugins don't hear.
 #[cfg_attr(not(feature = "js"), allow(dead_code))]
 fn for_plugins(event: &str, d: &serde_json::Value) -> Option<serde_json::Value> {
-    let call = || d["dir"].as_str().and_then(|p| Path::new(p).file_name()).map(|f| f.to_string_lossy().into_owned());
+    let (stamp, call) = (|| d["dir"].as_str().map(|p| crate::calls::stamp_of(Path::new(p))), || d["dir"].as_str().and_then(|p| Path::new(p).file_name()).map(|f| f.to_string_lossy().into_owned()));
     Some(match event {
         "meeting_soon" => json!({"id": d["id"], "subject": d["subject"], "start": d["start"], "threads": d["threads"].as_array().cloned().unwrap_or_default()}),
         "call_started" => json!({"app": d["app"]}),
         // `next_call`: Teams went straight on to another call (not a hang-up); the next call_started follows at once.
         "call_ended" => json!({"app": d["app"], "recording": d["recording"], "next_call": d["next_call"] == true}),
-        "recording_started" => json!({"call": call(), "title": d["title"], "memo": d["memo"] == true}),
-        "recording_stopped" => json!({"call": call(), "duration_s": d["duration_s"], "reason": d["reason"]}),
-        "transcribed" => json!({"call": call(), "ok": d["ok"]}),
+        "recording_started" => json!({"call": call(), "stamp": stamp(), "title": d["title"], "memo": d["memo"] == true}),
+        "recording_stopped" => json!({"call": call(), "stamp": stamp(), "duration_s": d["duration_s"], "reason": d["reason"]}),
+        "transcribed" => json!({"call": call(), "stamp": stamp(), "ok": d["ok"]}),
         _ => return None,
     })
 }
@@ -1553,8 +1553,9 @@ mod tests {
     #[test]
     fn a_plugin_hears_a_call_by_its_name_not_its_path() {
         let p = for_plugins("recording_started", &json!({"dir": "/Users/x/echo/calls/2026-11-06_100000-acme", "title": "Acme"})).unwrap();
-        assert_eq!(p, json!({"call": "2026-11-06_100000-acme", "title": "Acme", "memo": false}));
-        assert_eq!(for_plugins("transcribed", &json!({"dir": "/a/b/c", "ok": true, "error": "x"})).unwrap(), json!({"call": "c", "ok": true}));
+        assert_eq!(p, json!({"call": "2026-11-06_100000-acme", "stamp": "2026-11-06_100000", "title": "Acme", "memo": false}));
+        assert_eq!(for_plugins("transcribed", &json!({"dir": "/a/b/c", "ok": true, "error": "x"})).unwrap(), json!({"call": "c", "stamp": "c", "ok": true}));
+        assert_eq!(for_plugins("recording_stopped", &json!({"dir": "/x/calls/2026-11-06_100000-acme-renamed"})).unwrap()["stamp"], "2026-11-06_100000", "a retitle keeps it");
         assert!(for_plugins("error", &json!({"message": "x"})).is_none(), "not one plugins hear");
         // A meeting about to start names its threads when Echo knows them (#612); none known: [].
         let soon = |d: serde_json::Value| for_plugins("meeting_soon", &d).unwrap()["threads"].clone();

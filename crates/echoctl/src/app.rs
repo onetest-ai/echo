@@ -1115,11 +1115,12 @@ pub fn choose_files(prompt: &str, multiple: bool, ext: &[String]) -> Vec<PathBuf
 // Windows' pickers: the text goes in through the environment, never quoted into the script — PowerShell also ends a
 // '…' string at a curly quote (‘ ’ ‚ ‛), so a quote in a plugin's prompt would end it and run what follows.
 
-/// The PowerShell script of Windows' folder picker and the environment it reads its prompt from.
+/// The PowerShell script of Windows' folder picker (with its "Make New Folder" button, as macOS's `choose folder` has
+/// "New Folder") and the environment it reads its prompt from.
 #[cfg_attr(not(windows), allow(dead_code))]
 fn folder_dialog_ps(prompt: &str) -> (String, Vec<(&'static str, String)>) {
     let script = "Add-Type -AssemblyName System.Windows.Forms; $d = New-Object System.Windows.Forms.FolderBrowserDialog; \
-                  $d.Description = $env:ECHO_PICK_PROMPT; if ($d.ShowDialog() -eq 'OK') { $d.SelectedPath }";
+                  $d.Description = $env:ECHO_PICK_PROMPT; $d.ShowNewFolderButton = $true; if ($d.ShowDialog() -eq 'OK') { $d.SelectedPath }";
     (script.to_string(), vec![("ECHO_PICK_PROMPT", prompt.to_string())])
 }
 
@@ -1471,7 +1472,8 @@ mod tests {
         }
         assert_eq!(fenv, vec![("ECHO_PICK_PROMPT", evil.to_string())]);
         assert_eq!(env, vec![("ECHO_PICK_PROMPT", evil.to_string()), ("ECHO_PICK_FILTER", "Files|*.md;*.pdf".to_string())]);
-        assert!(files.contains("$d.Multiselect = $true") && super::files_dialog_ps("p", false, &[]).0.contains("$d.Multiselect = $false"));
+        assert!(folder.contains("$d.ShowNewFolderButton = $true"), "a new folder can be made in the picker");
+        assert!(files.contains("$d.Multiselect = $true") &&super::files_dialog_ps("p", false, &[]).0.contains("$d.Multiselect = $false"));
         assert_eq!(super::files_dialog_ps("p", false, &[]).1[1].1, "", "no filter: every file");
     }
 

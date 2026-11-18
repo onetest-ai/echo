@@ -29,7 +29,9 @@ and `CLAUDE_CONFIG_DIR` at the test's own folders (`user/`, `user/.claude` for t
 - Development-build stand-ins (`#[cfg(debug_assertions)]`): `ECHOCTL_PICK_FOLDER` (instead of a native folder dialog),
   `ECHOCTL_PICK_FILES` (instead of a native file dialog, `jshost::files::pick_files_takes_the_stand_in_in_a_debug_build_and_gives_handles`),
   `ECHOCTL_TEST_HOSTS` (a plugin's named host reaching a fake service,
-  `jshost::a_plugins_named_host_reaches_the_fake_service_set_for_tests`).
+  `jshost::a_plugins_named_host_reaches_the_fake_service_set_for_tests`), `ECHOCTL_TEST_GRAPH` (a fake Microsoft 365:
+  signed in with no tokens, every Graph request to a local address, `tests/fixtures/fake_graph.py`,
+  `jshost::a_plugin_reads_a_mail_thread_from_the_fake_microsoft_365_set_for_tests`).
 
 ## Opening nothing in tests
 

@@ -56,10 +56,10 @@ fn cut(s: &str, n: usize) -> String {
 }
 
 /// A call's facts: `{title, started_at, ended_at, duration_min, app, memo}` (`duration_min` from its start and end).
-fn call_facts(meta: &Value) -> serde_json::Map<String, Value> {
+fn call_facts(dir: &Path, meta: &Value) -> serde_json::Map<String, Value> {
     let at = |k: &str| meta[k].as_str().and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok());
     let minutes = at("started_at").zip(at("ended_at")).map(|(a, b)| ((b - a).num_seconds() as f64 / 60.0).round() as i64).filter(|m| *m >= 0);
-    let v = json!({"title": meta["title"], "started_at": meta["started_at"], "ended_at": meta["ended_at"], "duration_min": minutes, "app": meta["app"], "memo": meta["kind"] == "memo"});
+    let v = json!({"stamp": crate::calls::stamp_of(dir), "title": meta["title"], "started_at": meta["started_at"], "ended_at": meta["ended_at"], "duration_min": minutes, "app": meta["app"], "memo": meta["kind"] == "memo"});
     v.as_object().cloned().unwrap_or_default()
 }
 
@@ -165,7 +165,9 @@ fn attendees(meeting: &Value) -> Vec<Value> {
 pub fn source(id: &str, opts: &Value) -> Result<Value> {
     if let Some(name) = id.strip_prefix("call:") {
         anyhow::ensure!(crate::links::Link::parse(&format!("echo://call/{name}")).is_some(), "not a call: {id}");
-        let dir = crate::calls::resolve_call(name).map_err(|_| anyhow!("no call {name:?}"))?;
+        // A folder's name, or the call's stamp (`calls::stamp_of`): the call it names now, retitled or not.
+        let found = if crate::calls::find_call(name).is_ok() { None } else { crate::calls::by_stamp(&crate::calls::stamp_of(Path::new(name))) };
+        let dir = crate::calls::resolve_call(&found.map_or_else(|| name.to_string(), |d| d.display().to_string())).map_err(|_| anyhow!("no call {name:?}"))?;
         let meta = crate::calls::read_json(&dir.join("meta.json"));
         let text = std::fs::read_to_string(dir.join("notes.md")).map_err(|_| anyhow!("{name}: no minutes yet"))?;
         let (id, link) = call_id(&dir);
@@ -184,7 +186,7 @@ pub fn source(id: &str, opts: &Value) -> Result<Value> {
             "attendees": attendees(&crate::calls::read_json(&dir.join("meeting.json"))), "participants": participants(&dir, &known_people()),
             "minutes": minutes_parts(&dir, true),
         });
-        for (k, v) in call_facts(&meta) {
+        for (k, v) in call_facts(&dir, &meta) {
             out[k] = v;
         }
         if opts["transcript"] != false {
@@ -244,7 +246,8 @@ impl Routing {
 /// `client` theirs (`client_of`), `profile` their AI profile when they share one, `from` who wrote the messages it
 /// holds, `people` the conversation's addresses but the user's (mail), `trust` "trusted": Recall indexes only the
 /// messages of senders the user trusts (a sender waiting for the user's decision, ignored, or unauthenticated stays
-/// out of it); `at` its last message's day.
+/// out of it); `at` its last message's day; a mail's Microsoft 365 ids as Recall keeps them, `m365_id` (its last
+/// message's Graph id, as `ctx.m365.mailThread` takes it) and `conversation_id`, null for a post or what Recall didn't keep.
 #[cfg(feature = "brain")]
 fn mail_item(c: &rusqlite::Connection, src: &str, routing: &Routing) -> Result<Value> {
     let (kind, title, date, refs): (String, Option<String>, Option<String>, Option<String>) = c
@@ -268,6 +271,7 @@ fn mail_item(c: &rusqlite::Connection, src: &str, routing: &Routing) -> Result<V
         "at": date, "client": client_of(&threads), "threads": threads,
         "profile": if profiles.len() == 1 { profiles.into_iter().next() } else { None },
         "from": from, "people": people, "trust": "trusted", "link": format!("echo://mail/{src}"), "url": refs["url"],
+        "m365_id": refs["message"], "conversation_id": refs["conversation"],
     }))
 }
 
@@ -330,7 +334,7 @@ pub fn sources(opts: &Value) -> Result<Value> {
             if !routed(&threads, &client_v) {
                 continue;
             }
-            out.push(json!({"id": call_id(&dir).0, "kind": "call", "title": meta["title"], "date": date, "threads": threads.iter().map(|t| t["id"].clone()).collect::<Vec<_>>(), "client": client_v}));
+            out.push(json!({"id": call_id(&dir).0, "stamp": crate::calls::stamp_of(&dir), "kind": "call", "title": meta["title"], "date": date, "threads": threads.iter().map(|t| t["id"].clone()).collect::<Vec<_>>(), "client": client_v}));
         }
     }
     #[cfg(feature = "brain")]
@@ -401,7 +405,7 @@ pub fn calls(opts: &Value) -> Result<Value> {
             "chat": dir.join("chat.json").is_file(), "people": people, "participants": participants(&dir, &known), "client": client_v, "threads": threads,
             "profile": crate::ai::call_profile_id(&dir).ok(),
         });
-        for (k, v) in call_facts(&meta) {
+        for (k, v) in call_facts(&dir, &meta) {
             row[k] = v;
         }
         out.push(row);
@@ -557,7 +561,7 @@ pub(crate) fn minutes_payload(dir: &Path) -> Value {
         "client": client_of(&threads), "threads": threads, "profile": crate::ai::call_profile_id(dir).ok(),
         "participants": participants(dir, &known_people()), "minutes": minutes,
     });
-    for (k, v) in call_facts(&meta) {
+    for (k, v) in call_facts(dir, &meta) {
         out[k] = v;
     }
     out
@@ -826,7 +830,9 @@ mod tests {
         let (acme, globex_t) = (json!({"client": "acme", "client_name": "Acme", "id": "acme-pilot", "name": "Acme pilot"}), json!({"client": "globex", "client_name": "Globex", "id": "globex-pilot", "name": "Globex pilot"}));
         let item = |src: &str, kind: &str, title: &str, at: &str, client: Value, profile: Value, threads: Value| {
             json!({"at": at, "client": client, "from": ["Jane Doe"], "id": format!("mail:{src}"), "kind": kind, "link": format!("echo://mail/{src}"), "people": ["jane@acme.example"],
-                   "profile": profile, "subject": title, "threads": threads, "title": title, "trust": "trusted", "url": format!("https://outlook.example/{src}")})
+                   "profile": profile, "subject": title, "threads": threads, "title": title, "trust": "trusted", "url": format!("https://outlook.example/{src}"),
+                   // Recall kept no Microsoft 365 ids of these (a post has none; a mail indexed before it kept them).
+                   "m365_id": null, "conversation_id": null})
         };
         let one = item("mail/one", "mail", "Pilot dates", "2026-11-11", json!({"id": "acme", "name": "Acme"}), json!("work"), json!([acme]));
         let two = item("mail/two", "mail", "Both pilots", "2026-11-12", Value::Null, Value::Null, json!([acme, globex_t]));
@@ -852,7 +858,7 @@ mod tests {
         let (_env, _root) = crate::paths::testenv::folders("share-sources-event");
         let pilot = acme_pilot();
         let md = "# Pilot dates\n\n### 2026-11-10 09:12 Jane Doe\n\n- The pilot moves to 24 Nov — “moves to the 24th”\n\n### 2026-11-11 08:00 Kim Ito\n\n- Kim confirms the room\n";
-        let refs = json!({"kind": "mail", "conversation": "c1", "people": ["jane@acme.example", "kim@acme.example"], "url": "https://outlook.example/1", "subjects": ["Pilot dates", "RE: Pilot dates"], "threads": [{"id": pilot}]});
+        let refs = json!({"kind": "mail", "conversation": "c1", "message": "AAMk-c1-2", "people": ["jane@acme.example", "kim@acme.example"], "url": "https://outlook.example/1", "subjects": ["Pilot dates", "RE: Pilot dates"], "threads": [{"id": pilot}]});
         let input = crate::brain::store::Input {
             source: "mail/abc".into(), kind: "mail".into(), title: "Pilot dates".into(), event_date: Some("2026-11-11".into()), md: md.into(), refs,
             link: Box::new(|_| "https://outlook.example/1".into()), speaker: Box::new(|c| c.title.splitn(3, ' ').nth(2).map(str::to_owned)),
@@ -867,9 +873,11 @@ mod tests {
         assert_eq!((it["client"].clone(), it["from"].clone()), (json!({"id": "acme", "name": "Acme"}), json!(["Jane Doe", "Kim Ito"])));
         assert_eq!(it["people"], json!(["jane@acme.example", "kim@acme.example"]));
         assert!(it.get("text").is_none() && it.get("messages").is_none(), "no content in the event: {it}");
+        // Its Microsoft 365 ids as Recall kept them: the mail `ctx.m365.mailThread` reads the thread by, its conversation.
+        assert_eq!((it["m365_id"].as_str(), it["conversation_id"].as_str()), (Some("AAMk-c1-2"), Some("c1")));
         // The read: the same routing, with Recall's facts message by message.
         let s = source("mail:mail/abc", &json!({})).unwrap();
-        for k in ["threads", "client", "profile", "from", "people", "trust", "subject", "at"] {
+        for k in ["threads", "client", "profile", "from", "people", "trust", "subject", "at", "m365_id", "conversation_id"] {
             assert_eq!(s[k], it[k], "{k}");
         }
         assert_eq!(s["messages"][0]["from"], "Jane Doe");
@@ -882,6 +890,7 @@ mod tests {
         let row = &rows[0];
         assert_eq!((row["id"].as_str(), row["date"].as_str(), row["threads"].clone(), row["trust"].as_str()), (Some("mail:mail/abc"), Some("2026-11-11"), json!([pilot]), Some("trusted")));
         assert_eq!((row["from"].clone(), row["client"].clone()), (it["from"].clone(), it["client"].clone()));
+        assert_eq!((row["m365_id"].clone(), row["conversation_id"].clone()), (it["m365_id"].clone(), it["conversation_id"].clone()));
         assert!(row.get("text").is_none() && row.get("messages").is_none());
         assert!(sources(&json!({"kind": "mail", "q": "nobody"})).unwrap().as_array().unwrap().is_empty());
         assert!(sources(&json!({"kind": "mail", "client": "globex"})).unwrap().as_array().unwrap().is_empty());
@@ -905,6 +914,27 @@ mod tests {
         for bad in ["call:../x", "mail:../x", "nope:x"] {
             assert!(source(bad, &json!({})).is_err(), "{bad}");
         }
+    }
+
+    #[test]
+    fn a_retitled_call_keeps_its_stamp_in_what_plugins_get_and_a_stamp_reads_it() {
+        let (_env, _root) = crate::paths::testenv::folders("share-stamp");
+        let d = crate::paths::calls_dir().join("2026-10-28_110000-aurora-weekly");
+        std::fs::create_dir_all(&d).unwrap();
+        std::fs::write(d.join("meta.json"), r#"{"title": "Aurora weekly", "started_at": "2026-10-28T11:00:00+02:00"}"#).unwrap();
+        std::fs::write(d.join("notes.md"), "# Aurora weekly\n- SSO first [12:05]\n").unwrap();
+        assert_eq!(minutes_payload(&d)["stamp"], "2026-10-28_110000");
+        assert_eq!(sources(&json!({})).unwrap()[0]["stamp"], "2026-10-28_110000");
+        assert_eq!(calls(&json!({})).unwrap()[0]["stamp"], "2026-10-28_110000");
+        // Retitled: the folder's name changes, the stamp doesn't; the old name and the bare stamp both read it.
+        let moved = crate::paths::calls_dir().join("2026-10-28_110000-aurora-kickoff");
+        std::fs::rename(&d, &moved).unwrap();
+        assert_eq!(minutes_payload(&moved)["stamp"], "2026-10-28_110000");
+        for id in ["call:2026-10-28_110000", "call:2026-10-28_110000-aurora-weekly", "call:2026-10-28_110000-aurora-kickoff"] {
+            let s = source(id, &json!({})).unwrap();
+            assert_eq!((s["stamp"].as_str(), s["id"].as_str()), (Some("2026-10-28_110000"), Some("call:2026-10-28_110000-aurora-kickoff")), "{id}");
+        }
+        assert!(source("call:2026-10-28_120000", &json!({})).is_err(), "a stamp no call has is nothing");
     }
 
     #[cfg(feature = "brain")]

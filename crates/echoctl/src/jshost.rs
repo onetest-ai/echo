@@ -363,7 +363,8 @@ const PRELUDE: &str = r#"
       /** Another app's file its manifest names in `uses.files.read` (that very entry, e.g. "~/…/obsidian.json"):
        *  its text (1 MB at most), or null when it isn't on this computer. */
       readFile: (entry) => call('files.read', String(entry)),
-      /** The system's folder picker; the folder picked is given to this plugin. Its path, or null. */
+      /** The system's folder picker (the user can make a new folder in it); the folder picked is given to this plugin.
+       *  Its path, or null. */
       pickFolder: (prompt) => later('system.pick_folder', String(prompt || 'Choose a folder')),
       /** The system's file picker: [{file, name, size}] handles of the files picked ([] cancelled); `multiple`, `ext`. */
       pickFiles: (prompt, opts) => later('system.pick_files', [String(prompt || 'Choose files'), opts || {}]),
@@ -3661,6 +3662,68 @@ mod tests {
         // Asked for, but Echo isn't signed in: said, and nothing else is tried (no sign-in of its own).
         assert!(err("thread", json!({"id": "AAMk1"})).contains("Microsoft 365 isn't connected"));
         assert!(err("search", json!({"q": "pilot"})).contains("Microsoft 365 isn't connected"));
+        plugins::remove("mailer", false).unwrap();
+        sync();
+    }
+
+    // A release build reads no ECHOCTL_TEST_GRAPH: there this would reach for the real Microsoft 365 (testing R11).
+    #[cfg(debug_assertions)]
+    #[test]
+    fn a_plugin_reads_a_mail_thread_from_the_fake_microsoft_365_set_for_tests() {
+        use std::io::{Read, Write};
+        let (_env, root) = paths::testenv::folders("jshost-fake-graph");
+        // A made-up Graph: one acme.example conversation of two mails, the first with a file and a signature's picture.
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        let log = seen.clone();
+        std::thread::spawn(move || {
+            for mut s in listener.incoming().flatten() {
+                let mut buf = [0u8; 8192];
+                let n = s.read(&mut buf).unwrap_or(0);
+                let head = String::from_utf8_lossy(&buf[..n]).into_owned();
+                let path = head.split_whitespace().nth(1).unwrap_or("").to_string();
+                log.lock().unwrap().push(format!("{path} {}", head.lines().any(|l| l.eq_ignore_ascii_case("authorization: bearer test-token"))));
+                let mail = |id: &str, at: &str, files: bool| json!({"id": id, "conversationId": "conv-1", "subject": "Acme pilot plan", "from": {"emailAddress": {"name": "Jane Doe", "address": "jane@acme.example"}},
+                                                            "toRecipients": [], "receivedDateTime": at, "body": {"content": "The pilot starts Monday."}, "hasAttachments": files});
+                let body = if path.starts_with("/me/messages/AAMk-2?") {
+                    mail("AAMk-2", "2026-11-11T10:00:00Z", false)
+                } else if path.starts_with("/me/messages/AAMk-1/attachments?") {
+                    json!({"value": [{"name": "plan.pdf", "isInline": false}, {"name": "logo.png", "isInline": true}]})
+                } else if path.starts_with("/me/messages?$filter=conversationId%20eq%20%27conv-1%27") {
+                    json!({"value": [mail("AAMk-2", "2026-11-11T10:00:00Z", false), mail("AAMk-1", "2026-11-10T09:00:00Z", true)]})
+                } else {
+                    json!({"error": {"code": "NotFound", "message": "not in the fake"}})
+                };
+                let body = body.to_string();
+                let code = if body.contains("\"error\"") { "404 Not Found" } else { "200 OK" };
+                let _ = write!(s, "HTTP/1.1 {code}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}", body.len());
+            }
+        });
+        let main = r#"
+            export function apply(ctx) {
+              ctx.command('thread', (a) => ctx.m365.mailThread(a.id))
+            }
+            "#;
+        install_made_up(&root, "mailer", json!({"m365": {"read": ["mail"]}}), main);
+        let thread = || call_loaded("mailer", "thread", &json!({"id": "AAMk-2"}));
+        // Not a local address: refused, nothing reached.
+        let bad = EnvVar::set("ECHOCTL_TEST_GRAPH", "https://graph.microsoft.com");
+        assert!(crate::graph::account().is_none(), "a wrong fake isn't a sign-in");
+        assert!(thread().unwrap_err().to_string().contains("Microsoft 365 isn't connected"));
+        drop(bad);
+        let _fake = EnvVar::set("ECHOCTL_TEST_GRAPH", &format!("http://127.0.0.1:{port}/"));
+        assert!(crate::graph::account().is_some(), "signed in to the fake, no tokens");
+        assert!(crate::graph::login().unwrap_err().to_string().contains("never signs in to the real Microsoft 365"));
+        let t = thread().unwrap();
+        assert_eq!((t["subject"].as_str(), t["picked"].as_str()), (Some("Acme pilot plan"), Some("AAMk-2")));
+        let msgs = t["messages"].as_array().unwrap();
+        assert_eq!(msgs.iter().map(|m| m["id"].as_str().unwrap()).collect::<Vec<_>>(), ["AAMk-1", "AAMk-2"], "oldest first");
+        assert_eq!((msgs[0]["files"].clone(), msgs[1]["files"].clone()), (json!(["plan.pdf"]), json!([])), "a signature's picture left out");
+        assert!(call_loaded("mailer", "thread", &json!({"id": "AAMk-none"})).unwrap_err().to_string().contains("not in the fake"));
+        // Every request went to the fake with its made-up token.
+        let seen = seen.lock().unwrap().clone();
+        assert!(seen.len() >= 4 && seen.iter().all(|s| s.ends_with(" true")), "{seen:?}");
         plugins::remove("mailer", false).unwrap();
         sync();
     }

@@ -3,7 +3,7 @@ id: TC-016
 title: A plugin hears only the Echo events it named in uses.events.on — the sheet says which, ctx.on accepts those and refuses every other with "didn't ask to hear"; a recording it named reaches it with the call's id and title, never the words
 priority: high
 type: functional
-requirements: [F-PLUG-08]
+requirements: [F-PLUG-08, F-PLUG-117]
 module: plugins
 run: agent
 platform: macos
@@ -66,11 +66,11 @@ JS
 | 5 | `echoctl plugin call acme-listener heard` (as in step 2) | `"accepted"` holds `minutes_written` and `recording_started`; `"refused"` has the one key `call_started` (still not asked for), with the same wording as step 2; `"heard": []` |
 | 6 | `echoctl config --languages en --unscheduled manual --scheduled manual --auto-minutes false`; `echoctl ai live off`; `nohup echoctl app run --no-tray --background > "$D/app.out" 2>&1 & echo $! > "$D/app.pid"; $W 30 app` | The config calls exit 0; "waited … for app" |
 | 7 | `echoctl arm --title "REC-016 listener"; $W 10 armed; $C start acme-sync --hold; $W 30 recording rec-016-listener` | "waited … for recording rec-016-listener": the call started and the recording with it (Echo itself has now fired `call_started` and `recording_started`) |
-| 8 | `echoctl plugin call acme-listener heard` (wait 2 s and run it again if `"heard"` is still empty) | `"heard"` holds exactly one entry, for `recording_started`: its payload names the call by its id (a name ending `-rec-016-listener`) and its title `REC-016 listener`; every value in the payload is that id, that title or a true/false flag, and none is a sentence said in the call. There is no entry for `call_started` |
+| 8 | `echoctl plugin call acme-listener heard` (wait 2 s and run it again if `"heard"` is still empty) | `"heard"` holds exactly one entry, for `recording_started`: its payload names the call by its id (a name ending `-rec-016-listener`), its `stamp` (the first 17 characters of that name, `YYYY-MM-DD_HHMMSS`) and its title `REC-016 listener`; every value in the payload is that id, that stamp, that title or a true/false flag, and none is a sentence said in the call. There is no entry for `call_started` |
 | 9 | `$C end; target/debug/echoctl stop; $W 60 event recording_stopped`; then `echoctl plugin call acme-listener heard` | `"heard"` still holds that one entry: the hang-up and the stop, which Echo also announced, reached the plugin as nothing, because it never named them |
 
 ## Expected Final State
-Acme listener at 0.2.0 hears the two events its manifest names; the one it never named is refused; of everything the recording fired it was given only `recording_started`, with the call's id and title and none of the words.
+Acme listener at 0.2.0 hears the two events its manifest names; the one it never named is refused; of everything the recording fired it was given only `recording_started`, with the call's id, stamp and title and none of the words.
 
 ## Teardown
 - `$C end` (ignore "no call"); `target/debug/echoctl app quit` (if it still runs after 30 s: `kill $(cat "$D/app.pid")`)

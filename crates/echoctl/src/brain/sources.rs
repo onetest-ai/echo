@@ -502,7 +502,8 @@ pub fn sync(emb: Option<&dyn super::embed::Embedder>) -> Result<(Read, store::Re
                 subjects.push(x);
             }
         }
-        let refs = json!({"kind": "mail", "conversation": c, "people": people, "url": first["url"], "subjects": subjects});
+        // `message`: its last mail's Graph id, the one `ctx.m365.mailThread` reads the conversation by.
+        let refs = json!({"kind": "mail", "conversation": c, "message": msgs.last().map(|m| m["id"].clone()), "people": people, "url": first["url"], "subjects": subjects});
         let threads = threads_for(&refs, &w);
         if threads.is_empty() {
             continue;

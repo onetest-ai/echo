@@ -467,6 +467,15 @@ on `PATH` work in any build.
 - **Every process of the run** needs it: export it before `tests/fixtures/serve.sh up` (the window's server inherits
   it) and append `export ECHOCTL_TEST_HOSTS=…` to `<dir>/env` for the CLI and the app. The fake service is the case's
   own (a `python3 -m http.server` folder of made-up JSON, or a few lines of `http.server`), started on its port first.
+- **Microsoft 365** (`ctx.m365.search`, `mailThread`, `chat`): start `python3 tests/fixtures/fake_graph.py <port> --log
+  <dir>/graph.log &` (made-up acme.example mail: the conversation "Acme pilot plan", mails `AAMk-acme-pilot-1` with
+  `acme-pilot-plan.pdf` and `AAMk-acme-pilot-2`, and the chat `19:acme-pilot@thread.v2` with two messages today), then
+  append `export ECHOCTL_TEST_GRAPH=http://127.0.0.1:<port>` to `<dir>/env` (and export it before `serve.sh up` when the
+  window needs it). A debug build is then signed in to the fake (About me's address, no tokens, the real sign-in
+  refused) and sends every Graph request there; a release build ignores it. A value that isn't a local address leaves
+  Echo not connected ("Microsoft 365 isn't connected"). The fake logs each request (`METHOD PATH`) to its log; anything
+  it doesn't serve answers 404 ("Not in the fake Microsoft 365"). Every part of Echo that reads Microsoft 365 reaches
+  the fake while it is set, so a case sets it only for its own run. Stop it by its saved pid in the teardown.
 - **The user's sign-in** (`ctx.signin.get`, #466): `gh` and `git` are found on `PATH` first, and `<dir>/bin` is first on
   every process's `PATH` (`<dir>/env`), so made-up `gh` / `git` scripts written there (any time: they are looked up on
   each call) answer instead with made-up tokens. Write both — a failing one stands for "not signed in" — or the
@@ -482,7 +491,8 @@ on `PATH` work in any build.
 Cases that need these are `run: person` or only check the button and its dialog, never the result (except the
 clean-install runs, below, on a Mac where Echo has never been):
 
-- Microsoft 365: sign-in, calendar sync, mail, Teams, meeting chat (Settings → Calendar & chat "Sign in…", "Sends to you").
+- Microsoft 365: sign-in, calendar sync, mail, Teams, meeting chat (Settings → Calendar & chat "Sign in…", "Sends to you");
+  a plugin's `ctx.m365` reads run against the fake (Plugins against fake services).
 - Claude Code runs: Write minutes / Write minutes again, Prepare, Send to Claude, Yolo, Ask Claude about this call,
   "Sync now" (What moved, thread work), "Claude" panel in the footer, "Claude can" work, "Claude about this thread".
 - The tray and the native window while the user's own Echo runs (see "Recording with file-fed calls": No tray; where none runs, `recording/TC-019` and `window/TC-011` are agent-run), "Memo",

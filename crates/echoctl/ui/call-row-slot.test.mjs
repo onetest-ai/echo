@@ -11,11 +11,11 @@ assert.ok(a >= 0 && b > a, 'the call row slot block not found in app.js')
 const Plugins = { drawing: false, slots: {} }
 let renders = 0
 const ctxRender = () => { if (!Plugins.drawing) renders++ }
-const { chips, slotCall } = new Function('Plugins', `${src.slice(a, b)}\nreturn { chips: callRowChips, slotCall }`)(Plugins)
+const { chips, slotCall } = new Function('Plugins', 'callStamp', `${src.slice(a, b)}\nreturn { chips: callRowChips, slotCall }`)(Plugins, (n) => /^\d{4}-\d\d-\d\d_\d{6}/.test(n) ? n.slice(0, 17) : '')
 assert.ok(src.includes("'call.row']"), 'call.row is one of SLOTS')
 
 const call = slotCall({ name: '2026-10-28_110000-aurora', title: 'Aurora weekly', started_at: '2026-10-28T11:00:00+02:00', status: 'notes', memo: false, people: ['Lena'], chat: true })
-assert.deepEqual(call, { name: '2026-10-28_110000-aurora', title: 'Aurora weekly', started_at: '2026-10-28T11:00:00+02:00', status: 'notes', memo: false }, "the row's own facts, nothing more")
+assert.deepEqual(call, { name: '2026-10-28_110000-aurora', stamp: '2026-10-28_110000', title: 'Aurora weekly', started_at: '2026-10-28T11:00:00+02:00', status: 'notes', memo: false }, "the row's own facts (its stamp too, which a retitle keeps), nothing more")
 const logged = []
 const items = [
   { plugin: 'vault', id: 'in', label: 'In the vault', chip: (c) => { ctxRender(); return c.status === 'notes' ? 'In vault ✓' : null } },

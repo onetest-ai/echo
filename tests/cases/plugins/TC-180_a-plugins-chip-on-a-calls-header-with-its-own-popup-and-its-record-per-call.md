@@ -3,7 +3,7 @@ id: TC-180
 title: A plugin puts a chip of its own on a call's header, with its own popup, and keeps its record per call; a box that throws is left out and the header draws; switched off, its chip leaves every call
 priority: medium
 type: functional
-requirements: [F-PLUG-101]
+requirements: [F-PLUG-101, F-PLUG-117]
 module: plugins
 run: agent
 platform: any
@@ -43,4 +43,4 @@ Call demo and Menu demo are installed and on; Acme weekly sync is filed in Call 
 
 ## Notes
 - The box is the plugin's own HTML (Echo's generic `btn` and `menu` classes here); the popup is its own, drawn by its `render` and opened by its own click listener (`ctx.listen`).
-- `call` holds only what the page has: `{name, title, started_at, notes, profile, memo, threads, client}` (`slotCallPage`); `after` once per box drawn afresh, one that throws left out — `node crates/echoctl/ui/call-slots.test.mjs`.
+- `call` holds only what the page has: `{name, stamp, title, started_at, notes, profile, memo, threads, client}` (`slotCallPage`; `stamp` the call's `YYYY-MM-DD_HHMMSS`, kept when it is retitled); `after` once per box drawn afresh, one that throws left out — `node crates/echoctl/ui/call-slots.test.mjs`.

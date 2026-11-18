@@ -80,9 +80,50 @@ fn save(t: &Tokens) -> Result<()> {
     Ok(())
 }
 
-/// The signed-in account, if any (for the current app registration).
+/// The signed-in account, if any (for the current app registration). With the fake Graph (`test_graph`): the user's
+/// own address from the settings, signed in with no tokens.
 pub fn account() -> Option<String> {
+    if let Ok(Some(_)) = test_graph() {
+        return Some(Config::load().ok().and_then(|c| c.me).and_then(|m| m.email).unwrap_or_else(|| "me@example.invalid".into()));
+    }
     load().map(|t| t.username)
+}
+
+/// Development builds and tests: `ECHOCTL_TEST_GRAPH=http://127.0.0.1:<port>` (or `http://localhost:<port>`) is a fake
+/// Microsoft Graph on this computer — Echo is signed in to it with a made-up token, and every Graph request goes there
+/// (`<base>/<path after /v1.0>`). Fails closed: a value that isn't a local address fails every request, and the real
+/// sign-in is refused while it is set. Never read by a release build.
+fn test_graph() -> Result<Option<String>> {
+    #[cfg(debug_assertions)]
+    {
+        let Some(v) = std::env::var_os("ECHOCTL_TEST_GRAPH") else { return Ok(None) };
+        let v = v.to_string_lossy();
+        test_graph_base(&v).map(Some).ok_or_else(|| anyhow!("ECHOCTL_TEST_GRAPH: “{v}” isn't a local address — http://127.0.0.1:<port> or http://localhost:<port>"))
+    }
+    #[cfg(not(debug_assertions))]
+    Ok(None)
+}
+
+/// `http://127.0.0.1:<port>` or `http://localhost:<port>` (no path), without a trailing `/`; anything else None.
+#[cfg_attr(not(debug_assertions), allow(dead_code))]
+fn test_graph_base(v: &str) -> Option<String> {
+    let rest = v.trim().strip_prefix("http://")?.trim_end_matches('/');
+    let (name, port) = rest.split_once(':')?;
+    (matches!(name, "127.0.0.1" | "localhost") && !port.is_empty() && port.len() <= 5 && port.bytes().all(|b| b.is_ascii_digit()) && port.parse::<u16>().is_ok_and(|p| p > 0))
+        .then(|| format!("http://{name}:{port}"))
+}
+
+/// Where a request to `url` goes: as it is, or with the fake Graph set, Graph's own URL on the fake (one of the fake's
+/// own, a next page, as it is) and any other host refused.
+fn at(url: &str) -> Result<String> {
+    match test_graph()? {
+        None => Ok(url.to_string()),
+        Some(base) => match url.strip_prefix(GRAPH) {
+            Some(rest) => Ok(format!("{base}{rest}")),
+            None if url.starts_with(&format!("{base}/")) => Ok(url.to_string()),
+            None => bail!("ECHOCTL_TEST_GRAPH is set: a test never reaches {}", url.split('?').next().unwrap_or(url)),
+        },
+    }
 }
 
 pub fn logout() -> Result<()> {
@@ -171,7 +212,7 @@ fn quote(s: &str) -> String {
 
 fn token_request(tenant: &str, body: &str) -> Result<Value> {
     let url = format!("https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token");
-    let v = curl(&format!("url = {}\nrequest = \"POST\"\nheader = \"Content-Type: application/x-www-form-urlencoded\"\ndata = {}\n", quote(&url), quote(body)))?;
+    let v = curl(&format!("url = {}\nrequest = \"POST\"\nheader = \"Content-Type: application/x-www-form-urlencoded\"\ndata = {}\n", quote(&at(&url)?), quote(body)))?;
     if let Some(e) = v["error"].as_str() {
         bail!("{e}: {}", v["error_description"].as_str().unwrap_or("").lines().next().unwrap_or(""));
     }
@@ -181,7 +222,7 @@ fn token_request(tenant: &str, body: &str) -> Result<Value> {
 fn graph_get(token: &str, url: &str) -> Result<Value> {
     let v = curl(&format!(
         "url = {}\nheader = {}\nheader = \"Prefer: outlook.timezone=\\\"UTC\\\"\"\n",
-        quote(url),
+        quote(&at(url)?),
         quote(&format!("Authorization: Bearer {token}"))
     ))?;
     if let Some(e) = v.get("error") {
@@ -260,6 +301,9 @@ pub fn login_photos() -> Result<String> {
 }
 
 fn login_with(scopes: &str) -> Result<String> {
+    if test_graph()?.is_some() {
+        bail!("ECHOCTL_TEST_GRAPH is set: a test never signs in to the real Microsoft 365");
+    }
     let (client_id, tenant) = app_registration();
     let verifier = b64url(&random(48)?);
     let challenge = b64url(&Sha256::digest(verifier.as_bytes()));
@@ -350,6 +394,9 @@ fn login_with(scopes: &str) -> Result<String> {
 
 /// A valid access token, refreshing it when it is about to expire.
 fn access_token() -> Result<String> {
+    if test_graph()?.is_some() {
+        return Ok("test-token".into());
+    }
     let mut t = load().ok_or_else(|| anyhow!("not signed in to Microsoft 365 — `echoctl calendar login`"))?;
     if t.expires_at - 120 > Utc::now().timestamp() {
         return Ok(t.access_token);
@@ -400,7 +447,7 @@ pub fn photo(email: &str, out: &std::path::Path) -> Result<Option<bool>> {
         .stderr(Stdio::piped())
         .spawn()
         .context("running curl")?;
-    child.stdin.take().unwrap().write_all(format!("url = {}\nheader = {}\n", quote(&url), quote(&format!("Authorization: Bearer {token}"))).as_bytes())?;
+    child.stdin.take().unwrap().write_all(format!("url = {}\nheader = {}\n", quote(&at(&url)?), quote(&format!("Authorization: Bearer {token}"))).as_bytes())?;
     let o = child.wait_with_output()?;
     if !o.status.success() {
         let _ = std::fs::remove_file(&part);
@@ -451,7 +498,7 @@ pub fn person(email: &str) -> Result<Option<Value>> {
 fn graph_get_text(token: &str, url: &str) -> Result<Value> {
     let v = curl(&format!(
         "url = {}\nheader = {}\nheader = \"Prefer: outlook.timezone=\\\"UTC\\\", outlook.body-content-type=\\\"text\\\"\"\n",
-        quote(url),
+        quote(&at(url)?),
         quote(&format!("Authorization: Bearer {token}"))
     ))?;
     if let Some(e) = v.get("error") {
@@ -771,7 +818,7 @@ fn graph_raw(token: &str, url: &str) -> Result<(u16, String)> {
         .stderr(Stdio::piped())
         .spawn()
         .context("running curl")?;
-    let config = format!("url = {}\nheader = {}\nwrite-out = \"\\n%{{http_code}}\"\n", quote(url), quote(&format!("Authorization: Bearer {token}")));
+    let config = format!("url = {}\nheader = {}\nwrite-out = \"\\n%{{http_code}}\"\n", quote(&at(url)?), quote(&format!("Authorization: Bearer {token}")));
     child.stdin.take().unwrap().write_all(config.as_bytes())?;
     let out = child.wait_with_output()?;
     if !out.status.success() {
@@ -786,7 +833,7 @@ fn graph_raw(token: &str, url: &str) -> Result<(u16, String)> {
 /// error in words. Only what Echo sends the user themselves (`deliver.rs`): their own chat, their mailbox.
 pub fn post(path: &str, body: &Value) -> Result<Value> {
     let token = access_token()?;
-    let url = format!("https://graph.microsoft.com/v1.0{path}");
+    let url = at(&format!("{GRAPH}{path}"))?;
     let mut child = Command::new("curl").no_window()
         .args(["-sS", "-K", "-"])
         .stdin(Stdio::piped())
@@ -829,7 +876,9 @@ pub enum Body<'a> {
 /// download), or the error in words. `headers`: extra ones (`ConsistencyLevel: eventual`).
 pub fn request(method: &str, path: &str, body: Body, save_to: Option<&std::path::Path>, headers: &[&str]) -> Result<Value> {
     let token = access_token()?;
-    let url = if path.starts_with("https://graph.microsoft.com/") { path.to_string() } else { format!("{GRAPH}{path}") };
+    let test = test_graph()?;
+    let url = if path.starts_with("https://graph.microsoft.com/") || test.is_some_and(|b| path.starts_with(&format!("{b}/"))) { path.to_string() } else { format!("{GRAPH}{path}") };
+    let url = at(&url)?;
     let mut config = format!(
         "url = {}
 request = {}
@@ -1099,6 +1148,15 @@ pub fn find_call_chat(recording_start: DateTime<Utc>, began: Option<DateTime<Utc
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_fake_graph_is_only_a_local_address() {
+        assert_eq!(test_graph_base("http://127.0.0.1:48270/").as_deref(), Some("http://127.0.0.1:48270"));
+        assert_eq!(test_graph_base(" http://localhost:9 ").as_deref(), Some("http://localhost:9"));
+        for bad in ["https://127.0.0.1:48270", "http://graph.microsoft.com:80", "http://0.0.0.0:1", "http://[::1]:1", "http://127.0.0.1", "http://127.0.0.1:0", "http://127.0.0.1:99999", "http://127.0.0.1:1/v1.0", ""] {
+            assert_eq!(test_graph_base(bad), None, "{bad}");
+        }
+    }
 
     #[test]
     fn only_the_occurrences_transcripts_are_fetched() {
