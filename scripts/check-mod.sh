@@ -44,6 +44,8 @@ node crates/echoctl/ui/note-time.test.mjs
 node crates/echoctl/ui/notes-scroll.test.mjs
 # The ⌘K palette's ranking (Palette).
 node crates/echoctl/ui/palette.test.mjs
+# The search over what was said: the request, the chips, the date read from the words, the marked words (search block).
+node crates/echoctl/ui/search.test.mjs
 # How a project is drawn (identicons) and its stages (ProjectArt).
 node crates/echoctl/ui/projects.test.mjs
 # A thread's and a client's dashboards: which a thread shows, the plugins' presets in the "+", a preset's line.

@@ -865,14 +865,13 @@ fn stopword(w: &str) -> bool {
 }
 
 /// An FTS query from free text: every word of any script (two letters or more) but the stopwords, OR-ed, quoted.
+/// The words of a query a search looks for (lowercase; common words and single letters skipped).
+pub fn query_words(q: &str) -> Vec<String> {
+    q.split(|c: char| !c.is_alphanumeric()).filter(|w| w.chars().count() >= 2).map(str::to_lowercase).filter(|w| !stopword(w)).collect()
+}
+
 fn fts_query(q: &str) -> Option<String> {
-    let words: Vec<String> = q
-        .split(|c: char| !c.is_alphanumeric())
-        .filter(|w| w.chars().count() >= 2)
-        .map(str::to_lowercase)
-        .filter(|w| !stopword(w))
-        .map(|w| format!("\"{w}\""))
-        .collect();
+    let words: Vec<String> = query_words(q).into_iter().map(|w| format!("\"{w}\"")).collect();
     (!words.is_empty()).then(|| words.join(" OR "))
 }
 

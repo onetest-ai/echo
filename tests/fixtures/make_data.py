@@ -2230,6 +2230,27 @@ def build_preps(d, H, rows, events):
     d.skip("prep.state=writing", "only while Claude Code writes it")
 
 
+def build_intake(d):
+    """Intake's facts as a sync of Acme rollout's mail and channel would have kept them: one mail and one post, both about
+    the SSO cutover. Read only once Recall is on (`echoctl brain set --enabled true`, then `brain sync` indexes them)."""
+    rollout = [{"id": "acme-rollout", "name": "Acme rollout", "client": "acme"}]
+
+    def facts(source, kind, title, when, who, sender, link, lines):
+        head = f"{when.astimezone(timezone.utc).strftime('%Y-%m-%d %H:%M')} {who}"
+        path = d.path("recall", "intake", "facts", *source.split("/")[:-1], source.split("/")[-1] + ".json")
+        d.write_json(path, {"version": 1, "source": source, "kind": kind, "title": title, "event_date": when.strftime("%Y-%m-%d"),
+                            "refs": {"threads": rollout, "client": "acme", "people": [who], "url": link},
+                            "sections": [{"head": head, "from": who, "at": iso(when), "link": link, "sender": sender,
+                                          "facts": [{"text": t, "quote": q} for t, q in lines]}]})
+
+    facts("mail/acme-sso-window", "mail", "Re: SSO cutover window", d.now - timedelta(days=2, hours=3), "Dana Lee", "dana@acme.example",
+          "https://outlook.office.com/mail/acme.example/sso-window",
+          [("Acme's help desk can staff Saturday morning for the SSO cutover", "Please confirm the cutover starts at 6 and not at 8")])
+    facts("channel/acme-okta/1", "channel", "Acme rollout › Okta and SSO", d.now - timedelta(days=4, hours=2), "Omar Haddad", "omar-haddad-id",
+          "https://teams.microsoft.com/l/message/acme-okta/1",
+          [("The SSO cutover rehearsal passed except the expense app", "Test users are moved. The SSO cutover rehearsal passed except the expense app")])
+
+
 def build_inbox(d, H):
     """What the Inbox holds beyond calls, threads and plugins: senders waiting to be trusted, and what was done this week."""
     now = d.now
@@ -2430,6 +2451,7 @@ def build_standard(d, hostile=False):
     fill_calls(d, H)
     build_agenda(d, H)
     build_inbox(d, H)
+    build_intake(d)
     finish_calls(d)
     build_more_threads(d)
     if H:

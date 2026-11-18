@@ -143,13 +143,16 @@ function paletteDraw() {
   const all = paletteItems(t)
   // Calls show only when something is typed (the list would be every call).
   PAL.items = Palette.grouped(Palette.rank(PAL.query.trim() ? all : all.filter((x) => x.group !== 'Calls'), PAL.query))
+  // With Intake on, first: what was typed, searched in what was said (the Calls list's box in search mode).
+  const q = PAL.query.trim()
+  if (q && sxAvailable()) PAL.items.unshift({ group: 'Search', html: `Search what was said… <b>“${esc(q)}”</b>`, hint: 'calls, mail, channels, documents', run: () => sxStart(q) })
   if (PAL.sel >= PAL.items.length) PAL.sel = Math.max(0, PAL.items.length - 1)
   let group = null
   // Each group's items in a group named by its head.
   $('#pal-list').innerHTML = PAL.items.map((it, i) => {
     const head = it.group !== group ? `${group === null ? '' : '</div>'}<div role="group" aria-label="${esc(it.group)}"><div class="pal-group">${esc(it.group)}</div>` : ''
     group = it.group
-    return `${head}<button class="pal-item${i === PAL.sel ? ' on' : ''}${it.disabled ? ' off' : ''}" role="option" aria-selected="${i === PAL.sel}" aria-disabled="${!!it.disabled}" data-pal-i="${i}"><span class="pal-label">${it.icon || ''}${esc(it.label)}</span><span class="pal-hint">${esc(it.disabled ? it.disabled : it.hint || '')}</span></button>`
+    return `${head}<button class="pal-item${i === PAL.sel ? ' on' : ''}${it.disabled ? ' off' : ''}" role="option" aria-selected="${i === PAL.sel}" aria-disabled="${!!it.disabled}" data-pal-i="${i}"><span class="pal-label">${it.icon || ''}${it.html || esc(it.label)}</span><span class="pal-hint">${esc(it.disabled ? it.disabled : it.hint || '')}</span></button>`
   }).join('') + (group === null ? '' : '</div>') || '<div class="pal-empty">Nothing matches.</div>'
   const on = $('#pal-list .pal-item.on'); if (on) on.scrollIntoView({ block: 'nearest' })
 }

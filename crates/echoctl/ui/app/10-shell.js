@@ -315,7 +315,8 @@ function list() {
   const q = S.query.trim()
   const calls = S.calls || []
   let body
-  if (S.calls === null) body = `<div class="skeleton" style="padding:12px">${'<i></i>'.repeat(8)}</div>`
+  if (sxShown()) body = sxBody()
+  else if (S.calls === null) body = `<div class="skeleton" style="padding:12px">${'<i></i>'.repeat(8)}</div>`
   else if (S.error) body = `<p class="error" style="padding:12px">Can't read the calls: ${esc(S.error)}</p>`
   else if (!calls.length) body = q ? `<p style="padding:14px;color:var(--text-3)">Nothing matches "${esc(S.query)}".</p>` : ''
   else {
@@ -325,26 +326,11 @@ function list() {
       const g = d ? dayLabel(d) : 'Undated'
       const head = g !== group ? `<div class="group">${esc(g)}</div>` : ''
       group = g
-      const meta = [d ? hm(d) : '', c.memo ? 'Memo' : '', c.imported ? 'Teams transcript' : '', c.minutes ? `${c.minutes} min` : ''].filter(Boolean).map((x) => `<span>${esc(x)}</span>`).join('')
-      // Who was there: up to three faces on the right, the rest as +N; every name in the tooltip.
-      // (Their initials are drawn by the stylesheet; the names are read as words, as the line said them before.)
-      const who = c.people.slice(0, 2).join(', ') + (c.people.length > 2 ? ` +${c.people.length - 2}` : '')
-      const faces = c.people.length ? `<span class="row-faces" title="${esc(c.people.join(', '))}"><span class="row-sr">${esc(who)}</span>${c.people.slice(0, 3).map((n) => avatar(n, false, true).replace(/>([^<]*)<\/span>$/, ' data-ini="$1" aria-hidden="true"></span>')).join('')}${c.people.length > 3 ? `<span class="row-more" aria-hidden="true">+${c.people.length - 3}</span>` : ''}</span>` : ''
-      const pjs = ((S.pj.data && S.pj.data.by_call) || {})[c.name] || []
-      const icons = pjs.length ? `<span class="pj-icons">${pjs.slice(0, 3).map((p) => projIcon(p, 14)).join('')}</span>` : ''
-      const due = minutesAhead(c)
-      const clockChip = due ? `<span class="mn-clock" title="Minutes at ${esc(hm(due))}">⏱ ${minutesLeft(due)} min</span>` : ''
-      // Plugins' chips (`call.row`): text only, each through esc.
-      const plugChips = callRowChips(Plugins.slots['call.row'], slotCall(c), (m) => console.warn(`call.row: ${m}`)).map((x) => `<span class="plug-chip" data-plug-chip="${esc(x.key)}" title="${esc(x.title)}">${esc(x.text)}</span>`).join('')
-      return `${head}<button class="row" role="option" data-call="${esc(c.name)}" aria-selected="${c.name === S.selected}">
-        ${c.memo && c.status !== 'recording' ? `<span class="si memo" title="Memo" aria-label="Memo">${MIC(14)}</span>` : statusIcon(c.status)}
-        <span class="t">${esc(c.title)}</span>${clockChip}
-        <span class="m">${icons}${meta}${plugChips}</span>${faces}
-      </button>`
+      return head + callRow(c)
     }).join('') + (S.callsNext ? `<div class="rows-more" data-calls-more>${S.callsMore ? 'Loading…' : `${calls.length} of ${S.callsTotal}`}</div>` : '')
   }
   // Today's meetings still to come, each a call-to-be with its prep.
-  const ups = !q && S.up && S.up.meetings ? S.up.meetings : []
+  const ups = !q && !sxShown() && S.up && S.up.meetings ? S.up.meetings : []
   // Folded by default (a full day is a long list): a head like a call's row — how many, and the next one.
   // One going on now first ("Now"), else the next to start.
   const nowMs = Date.now(), nx = ups.find((u) => u.start && new Date(u.start) <= nowMs) || ups[0]
@@ -371,9 +357,30 @@ function list() {
   }).join('') : ''
   if (upRows && body !== undefined) body = upRows + body
   return `<section class="list">
-    <div class="list-head"><div class="list-title"><h1>Calls</h1><button class="icon-btn" data-panel-show="vocabulary" title="Vocabulary — names and terms transcription should hear right" aria-label="Vocabulary">${BOOK}</button></div><input class="search" id="q" placeholder="Search titles and people" value="${esc(S.query)}" aria-label="Search calls"></div>
-    <div class="rows" role="listbox" aria-label="Calls">${body}</div>
+    <div class="list-head"><div class="list-title"><h1>Calls</h1><button class="icon-btn" data-panel-show="vocabulary" title="Vocabulary — names and terms transcription should hear right" aria-label="Vocabulary">${BOOK}</button></div>${S.sx.on ? sxHead() : `<input class="search" id="q" placeholder="Search titles and people" value="${esc(S.query)}" aria-label="Search calls">`}</div>
+    <div class="rows" role="listbox" aria-label="${sxShown() ? 'Calls and what was said' : 'Calls'}">${body}</div>
   </section>`
+}
+
+/** A call's row in the list (and among a search's titles and people, `when` its day rather than its time). */
+function callRow(c, when = hm) {
+  const d = c.started_at ? new Date(c.started_at) : null
+  const meta = [d ? when(d) : '', c.memo ? 'Memo' : '', c.imported ? 'Teams transcript' : '', c.minutes ? `${c.minutes} min` : ''].filter(Boolean).map((x) => `<span>${esc(x)}</span>`).join('')
+  // Who was there: up to three faces on the right, the rest as +N; every name in the tooltip.
+  // (Their initials are drawn by the stylesheet; the names are read as words, as the line said them before.)
+  const who = c.people.slice(0, 2).join(', ') + (c.people.length > 2 ? ` +${c.people.length - 2}` : '')
+  const faces = c.people.length ? `<span class="row-faces" title="${esc(c.people.join(', '))}"><span class="row-sr">${esc(who)}</span>${c.people.slice(0, 3).map((n) => avatar(n, false, true).replace(/>([^<]*)<\/span>$/, ' data-ini="$1" aria-hidden="true"></span>')).join('')}${c.people.length > 3 ? `<span class="row-more" aria-hidden="true">+${c.people.length - 3}</span>` : ''}</span>` : ''
+  const pjs = ((S.pj.data && S.pj.data.by_call) || {})[c.name] || []
+  const icons = pjs.length ? `<span class="pj-icons">${pjs.slice(0, 3).map((p) => projIcon(p, 14)).join('')}</span>` : ''
+  const due = minutesAhead(c)
+  const clockChip = due ? `<span class="mn-clock" title="Minutes at ${esc(hm(due))}">⏱ ${minutesLeft(due)} min</span>` : ''
+  // Plugins' chips (`call.row`): text only, each through esc.
+  const plugChips = callRowChips(Plugins.slots['call.row'], slotCall(c), (m) => console.warn(`call.row: ${m}`)).map((x) => `<span class="plug-chip" data-plug-chip="${esc(x.key)}" title="${esc(x.title)}">${esc(x.text)}</span>`).join('')
+  return `<button class="row" role="option" data-call="${esc(c.name)}" aria-selected="${c.name === S.selected}">
+        ${c.memo && c.status !== 'recording' ? `<span class="si memo" title="Memo" aria-label="Memo">${MIC(14)}</span>` : statusIcon(c.status)}
+        <span class="t">${esc(c.title)}</span>${clockChip}
+        <span class="m">${icons}${meta}${plugChips}</span>${faces}
+      </button>`
 }
 
 /** In a narrow window the list folds away: this opens it over the call (`.list-open`). */
@@ -384,7 +391,7 @@ function listToggle() {
 }
 
 function emptyMain() {
-  if (S.calls && !S.calls.length) {
+  if (S.calls && !S.calls.length && !S.query.trim()) {
     return `<div class="empty"><div>${mark()}<h3>No calls yet</h3><p>Use Record at the top of this window or ${TRAY.octopus}. Echo transcribes each call on this computer when it ends.</p></div></div>`
   }
   return `${listToggle()}<div class="empty"><div>${mark()}<h3>Pick a call</h3><p>Its minutes, your notes, the transcript, chat and shared screens open here.</p></div></div>`

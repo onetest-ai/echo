@@ -1,0 +1,66 @@
+/* ── search: what was said, in the Calls list and its moment in the right panel ─────────────────────────────────
+   Tokens only: --line, --text-*, --accent-soft / --accent-ink (violet: a match or an active filter), --r-control. */
+
+/* the Calls box with a clear button */
+.sx-q { position: relative; }
+.sx-q .search { padding-right: 28px; }
+.sx-q .icon-btn { position: absolute; right: 2px; top: 2px; }
+.sx-q .icon-btn svg { width: 14px; height: 14px; }
+
+/* filter chips: kinds as an icon switch, the rest behind one icon; active ones as chips */
+.sx-chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.sx-chips .md-seg { width: 30px; }
+.sx-chip { display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 4px 0 8px; border-radius: 12px; border: 0;
+  background: var(--accent-soft); color: var(--accent-ink); font: inherit; font-size: 12px; white-space: nowrap; cursor: default; }
+.sx-chip.add { padding: 0 8px; background: none; color: var(--text-2); border: 1px solid var(--line-strong); }
+.sx-chip.add svg { width: 12px; height: 12px; }
+.sx-chip .x { display: inline-flex; width: 16px; height: 16px; align-items: center; justify-content: center; border-radius: 8px; opacity: 0.7; }
+.sx-chip .x svg { width: 10px; height: 10px; }
+/* a filter read from the words of the query: dashed, like Echo's other guesses (.md-seg.on.guess) */
+.sx-chip.guess { background: transparent; outline: 1px dashed var(--accent); outline-offset: -1px; }
+.sx-count { margin-left: auto; font-size: 11.5px; color: var(--text-3); font-variant-numeric: tabular-nums; }
+.sx-add-wrap { position: relative; display: inline-flex; }
+.sx-menu { top: 30px; left: 0; right: auto; max-height: min(420px, 60vh); overflow-y: auto; }
+.sx-menu .sx-person { margin: 2px 4px 4px; width: auto; height: 28px; }
+
+/* a source row and its moments */
+.sx-src { grid-template-columns: 16px minmax(0, 1fr) 14px; }
+.sx-src .m { grid-column: 2 / 4; }
+.sx-chev { grid-column: 3; grid-row: 1; align-self: center; display: inline-flex; color: var(--text-3); transition: transform 0.15s; }
+.sx-chev svg { width: 14px; height: 14px; }
+.sx-src[aria-expanded="true"] .sx-chev { transform: rotate(90deg); }
+.sx-moments { margin: 0 0 6px 25px; border-left: 1px solid var(--line); padding-left: 6px; }
+.sx-mo { display: block; width: 100%; border: 0; background: none; text-align: left; padding: 6px 8px; border-radius: var(--r-control); color: var(--text); font: inherit; cursor: default; }
+.sx-mo:hover { background: var(--line); }
+.sx-mo[aria-selected="true"] { background: var(--accent-soft); }
+.sx-mo .s { display: flex; gap: 8px; font-size: 11px; color: var(--text-3); font-variant-numeric: tabular-nums; }
+.sx-mo .s b { font-weight: 600; color: var(--text-2); }
+.sx-mo .x { font-size: 12.5px; line-height: 1.45; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+.sx-more { display: block; padding: 4px 8px 2px; }
+.sx-mo mark, .sx-pm mark { background: var(--accent-soft); color: inherit; border-radius: 3px; padding: 0 1px; }
+.sx-mo[aria-selected="true"] mark { background: none; color: var(--accent-ink); font-weight: 600; }
+
+/* inline notes in a results list: no match, older than the index keeps */
+.sx-note { display: flex; gap: 8px; padding: 6px 10px 10px; font-size: 12px; color: var(--text-3); line-height: 1.45; }
+.sx-note svg { width: 14px; height: 14px; flex: none; margin-top: 2px; }
+.sx-note b { color: var(--text-2); font-weight: 600; }
+
+/* the moment in the right panel */
+.sx-pm { padding: 12px 14px 20px; display: flex; flex-direction: column; gap: 12px; }
+.sx-pm h3 { margin: 0; font-size: 14px; font-weight: 650; display: flex; gap: 6px; align-items: center; }
+.sx-pm h3 svg { width: 14px; height: 14px; color: var(--text-3); flex: none; }
+.sx-pm .facts { margin: 0; font-size: 12px; gap: 4px 12px; }
+.sx-pm .pj-chips { margin: 0; }
+.sx-sec { font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-2); display: flex; gap: 6px; }
+.sx-sec span { font-weight: 500; color: var(--text-3); letter-spacing: 0; text-transform: none; font-family: var(--mono); }
+.sx-said { margin: 0; font-size: 13.5px; line-height: 1.55; }
+.sx-pm .transcript { gap: 10px; }
+.sx-pm .turn { grid-template-columns: 38px 1fr; gap: 8px; }
+.sx-pm .turn.hit { margin: -4px -8px; padding: 4px 8px; }
+.sx-pm .turn p { font-size: 12.5px; line-height: 1.5; }
+.sx-pm .turn.ctx p { color: var(--text-2); }
+.sx-acts { display: flex; gap: 4px; align-items: center; }
+.sx-acts .btn { margin-right: auto; }
+.sx-more-wrap { position: relative; display: inline-flex; }
+.sx-also { display: flex; flex-direction: column; gap: 2px; border-top: 1px solid var(--line); padding-top: 10px; }
+.sx-also .sx-mo { padding: 5px 6px; }

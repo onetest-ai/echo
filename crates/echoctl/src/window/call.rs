@@ -46,6 +46,20 @@ pub(super) fn calls_page(q: &str) -> Value {
     let limit = query_param(q, "limit").and_then(|l| l.parse::<usize>().ok()).filter(|l| *l > 0).unwrap_or(CALLS_PAGE).min(500);
     let before = query_param(q, "before").filter(|b| !b.is_empty());
     let words: Vec<String> = query_param(q, "q").unwrap_or_default().to_lowercase().split_whitespace().map(str::to_owned).collect();
+    let dirs = matching(&words);
+    let total = dirs.len();
+    let start = match &before {
+        // The first call after the cursor in the list's own order (newest first: `calls::order_key`, reversed).
+        Some(b) => { let cur = calls::order_key(Path::new(b.as_str())); dirs.iter().position(|d| calls::order_key(d) < cur).unwrap_or(dirs.len()) }
+        None => 0,
+    };
+    let page: Vec<&PathBuf> = dirs.iter().skip(start).take(limit).collect();
+    let next = (start + page.len() < dirs.len()).then(|| page.last().and_then(|d| d.file_name()).map(|n| n.to_string_lossy().into_owned())).flatten();
+    json!({ "calls": summaries(&page), "next": next, "total": total })
+}
+
+/// Every call, newest first, whose title, people or meeting subject hold every one of `words` (lowercase; none: all).
+pub(super) fn matching(words: &[String]) -> Vec<PathBuf> {
     let mut dirs: Vec<PathBuf> = calls::all_calls();
     dirs.reverse();
     // A search reads each call's own words (title, people, subject) — never a whole summary for a call it drops.
@@ -58,17 +72,13 @@ pub(super) fn calls_page(q: &str) -> Value {
             words.iter().all(|w| hay.contains(w.as_str()))
         });
     }
-    let total = dirs.len();
-    let start = match &before {
-        // The first call after the cursor in the list's own order (newest first: `calls::order_key`, reversed).
-        Some(b) => { let cur = calls::order_key(Path::new(b.as_str())); dirs.iter().position(|d| calls::order_key(d) < cur).unwrap_or(dirs.len()) }
-        None => 0,
-    };
-    let page: Vec<&PathBuf> = dirs.iter().skip(start).take(limit).collect();
-    let next = (start + page.len() < dirs.len()).then(|| page.last().and_then(|d| d.file_name()).map(|n| n.to_string_lossy().into_owned())).flatten();
-    // A thread's people are read once for the whole page.
+    dirs
+}
+
+/// The calls' rows as the list draws them (a thread's people read once for all of them).
+pub(super) fn summaries(dirs: &[&PathBuf]) -> Vec<Value> {
     let mut known = Known::default();
-    json!({ "calls": page.into_iter().map(|d| summary(d, &mut known)).collect::<Vec<_>>(), "next": next, "total": total })
+    dirs.iter().map(|d| summary(d, &mut known)).collect()
 }
 
 /// What a page of calls reads once: a thread's people (the People view's) by thread id, and the people directory.
