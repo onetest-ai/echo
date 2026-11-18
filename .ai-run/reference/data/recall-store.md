@@ -42,9 +42,11 @@ inside `BEGIN IMMEDIATE` after checking `pragma_table_info`, and backfilled once
   and `Client:` lines that carry echo:// links their label and links (what else such a line says stays), and reduces
   other echo:// links to their labels. A store whose `meta.fts_text` differs from `FTS_TEXT_VERSION` has it written
   again from `chunks` at `open`, in batches of `FTS_BATCH` sections (`meta.fts_text_next`), each only when no one else
-  writes; busy, the rest waits for a later open.
+  writes, for `FTS_OPEN_BUDGET` per open; busy or out of time, the rest waits for a later open. Done, rows of
+  `chunks_fts` without a section are dropped.
 - Term mentions after a dictionary edit (`brain::taxonomy::mentions::mentions_of`) take their candidates from the
-  keyword index and from every section with an echo:// link, so a name only in a header line counts as in a full scan.
+  keyword index and from the sections with an echo:// link (read once per edit), so a name only in a header line
+  counts as in a full scan.
 
 ## Evaluation
 

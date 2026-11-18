@@ -101,19 +101,22 @@ pub fn open(path: &Path) -> Result<Connection> {
         tx.commit()?;
     }
     if meta(&c, "fts_text").as_deref() != Some(FTS_TEXT_VERSION) {
-        rewrite_fts(&c)?;
+        rewrite_fts(&c, FTS_OPEN_BUDGET)?;
     }
     Ok(c)
 }
 
 /// Sections whose keyword text one transaction of `rewrite_fts` writes.
 const FTS_BATCH: i64 = 500;
+/// How long one `open` goes on rewriting the keyword text (after its first batch); the rest waits for later opens.
+const FTS_OPEN_BUDGET: std::time::Duration = std::time::Duration::from_secs(1);
 
 /// Write every section's keyword text again (`fts_text`) from what `chunks` keeps, once per `FTS_TEXT_VERSION`: in
 /// short transactions by id (`meta.fts_text_next`: the version and the last id done), each taken only when no one else
-/// writes — busy, it stops, and the old text is searched until a later open goes on. No source is read again and no
-/// vector made again.
-fn rewrite_fts(c: &Connection) -> Result<()> {
+/// writes, for `budget` after the first — busy or out of time, it stops, and the old text is searched until a later
+/// open goes on. Done, the rows of sections gone are dropped. No source is read again and no vector made again.
+fn rewrite_fts(c: &Connection, budget: std::time::Duration) -> Result<()> {
+    let start = std::time::Instant::now();
     c.busy_timeout(std::time::Duration::ZERO)?;
     let r = (|| -> Result<()> {
         loop {
@@ -139,6 +142,7 @@ fn rewrite_fts(c: &Connection) -> Result<()> {
                     n += 1;
                 }
                 if n < FTS_BATCH {
+                    c.execute("DELETE FROM chunks_fts WHERE rowid NOT IN (SELECT id FROM chunks)", [])?;
                     set_meta(c, "fts_text", FTS_TEXT_VERSION)?;
                     c.execute("DELETE FROM meta WHERE key = 'fts_text_next'", [])?;
                     return Ok(true);
@@ -147,7 +151,7 @@ fn rewrite_fts(c: &Connection) -> Result<()> {
                 Ok(false)
             })();
             c.execute_batch(if step.is_ok() { "COMMIT" } else { "ROLLBACK" })?;
-            if step? {
+            if step? || start.elapsed() >= budget {
                 return Ok(());
             }
         }
@@ -1210,7 +1214,7 @@ mod tests {
         let other = Connection::open(&db).unwrap();
         other.execute_batch("BEGIN IMMEDIATE").unwrap();
         let t0 = std::time::Instant::now();
-        rewrite_fts(&c).unwrap();
+        rewrite_fts(&c, FTS_OPEN_BUDGET).unwrap();
         assert!(t0.elapsed() < std::time::Duration::from_secs(2));
         assert_eq!(meta(&c, "fts_text").as_deref(), Some("1"));
         other.execute_batch("COMMIT").unwrap();
@@ -1279,12 +1283,20 @@ mod tests {
         assert_eq!((h["count"].as_u64(), h["hits"][0]["source"].as_str()), (Some(1), Some("call/mine")), "{h}");
         // Asked for more than 30: as many as asked.
         assert_eq!(search_in(&db, "gateway", 50, None, None, None).unwrap()["count"], 50);
-        // A rewrite of the keyword text in several batches ends with every section's.
+        // A rewrite of the keyword text out of time: one batch per open, going on from where the last stopped; done, it
+        // drops the rows of sections gone.
         set_meta(&c, "fts_text", "1").unwrap();
-        drop(c);
-        let c = open(&db).unwrap();
-        assert_eq!((meta(&c, "fts_text").as_deref(), meta(&c, "fts_text_next")), (Some(FTS_TEXT_VERSION), None));
-        assert_eq!(c.query_row("SELECT count(*) FROM chunks_fts", [], |r| r.get::<_, i64>(0)).unwrap(), 1301);
+        c.execute("INSERT INTO chunks_fts(rowid, text) VALUES (42, 'a section gone')", []).unwrap();
+        let mut opens = 0;
+        while meta(&c, "fts_text").as_deref() != Some(FTS_TEXT_VERSION) {
+            rewrite_fts(&c, std::time::Duration::ZERO).unwrap();
+            opens += 1;
+            if opens == 1 {
+                assert!(meta(&c, "fts_text_next").is_some_and(|v| v.starts_with(&format!("{FTS_TEXT_VERSION}:"))), "stopped after one batch");
+            }
+        }
+        assert_eq!((opens, meta(&c, "fts_text_next")), (3, None), "1,301 sections in batches of 500");
+        assert_eq!(c.query_row("SELECT count(*) FROM chunks_fts", [], |r| r.get::<_, i64>(0)).unwrap(), 1301, "the gone section's row dropped");
         assert_eq!(search_at(&db, "gateway", 5, None, None, None, History::Latest, Some(&mine)).unwrap()["count"], 1);
     }
 

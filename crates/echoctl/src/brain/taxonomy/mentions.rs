@@ -254,6 +254,18 @@ pub(super) fn mentions_of(c: &Connection, t: &Taxonomy, ids: &BTreeSet<String>) 
     }
     let mut tag = tx.prepare("INSERT OR IGNORE INTO chunk_topics(chunk_id, category_id, category_label, kind) VALUES (?1, ?2, ?3, 'term')")?;
     let mut edge = tx.prepare("INSERT INTO graph_edges(source, target, rel) VALUES (?1, ?2, 'mentions')")?;
+    // The full-text index leaves out the minutes' echo:// header lines (`store::fts_text`), which the full scan reads:
+    // the sections with an echo:// link (read once, with their clients) are candidates too.
+    let linked: Vec<(i64, String, BTreeSet<String>)> = tx
+        .prepare(
+            "SELECT c.id, coalesce(c.title, '') || ' ' || coalesce(c.text, ''),
+                    (SELECT group_concat(s.id, char(31)) FROM scopes s WHERE s.chunk_id = c.id AND s.kind = 'client') FROM chunks c WHERE c.text LIKE '%echo://%'",
+        )?
+        .query_map([], |r| {
+            let cl: Option<String> = r.get(2)?;
+            Ok((r.get(0)?, r.get(1)?, cl.unwrap_or_default().split('\u{1f}').filter(|x| !x.is_empty()).map(str::to_owned).collect()))
+        })?
+        .collect::<Result<_, _>>()?;
     for tm in t.terms.iter().filter(|x| ids.contains(&term_id(&x.layer, &x.name))) {
         let id = term_id(&tm.layer, &tm.name);
         let mut found: BTreeSet<i64> = BTreeSet::new();
@@ -263,11 +275,13 @@ pub(super) fn mentions_of(c: &Connection, t: &Taxonomy, ids: &BTreeSet<String>) 
                 continue;
             }
             let phrase = format!("\"{}\"", ws.join(" ").replace('"', "\"\""));
-            // The full-text index leaves out the minutes' echo:// header lines (`store::fts_text`), which the full scan
-            // reads: sections with an echo:// link are candidates too.
+            for (cid, text, clients) in &linked {
+                if (tm.layer == SHARED || clients.contains(&tm.layer)) && !found.contains(cid) && word_in(text, n) {
+                    found.insert(*cid);
+                }
+            }
             let sql = format!(
-                "SELECT c.id, coalesce(c.title, '') || ' ' || coalesce(c.text, '') FROM chunks c
-                 WHERE (c.id IN (SELECT rowid FROM chunks_fts WHERE chunks_fts MATCH ?1) OR c.text LIKE '%echo://%'){}",
+                "SELECT c.id, coalesce(c.title, '') || ' ' || coalesce(c.text, '') FROM chunks_fts f JOIN chunks c ON c.id = f.rowid WHERE chunks_fts MATCH ?1{}",
                 if tm.layer == SHARED { "" } else { " AND EXISTS (SELECT 1 FROM scopes s WHERE s.chunk_id = c.id AND s.kind = 'client' AND s.id = ?2)" }
             );
             let mut st = tx.prepare(&sql)?;
