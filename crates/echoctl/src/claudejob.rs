@@ -188,6 +188,8 @@ pub struct Spec {
     pub yolo: bool,
     /// A plugin's run in a folder it was given (`jshost::folders::claude_folder`): there, not as the folder session.
     pub folder: Option<InFolder>,
+    /// A plugin's run under a key of its own (`ctx.claude.run({key})`): its files (`Keyed::base`), for `stop_keyed`.
+    pub key: Option<PathBuf>,
 }
 
 impl Spec {
@@ -225,7 +227,127 @@ impl Spec {
             thread: None,
             yolo: false,
             folder: None,
+            key: None,
         })
+    }
+}
+
+/// The longest key a plugin names a run by.
+const KEY_MAX: usize = 64;
+
+/// A key a plugin names a run by: 1 to 64 of `A-Z a-z 0-9 . _ -`, any case the same key (as on a disk that folds case).
+pub fn check_key(key: &str) -> Result<()> {
+    if key.is_empty() || key.len() > KEY_MAX || !key.bytes().all(|b| b.is_ascii_alphanumeric() || b"._-".contains(&b)) {
+        bail!("a run's key is 1 to {KEY_MAX} letters, digits, “.”, “_” or “-”");
+    }
+    Ok(())
+}
+
+/// Where plugin `plugin`'s run under `key` keeps its files, across processes: `<base>.lock` held while it runs,
+/// `<base>.pid` its Claude Code once started, `<base>.stopped` once `stop_keyed` stopped it. The key's characters can't
+/// leave the folder: each file's name ends in its own suffix, and starts with `k-` (never a Windows device name).
+fn key_base(plugin: &str, key: &str) -> PathBuf {
+    paths::state_dir().join("plugins").join(".runs").join(plugin).join(format!("k-{}", key.to_ascii_lowercase()))
+}
+
+fn key_file(base: &Path, ext: &str) -> PathBuf {
+    let mut f = base.as_os_str().to_owned();
+    f.push(format!(".{ext}"));
+    PathBuf::from(f)
+}
+
+/// A plugin's run under its key, held while it runs: one at a time per plugin and key, in the app and in
+/// `echoctl plugin call` alike. Dropped, its files go and the key is free.
+pub struct Keyed {
+    pub base: PathBuf,
+    _lock: crate::app::FileLock,
+}
+
+impl Keyed {
+    /// Plugin `plugin`'s run under `key`; refused while one is running.
+    pub fn take(plugin: &str, key: &str) -> Result<Keyed> {
+        check_key(key)?;
+        let base = key_base(plugin, key);
+        fs::create_dir_all(base.parent().unwrap_or(&base))?;
+        let Some(lock) = crate::app::FileLock::try_take(&key_file(&base, "lock"))? else {
+            bail!("a run with key “{key}” is running already: stop it (ctx.claude.stop) or wait for it");
+        };
+        // What a run before left, if it ended without its drop (a crash).
+        let _ = fs::remove_file(key_file(&base, "pid"));
+        let _ = fs::remove_file(key_file(&base, "stopped"));
+        Ok(Keyed { base, _lock: lock })
+    }
+}
+
+impl Drop for Keyed {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(key_file(&self.base, "pid"));
+        let _ = fs::remove_file(key_file(&self.base, "stopped"));
+    }
+}
+
+/// `ctx.claude.stop(key)`: plugin `plugin`'s run under `key` stopped — its Claude Code and every process it started —
+/// wherever it runs (the app, a terminal's `plugin call`); its `run` then fails with `stopped`. False when none runs.
+pub fn stop_keyed(plugin: &str, key: &str) -> Result<bool> {
+    check_key(key)?;
+    let base = key_base(plugin, key);
+    // Its lock free: no run under that key.
+    if !base.parent().is_some_and(Path::is_dir) || crate::app::FileLock::try_take(&key_file(&base, "lock"))?.is_some() {
+        return Ok(false);
+    }
+    stop_base(&base)?;
+    Ok(true)
+}
+
+/// The run whose files are at `base` stopped. The mark first, then its process: a run that starts Claude Code meanwhile
+/// sees the mark (`key_started`).
+fn stop_base(base: &Path) -> Result<()> {
+    fs::write(key_file(base, "stopped"), b"")?;
+    if let Some(pid) = fs::read_to_string(key_file(base, "pid")).ok().and_then(|p| p.trim().parse::<u32>().ok()) {
+        crate::ai::stop_group(pid);
+    }
+    Ok(())
+}
+
+/// A plugin removed (`plugins::remove`): its runs under a key still running stopped, each waited for till it ends
+/// (10 s at most).
+pub fn stop_keyed_runs(plugin: &str) {
+    let dir = paths::state_dir().join("plugins").join(".runs").join(plugin);
+    for e in fs::read_dir(&dir).into_iter().flatten().flatten() {
+        let p = e.path();
+        if let Some(base) = p.to_str().and_then(|s| s.strip_suffix(".lock")) {
+            if matches!(crate::app::FileLock::try_take(&p), Ok(None)) && stop_base(Path::new(base)).is_ok() {
+                let end = std::time::Instant::now() + Duration::from_secs(10);
+                while matches!(crate::app::FileLock::try_take(&p), Ok(None)) && std::time::Instant::now() < end {
+                    std::thread::sleep(Duration::from_millis(50));
+                }
+            }
+        }
+    }
+}
+
+/// A plugin removed with its data: its keys' files go, those nobody holds (`jshost::folders::forget`).
+pub fn forget_keys(plugin: &str) {
+    let dir = paths::state_dir().join("plugins").join(".runs").join(plugin);
+    for e in fs::read_dir(&dir).into_iter().flatten().flatten() {
+        if let Ok(Some(l)) = crate::app::FileLock::try_take(&e.path()) {
+            drop(l);
+            let _ = fs::remove_file(e.path());
+        }
+    }
+    let _ = fs::remove_dir(&dir);
+}
+
+/// Was the run under this key stopped?
+fn key_stopped(base: &Path) -> bool {
+    key_file(base, "stopped").exists()
+}
+
+/// Its Claude Code started (`pid`): noted for `stop_keyed`, and stopped at once when a stop came first.
+fn key_started(base: &Path, pid: u32) {
+    let _ = fs::write(key_file(base, "pid"), pid.to_string());
+    if key_stopped(base) {
+        crate::ai::stop_group(pid);
     }
 }
 
@@ -360,6 +482,9 @@ pub fn run(spec: &Spec) -> Result<(String, String, Value)> {
     // The permission mode it asks Claude Code for: checked against the one it starts in.
     let asked = (acts.is_some() || spec.folder.is_some()).then(|| asked_mode(&a));
     let child = crate::ai::guard_ready(profile, &cwd, "run a plugin's job").and_then(|()| notes::admit_child(|| {
+        if spec.key.as_deref().is_some_and(key_stopped) {
+            bail!("stopped");
+        }
         let mut c = crate::ai::prepare_claude(profile, &a, &cwd, false)?;
         c.env("ECHOCTL_BIN", &exe);
         // A mail the run writes (`echoctl compose`) is noted here, for its outcome (`drafts::of_run`).
@@ -375,7 +500,14 @@ pub fn run(spec: &Spec) -> Result<(String, String, Value)> {
         }
         Ok(c.spawn()?)
     }));
+    if let (Ok(c), Some(k)) = (&child, &spec.key) {
+        key_started(k, c.id());
+    }
     let out = child.and_then(|c| finish(c, &mut log, &spec.run_dir, spec.timeout, asked));
+    // Its process reaped: its number may be another's soon (Windows reuses them), so no stop reads it any more.
+    if let Some(k) = &spec.key {
+        let _ = fs::remove_file(key_file(k, "pid"));
+    }
     if let Some(f) = settings_file {
         let _ = fs::remove_file(f);
     }
@@ -385,6 +517,15 @@ pub fn run(spec: &Spec) -> Result<(String, String, Value)> {
         // One line each: its words as they are, line breaks and control characters shown, not obeyed.
         let line: String = line.chars().map(|c| if c.is_control() { ' ' } else { c }).collect();
         let _ = writeln!(log, "{}  {line}", x["at"].as_str().unwrap_or(""));
+    }
+    // Stopped by its plugin (`stop_keyed`): so in its log and its record, whatever Claude Code printed last.
+    if spec.key.as_deref().is_some_and(key_stopped) {
+        let _ = writeln!(log, "{}  stopped by the plugin (ctx.claude.stop)", Local::now().format("%H:%M:%S"));
+        let record = spec.run_dir.join("permissions.json");
+        let mut r: Value = fs::read_to_string(&record).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_else(|| serde_json::json!({}));
+        r["stopped"] = Value::Bool(true);
+        let _ = fs::write(&record, r.to_string());
+        bail!("stopped");
     }
     let (answer, result) = out?;
     let _ = fs::write(spec.run_dir.join("answer.md"), &answer);
@@ -536,7 +677,7 @@ mod tests {
         let _fake = crate::ai::fake::install(&root);
         let p = crate::ai::fake::profile("work", None, &crate::ai::fake::signed_in("pat@example.com"));
         set_permissions(Permissions::Skip, Some(Permissions::Skip), Some(Permissions::Skip));
-        let wont = Spec { title: "Won't do: x".into(), prompt: "Who is it for?".into(), profile: "work".into(), model: String::new(), tools: Tools::None, run_dir: root.join("wont/1"), timeout: Duration::from_secs(60), session: false, task: None, thread: None, yolo: false, folder: None };
+        let wont = Spec { title: "Won't do: x".into(), prompt: "Who is it for?".into(), profile: "work".into(), model: String::new(), tools: Tools::None, run_dir: root.join("wont/1"), timeout: Duration::from_secs(60), session: false, task: None, thread: None, yolo: false, folder: None, key: None };
         let _ = run(&wont);
         let args: Vec<String> = fs::read_to_string(crate::ai::fake::file(&p, "p.args")).unwrap().split('\0').map(str::to_owned).collect();
         assert!(args.windows(2).any(|w| w[0] == "--tools" && w[1].is_empty()), "{args:?}");
@@ -571,7 +712,7 @@ mod tests {
         let routine = || routine_asking("");
         let yolo = || {
             n.set(n.get() + 1);
-            let s = Spec { title: "Yolo: x".into(), prompt: "Do it".into(), profile: "work".into(), model: String::new(), tools: Tools::Setting, run_dir: root.join(format!("yolo/{}", n.get())), timeout: Duration::from_secs(60), session: true, task: Some("acme/T001".into()), thread: Some("acme".into()), yolo: true, folder: None };
+            let s = Spec { title: "Yolo: x".into(), prompt: "Do it".into(), profile: "work".into(), model: String::new(), tools: Tools::Setting, run_dir: root.join(format!("yolo/{}", n.get())), timeout: Duration::from_secs(60), session: true, task: Some("acme/T001".into()), thread: Some("acme".into()), yolo: true, folder: None, key: None };
             let _ = run(&s);
             started(&s.run_dir)
         };
@@ -682,6 +823,7 @@ mod tests {
             thread: None,
             yolo: false,
             folder: Some(InFolder { cwd: vault.clone(), mode }),
+            key: None,
         };
         let record = |dir: &str| serde_json::from_str::<Value>(&fs::read_to_string(root.join("store/runs").join(dir).join("permissions.json")).unwrap()).unwrap();
         // Routines on Auto (the default), whatever the folder session's setting: every mode in the folder, its own

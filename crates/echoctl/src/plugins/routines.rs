@@ -294,6 +294,7 @@ pub fn run(id: &str) -> Result<Value> {
         thread: None,
         yolo: false,
         folder: None,
+        key: None,
     };
     let out = crate::claudejob::run(&spec);
     if let Err(e) = &out {

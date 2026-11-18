@@ -580,6 +580,9 @@ case "$1" in --version) echo "2.1.400 (Claude Code, test fake)"; exit 0;; esac
 if [ -f "$(dirname "$0")/../fake-answers.tsv" ]; then
   while IFS='	' read -r phrase line; do case "$*" in *"$phrase"*) printf '%s\n' "$line"; exit 0;; esac; done < "$(dirname "$0")/../fake-answers.tsv"
 fi
+# A plugin's run whose prompt holds "echo-test: keep running" goes on until it is stopped (plugins/TC-216); its pid in
+# <dir>/fake-running.pid.
+case "$*" in *"echo-test: keep running"*) echo $$ > "$(dirname "$0")/../fake-running.pid"; exec sleep 300;; esac
 case "$1 $2" in "auth status") ;; *) echo "test data: Claude Code is a fake here" >&2; exit 1;; esac
 case "$(basename "$CLAUDE_CONFIG_DIR")" in
   out)   echo '{"loggedIn": false, "authMethod": "none"}';;

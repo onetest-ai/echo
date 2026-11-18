@@ -461,6 +461,7 @@ pub(super) const ECHO_READS: &[(&str, &str)] = &[
     ("calls", "the list of your calls (titles, times, who was invited with their addresses, their threads)"),
     ("calendar", "the meetings Echo has read from your calendar"),
     ("me", "your name and email"),
+    ("recording", "whether Echo is recording or transcribing a call now, and which"),
 ];
 
 /// `uses.echo.jobs` on the sheet (echo-plugins R25).

@@ -1320,6 +1320,8 @@ pub fn remove(id: &str, keep_data: bool) -> Result<()> {
     Registry::update(|r| r.installed.remove(id).map(|_| ()).ok_or_else(|| anyhow!("“{id}” isn't installed")))?;
     scripts::stop_plugin(id);
     #[cfg(feature = "js")]
+    crate::claudejob::stop_keyed_runs(id);
+    #[cfg(feature = "js")]
     crate::jshost::files::forget(id);
     let _ = fs::remove_dir_all(installed_dir(id));
     forget_read(id);

@@ -24,6 +24,7 @@ use crate::{paths, plugins};
 
 mod test_hosts;
 mod service_async;
+mod store;
 mod typed;
 mod m365;
 pub mod files;
@@ -49,6 +50,7 @@ use http::fetch;
 #[cfg(test)]
 use http::curl_head;
 use service_async::service_async;
+use store::sweep_store;
 use test_hosts::test_host;
 #[cfg(test)]
 use test_hosts::test_host_in;
@@ -161,6 +163,8 @@ const PRELUDE: &str = r#"
       path: (path) => call('store.path', path || ''),
       /** What it keeps in its store (`dir`: one folder of it): {bytes, files} — its own files only, not its settings. */
       size: (dir) => call('store.size', dir || ''),
+      /** As ctx.fs.walk, under its store's folder `path` ('' the store): [{path, size, mtime, sha?}]. */
+      walk: (path, opts) => later('store.walk', [String(path || ''), opts || {}]),
     },
     /** Its `cache/` (Echo removes what is there over 7 days): `size()` {bytes, files}. */
     cache: { size: () => call('store.size', 'cache') },
@@ -277,6 +281,8 @@ const PRELUDE: &str = r#"
     },
     claude: {
       run: (opts) => later('claude.run', opts),
+      /** Its run under `key` (run's `key`) stopped: true, or false when none was running; that run fails "stopped". */
+      stop: (key) => later('claude.stop', String(key)),
       /** Is a Claude Code plugin ("name@marketplace") installed for an AI profile ('' = the default)? Only its channel's. */
       hasPlugin: (spec, profile) => later('claude.has_plugin', [spec, profile || '']),
       /** Install it (user scope of the default profile's Claude Code): only the one `uses.channel.plugin` names. */
@@ -300,7 +306,7 @@ const PRELUDE: &str = r#"
     /** Echo's own data, read-only: 'clients' | 'threads' | 'people' | 'dictionary' | 'sources' (opts: kind, thread,
      *  client, q, since, limit) | 'source' (an id: call:<folder> | mail:<source>; opts: transcript, chat — false leaves
      *  it out) | 'calls' (opts: q, since, until, thread, client, limit) | 'calendar' (opts: from, to; the meetings Echo
-     *  last read) | 'me' ({name, email}). Its events (`ctx.on`, uses.events.on —
+     *  last read) | 'me' ({name, email}) | 'recording' ({state, call, stamp}). Its events (`ctx.on`, uses.events.on —
      *  minutes_written and sources_changed come with reading sources): `plugins::EVENTS`. */
     /** About me (Settings → About me), read-only (uses.me): `me({kinds})` → null when it is missing, empty or still the
      *  template, else {text, name, parts: {identity, people, terms, style, patterns}, hash} — only the kinds asked (all
@@ -1016,44 +1022,6 @@ fn writable_store_path(id: &str, rel: &str) -> Result<PathBuf> {
     crate::grants::inside(&dunce::canonicalize(&base)?, rel)
 }
 
-/// When a host half starts: what lay in its store's `cache/` over 7 days, and downloads left half-written (`.part`,
-/// over an hour: a fetch takes at most 60 s), go. The rest of the store is the plugin's to clean.
-fn sweep_store(id: &str) {
-    fn walk(dir: &Path, f: &mut dyn FnMut(&Path, std::time::Duration)) {
-        for e in std::fs::read_dir(dir).into_iter().flatten().flatten() {
-            let Ok(t) = e.file_type() else { continue };
-            if t.is_dir() {
-                walk(&e.path(), f);
-            } else if t.is_file() {
-                let age = e.metadata().and_then(|m| m.modified()).ok().and_then(|m| m.elapsed().ok()).unwrap_or_default();
-                f(&e.path(), age);
-            }
-        }
-    }
-    const DAY: u64 = 86_400;
-    let base = plugins::data_dir(id);
-    let cache = base.join("cache");
-    walk(&base, &mut |p, age| {
-        // Only Echo's own downloads: `<name>.<pid>-<n>.part`.
-        let name = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-        let ours = name.strip_suffix(".part").and_then(|r| r.rsplit_once('.')).and_then(|(_, t)| t.split_once('-')).is_some_and(|(a, b)| !a.is_empty() && !b.is_empty() && (a.to_owned() + b).bytes().all(|c| c.is_ascii_digit()));
-        let stale_part = ours && age.as_secs() > 3600;
-        if stale_part || (p.starts_with(&cache) && age.as_secs() > 7 * DAY) {
-            let _ = std::fs::remove_file(p);
-        }
-    });
-    // The folders of `cache/` left empty (a snapshot swept), deepest first; `cache/` itself stays.
-    fn prune(dir: &Path) {
-        for e in std::fs::read_dir(dir).into_iter().flatten().flatten() {
-            if e.file_type().is_ok_and(|t| t.is_dir()) {
-                prune(&e.path());
-                let _ = std::fs::remove_dir(e.path());
-            }
-        }
-    }
-    prune(&cache);
-}
-
 fn service(id: &str, op: &str, arg: &Value) -> Result<Value> {
     let s = |v: &Value| v.as_str().unwrap_or("").to_string();
     Ok(match op {
@@ -1324,7 +1292,8 @@ fn service(id: &str, op: &str, arg: &Value) -> Result<Value> {
                 "calls" => crate::share::calls(&opt)?,
                 "calendar" => crate::share::calendar(&opt)?,
                 "me" => crate::share::me()?,
-                o => bail!("Echo doesn't share “{o}” (clients, threads, people, dictionary, sources, source, calls, calendar, me)"),
+                "recording" => crate::share::recording(),
+                o => bail!("Echo doesn't share “{o}” (clients, threads, people, dictionary, sources, source, calls, calendar, me, recording)"),
             }
         }
         "me" => {
@@ -3697,6 +3666,44 @@ mod tests {
         // What it didn't ask for isn't read.
         assert!(read("threads", Value::Null).unwrap_err().to_string().contains("didn't ask to read your threads"));
         plugins::remove("reader", false).unwrap();
+        sync();
+    }
+
+    #[test]
+    fn a_plugin_that_asked_reads_what_echo_records_now_and_no_other_plugin_does() {
+        let (_env, root) = paths::testenv::folders("jshost-recording-read");
+        let call = paths::calls_dir().join("2026-11-18_100000-acme-sync");
+        std::fs::create_dir_all(&call).unwrap();
+        std::fs::write(call.join("meta.json"), r#"{"app": "teams", "title": "Acme sync", "started_at": "2026-11-18T10:00:00+02:00"}"#).unwrap();
+        let main = r#"
+            export function apply(ctx) {
+              ctx.command('rec', () => ctx.echo.read('recording'))
+            }
+            "#;
+        let sheet = install_made_up(&root, "listener", json!({"echo": {"read": ["recording"]}}), main);
+        assert!(sheet.iter().any(|l| l.contains("whether Echo is recording or transcribing a call now")), "its line on the sheet: {sheet:?}");
+        // Hearing the events alone isn't asking to read it.
+        install_made_up(&root, "lister", json!({"echo": {"read": ["calls"]}, "events": {"on": ["transcribed"]}}), main);
+        let rec = |id: &str| call_loaded(id, "rec", &Value::Null);
+        assert_eq!(rec("listener").unwrap(), json!({"state": "idle", "call": null, "stamp": null}));
+        // A transcription whose process is gone (a crash) isn't one.
+        std::fs::write(call.join(crate::transcribe_marker()), "4000000").unwrap();
+        assert_eq!(rec("listener").unwrap()["state"], "idle");
+        // Transcribing: its marker names a live process.
+        std::fs::write(call.join(crate::transcribe_marker()), std::process::id().to_string()).unwrap();
+        assert_eq!(rec("listener").unwrap(), json!({"state": "transcribing", "call": "2026-11-18_100000-acme-sync", "stamp": "2026-11-18_100000"}));
+        // Recording: the watcher names the call (its heartbeat fresh); ahead of a transcription.
+        let rec_dir = paths::calls_dir().join("2026-11-18_110000-globex-pilot");
+        std::fs::create_dir_all(&rec_dir).unwrap();
+        let watch = json!({"pid": std::process::id(), "heartbeat": chrono::Utc::now(), "app": "teams", "in_call": true, "armed": false, "recording": rec_dir.display().to_string()});
+        std::fs::create_dir_all(paths::state_dir()).unwrap();
+        std::fs::write(paths::state_dir().join("watch.json"), watch.to_string()).unwrap();
+        assert_eq!(rec("listener").unwrap(), json!({"state": "recording", "call": "2026-11-18_110000-globex-pilot", "stamp": "2026-11-18_110000"}));
+        // A plugin that doesn't hear recordings can't read it.
+        assert!(rec("lister").unwrap_err().to_string().contains("didn't ask to read your recording"));
+        for id in ["listener", "lister"] {
+            plugins::remove(id, false).unwrap();
+        }
         sync();
     }
 

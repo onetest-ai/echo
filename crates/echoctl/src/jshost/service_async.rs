@@ -18,6 +18,14 @@ pub(super) fn service_async(id: &str, op: &str, arg: &Value) -> Result<Value> {
             let mut arg = arg.clone();
             arg["tools"] = plugins::may_run_claude(&uses, arg["tools"].as_str().unwrap_or(""))?.to_string().into();
             let mut spec = crate::claudejob::Spec::from_value(&arg, &plugins::data_dir(id))?;
+            // Under a key of its own (`key`): one run at a time per key, stopped by `ctx.claude.stop(key)`; held until
+            // the run has ended and its snapshot, if it failed, is gone.
+            let keyed = match &arg["key"] {
+                Value::Null => None,
+                Value::String(k) => Some(crate::claudejob::Keyed::take(id, k)?),
+                _ => bail!("a run's key is a string"),
+            };
+            spec.key = keyed.as_ref().map(|k| k.base.clone());
             // In a folder it was given (`folder`, `path`, `mode`): there, or in a snapshot of it (`copy`).
             let snapshot = folders::claude_folder(id, &arg, &mut spec)?;
             let ran = crate::claudejob::run(&spec);
@@ -35,6 +43,11 @@ pub(super) fn service_async(id: &str, op: &str, arg: &Value) -> Result<Value> {
                 out["snapshot"] = s;
             }
             Ok(out)
+        }
+        // Its own run under that key stopped (`claudejob::stop_keyed`): true, or false when none was running.
+        "claude.stop" => {
+            uses(id, "claude")?;
+            Ok(json!(crate::claudejob::stop_keyed(id, arg.as_str().unwrap_or(""))?))
         }
         // The user's sign-in to a host its sheet named (`plugins::signin`), to the host half only.
         "signin.get" => {
@@ -81,6 +94,7 @@ pub(super) fn service_async(id: &str, op: &str, arg: &Value) -> Result<Value> {
             Ok(json!(out))
         }
         "fs.walk" => folders::walk(id, arg[0].as_str().unwrap_or(""), &arg[1]),
+        "store.walk" => folders::store_walk(id, arg[0].as_str().unwrap_or(""), &arg[1]),
         "fs.search" => folders::search(id, arg[0].as_str().unwrap_or(""), arg[1].as_str().unwrap_or(""), &arg[2]),
         "fs.snapshot" => folders::snapshot(id, arg[0].as_str().unwrap_or(""), &arg[1]),
         "git.info" => git::info(id, arg[0].as_str().unwrap_or("")),
