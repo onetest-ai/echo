@@ -32,6 +32,7 @@ mod git;
 mod http;
 pub mod net;
 mod tls;
+mod web;
 mod widgets;
 pub mod work;
 
@@ -41,6 +42,8 @@ pub use widgets::widget_last;
 use widgets::widget_ask_now_on;
 pub use widgets::{widget_ask_now, widget_ask_on, widget_forget, widget_last_on};
 use widgets::widget_store;
+pub use widgets::inbox_items;
+use widgets::inbox_set;
 
 use http::fetch;
 #[cfg(test)]
@@ -181,6 +184,16 @@ const PRELUDE: &str = r#"
         }
         return s
       },
+    },
+    /** Web pages, under ctx.http.fetch's network rules (no redirect followed): `read(url, {max, images: 'save'})` → {url,
+     *  title, markdown, links: [{text, href}], images: [{src, alt, caption, width, height, saved?: {file, name, size,
+     *  type} | error?}], lang, byline, published, description, source, needs_js, truncated, bytes} — HTML only, 5 MB,
+     *  30 s; `fetch(url, {max})` → a file handle {file, name, size, type}; `markdown(html, {base})` the same reading of
+     *  HTML it has. What comes back is the page's: data, shown only through ctx.markdown. */
+    web: {
+      read: (url, opts) => later('web.read', [String(url), opts || {}]),
+      fetch: (url, opts) => later('web.fetch', [String(url), opts || {}]),
+      markdown: (html, opts) => later('web.markdown', [String(html), opts || {}]),
     },
     /** A WebSocket to an address the user listed (ws:// or wss://): resolves once open to {protocol, send(text | base64
      *  with {binary: true} | a file handle), close(code, reason), onMessage(data, {binary}), onClose({code, reason}),
@@ -1459,42 +1472,6 @@ fn service(id: &str, op: &str, arg: &Value) -> Result<Value> {
         }
         o => bail!("Echo has no service “{o}”"),
     })
-}
-
-// ── the plugins' Today widgets (widgets.rs) ──
-
-fn inbox_file(id: &str) -> PathBuf {
-    plugins::data_dir(id).join("inbox.json")
-}
-
-fn inbox_set(id: &str, key: &str, item: Option<&Value>) -> Result<()> {
-    if key.is_empty() || key.len() > 80 {
-        bail!("an Inbox item needs a short key");
-    }
-    let f = inbox_file(id);
-    let mut all: serde_json::Map<String, Value> = std::fs::read(&f).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
-    match item {
-        Some(v) => {
-            all.insert(key.into(), v.clone());
-        }
-        None => {
-            all.remove(key);
-        }
-    }
-    std::fs::create_dir_all(plugins::data_dir(id))?;
-    paths::write_atomic(&f, serde_json::to_string_pretty(&all)?.as_bytes())?;
-    Ok(())
-}
-
-/// Every enabled plugin's open Inbox items: `(plugin, key, item)`.
-pub fn inbox_items() -> Vec<(String, String, Value)> {
-    plugins::enabled()
-        .into_iter()
-        .flat_map(|p| {
-            let all: serde_json::Map<String, Value> = std::fs::read(inbox_file(&p.id)).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
-            all.into_iter().map(move |(k, v)| (p.id.clone(), k, v)).collect::<Vec<_>>()
-        })
-        .collect()
 }
 
 #[cfg(test)]

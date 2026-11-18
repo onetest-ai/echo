@@ -806,6 +806,26 @@
    ]
   },
   {
+   "id": "F-PLUG-110",
+   "feature": "A plugin's host half reads a web page as Markdown (`ctx.web.read(url, {max, timeout})`, no capability of its own) only where `ctx.http.fetch` may reach — a host its manifest names over https, an address the user listed, a page the user typed once — refused before anything is asked otherwise; a plain GET with no cookies, credentials or redirect followed: {url, title, markdown, links, images, lang, byline, published, description, source, needs_js, truncated, bytes}. The main part without navigation, scripts, forms or frames; headings, lists, code, tables, http(s) links and pictures (`![alt](src)`, a figure's caption under it, tracking pixels and `data:` left out) kept; the page's words never markup and its control and direction marks dropped. A page that builds itself with JavaScript is never run: its JSON-LD, framework state or `<noscript>` text taken when fuller (`source`), `needs_js` when it stays nearly empty. HTML only, never compressed, 5 MB read as it comes, 30 s: a PDF, a redirect (\"it moved\"), an error status or a page past `max` is refused with why. `ctx.web.markdown(html, {base})` reads HTML the plugin already has the same way, fetching nothing",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "plugin.enabled",
+    "plugin.uses"
+   ]
+  },
+  {
+   "id": "F-PLUG-111",
+   "feature": "A plugin saves a page's pictures (`ctx.web.read(url, {images: 'save'})`): each picture gets a file handle {file, name, size, type} in its store's cache (`cache/web/…`, swept with the cache) or the reason it wasn't saved — PNG, JPEG, GIF, WebP, AVIF or SVG only, 10 MB each, 50 pictures, 50 MB and 2 minutes a page. A picture comes from what the plugin may reach, or — only for a page on the public internet — from its own public host, never from this computer or the user's network; a page on the user's network gets only what the plugin may reach. `ctx.web.fetch(url, {max})` saves one file it may reach (10 MB, up to 50 MB) as a handle",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "plugin.enabled",
+    "plugin.uses"
+   ]
+  },
+  {
    "id": "F-PLUG-116",
    "feature": "A plugin's window half goes to a hash without a history step (`ctx.go(hash, {replace: true})`): the address changes in place (Back skips it) and the window shows the page as on a hashchange; without `replace`, `ctx.go(hash)` is a history step as before; the hash it is already at only redraws",
    "priority": "medium",

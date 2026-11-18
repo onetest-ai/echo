@@ -96,6 +96,10 @@
     {
       "id": "menu-demo",
       "source": "./plugins/menu-demo"
+    },
+    {
+      "id": "web-demo",
+      "source": "./plugins/web-demo"
     }
   ]
 }
