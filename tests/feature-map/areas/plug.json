@@ -935,6 +935,13 @@
    "priority": "high",
    "check": "agent",
    "axes": []
+  },
+  {
+   "id": "F-PLUG-138",
+   "feature": "A plugin's JavaScript that runs more than 5 s without an await is stopped, and every call still waiting on that plugin fails at once with \"<id>'s job took too long: Echo stops a plugin's JavaScript after 5 s\" (#817): `echoctl plugin call` prints it and exits 1, never waiting out its own time limit; the plugin answers its next call as before",
+   "priority": "high",
+   "check": "agent",
+   "axes": []
   }
  ]
 }

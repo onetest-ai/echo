@@ -89,7 +89,8 @@ file of a skill folder that has one asks again. Evidence: `plugins::scripts::des
 - `ctx.command(name, fn)`: `fn` takes JSON arguments and, second, `{files}` (the handles its caller passed: its window
   half's `ctx.call(…, {files})`, `echoctl plugin call … --file`; `[]` otherwise, § Folders and files), may be `async`,
   returns JSON and throws an `Error` to fail. A
-  window-called command has 30 s. More than 5 s of JavaScript between awaits is interrupted; bulk file reads go through
+  window-called command has 30 s. More than 5 s of JavaScript between awaits is interrupted, and every call still waiting on the plugin then fails with
+  “<id>'s job took too long”; bulk file reads go through
   `ctx.fs.readMany` / `ctx.fs.walk`, which run off that slice. Evidence: `jshost::CALL_TIMEOUT`, `jshost::SLICE`
 - `ctx.every(seconds, fn)`: periodic work, 10 s minimum; there are no timers in `echoctl plugin call`,
   `echoctl deliver`, `echoctl widget show` or `echoctl work show`. Evidence: `jshost::no_timers`
