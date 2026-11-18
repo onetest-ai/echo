@@ -307,3 +307,11 @@ document.addEventListener('keydown', (ev) => {
 })
 // The user scrolling (a wheel, not the grid's own scroll a render restores) or resizing the window closes it too.
 for (const t of ['wheel', 'resize']) window.addEventListener(t, () => { if (S.cal.ctx) closeEventMenu(false) }, { passive: true })
+// ── schedule mark: what the card shows right after Record, before the server answers ──────
+// What `calendar` returns for a scheduled meeting: `scheduled` and, with it, the language(s) it will be transcribed as.
+function markScheduled(e, on, lang) {
+  e.scheduled = on
+  if (on) e.scheduled_languages = [lang]
+  else delete e.scheduled_languages
+}
+// end of the schedule mark block
