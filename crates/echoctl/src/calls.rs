@@ -123,7 +123,8 @@ pub fn stamp_of(dir: &Path) -> String {
 }
 
 /// The call folder with this stamp now (it may have been renamed since it was last seen). None
-/// when no folder, or more than one, has it (two calls started in the same second: `-2`).
+/// when no folder, or more than one, has it (two calls started in the same second before `recorder::call_dir` gave
+/// each new call a stamp of its own).
 pub fn by_stamp(stamp: &str) -> Option<PathBuf> {
     if stamp.is_empty() {
         return None;
@@ -1086,6 +1087,8 @@ pub fn restore(name: &str) -> Result<()> {
     if !src.join("meta.json").exists() {
         bail!("{name} is not in {}", trash_dir().display());
     }
+    // Under the new calls' lock: a call starting now never takes the stamp of the one coming back (`recorder::call_dir`).
+    let _lock = crate::recorder::new_call_lock();
     // A numbered duplicate ("<call>.1") goes back under its original name if that is free.
     let base = name.rsplit_once('.').filter(|(_, n)| n.chars().all(|c| c.is_ascii_digit())).map(|(b, _)| b).unwrap_or(name);
     let mut dest = paths::calls_dir().join(base);

@@ -50,7 +50,7 @@ the end under `calls::lock_meta`. The live worker is closed in `Recording::finis
 
 ## Call folders and the trash
 
-- A new call gets a new folder (`recorder::call_dir`).
+- A new call gets a new folder, with a stamp of its own (`recorder::call_dir`).
 - Pruned frames move to `.echo/trash/<call>.frames/` with their index lines (`calls::prune_frames`); the app clears trash
   entries older than `TRASH_DAYS` (30, `calls::purge_trash`).
 

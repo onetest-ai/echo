@@ -50,18 +50,53 @@ pub fn slugify(s: &str) -> String {
     slug.chars().take(60).collect()
 }
 
-pub(crate) fn call_dir(started: &DateTime<Local>, title: Option<&str>) -> PathBuf {
-    let mut name = started.format("%Y-%m-%d_%H%M%S").to_string();
-    if let Some(t) = title.map(slugify).filter(|s| !s.is_empty()) {
-        name.push('-');
-        name.push_str(&t);
+/// A new call's folder, created: `<stamp>-<slug of the title>`, its stamp the first second at or after `started` that no
+/// folder in the calls folder or the trash starts with, so a stamp names one call for good (`calls::by_stamp`); the real
+/// start stays in `meta.json`. Chosen and created under one lock (`new_call_lock`): two recordings or imports at one
+/// instant get two.
+pub(crate) fn call_dir(started: &DateTime<Local>, title: Option<&str>) -> Result<PathBuf> {
+    let calls = paths::calls_dir();
+    fs::create_dir_all(&calls).with_context(|| format!("creating {}", calls.display()))?;
+    let _lock = new_call_lock();
+    let stamps = |d: PathBuf| fs::read_dir(d).into_iter().flatten().flatten().map(|e| crate::calls::stamp_of(&e.path()));
+    let taken: std::collections::HashSet<String> = stamps(calls.clone()).chain(stamps(crate::calls::trash_dir())).collect();
+    let slug = title.map(slugify).filter(|s| !s.is_empty()).map(|s| format!("-{s}")).unwrap_or_default();
+    let mut at = *started;
+    loop {
+        let stamp = at.format("%Y-%m-%d_%H%M%S").to_string();
+        if !taken.contains(&stamp) {
+            let dir = calls.join(format!("{stamp}{slug}"));
+            match fs::create_dir(&dir) {
+                Ok(()) => return Ok(dir),
+                // Made outside Echo since the folder was read: the next second.
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+                Err(e) => return Err(e).with_context(|| format!("creating {}", dir.display())),
+            }
+        }
+        at += chrono::Duration::seconds(1);
     }
-    // Never reuse a folder (two recordings in the same second would truncate each other).
-    let base = paths::calls_dir().join(&name);
-    if !base.exists() {
-        return base;
+}
+
+/// The lock a new call's stamp is chosen under (`<home>/.echo/new-call.lock`; its holders keep it for milliseconds).
+/// None, logged, when it can't be had within 2 s or opened at all: a recording never waits on it or fails for it — the
+/// folder is still a new one (`create_dir`), only its stamp may then be shared.
+pub(crate) fn new_call_lock() -> Option<crate::app::FileLock> {
+    let lock = paths::state_dir().join("new-call.lock");
+    let t = Instant::now();
+    loop {
+        match fs::create_dir_all(paths::state_dir()).and_then(|_| crate::app::FileLock::try_take(&lock)) {
+            Ok(Some(l)) => return Some(l),
+            Ok(None) if t.elapsed() < Duration::from_secs(2) => std::thread::sleep(Duration::from_millis(20)),
+            Ok(None) => {
+                eprintln!("{} is held by another process: a new call goes on without it", lock.display());
+                return None;
+            }
+            Err(e) => {
+                eprintln!("{}: {e}: a new call goes on without it", lock.display());
+                return None;
+            }
+        }
     }
-    (2..).map(|n| paths::calls_dir().join(format!("{name}-{n}"))).find(|p| !p.exists()).unwrap_or(base)
 }
 
 /// The call's transcription worker (`live.rs`), when transcription is built in.
@@ -100,8 +135,7 @@ impl Recording {
         let started_at = Local::now();
         // The meeting subject names the call when no explicit title is given.
         let title = title.map(str::to_owned).or_else(|| meeting.and_then(|m| m.subject.clone()));
-        let dir = call_dir(&started_at, title.as_deref());
-        fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
+        let dir = call_dir(&started_at, title.as_deref())?;
         let language = crate::call_language::for_new_call(languages.as_deref(), &crate::config::Config::load().unwrap_or_default());
         let meta = Meta {
             title: title.clone(),
@@ -147,8 +181,7 @@ impl Recording {
     pub fn start_memo(app: TargetApp, languages: Option<Vec<String>>, ai_profile: Option<String>) -> Result<Self> {
         let started_at = Local::now();
         let title = Some("Memo".to_string());
-        let dir = call_dir(&started_at, title.as_deref());
-        fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
+        let dir = call_dir(&started_at, title.as_deref())?;
         let language = crate::call_language::for_new_call(languages.as_deref(), &crate::config::Config::load().unwrap_or_default());
         let meta = Meta {
             title: title.clone(),
@@ -308,6 +341,92 @@ pub fn capture(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::calls::{by_stamp, stamp_of};
+
+    fn at(s: &str) -> DateTime<Local> {
+        chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%d_%H%M%S").unwrap().and_local_timezone(Local).unwrap()
+    }
+
+    /// A call folder as the recorder leaves it: made by the one helper, then its meta.
+    fn new_call(started: &str, title: &str) -> PathBuf {
+        let d = call_dir(&at(started), Some(title)).unwrap();
+        fs::write(d.join("meta.json"), serde_json::json!({"title": title}).to_string()).unwrap();
+        d
+    }
+
+    #[test]
+    fn calls_started_in_one_second_get_the_next_free_stamps() {
+        let (_env, _) = paths::testenv::folders("recorder-unique-stamps");
+        let call = new_call("2026-11-18_100000", "Acme sync");
+        let memo = new_call("2026-11-18_100000", "Memo");
+        let third = new_call("2026-11-18_100000", "Acme sync");
+        let stamps: Vec<_> = [&call, &memo, &third].map(|d| stamp_of(d)).into();
+        assert_eq!(stamps, ["2026-11-18_100000", "2026-11-18_100001", "2026-11-18_100002"]);
+        assert_eq!(third.file_name().unwrap(), "2026-11-18_100002-acme-sync", "no -2 after the slug");
+        for (d, s) in [&call, &memo, &third].iter().zip(&stamps) {
+            assert_eq!(by_stamp(s).as_ref(), Some(*d), "each opens by its stamp");
+        }
+    }
+
+    #[test]
+    fn a_stamp_held_by_a_folder_of_another_title_is_taken() {
+        let (_env, _) = paths::testenv::folders("recorder-stamp-other-slug");
+        // Another call's folder, not yet whole (an import writes meta.json last), and one in the trash.
+        fs::create_dir_all(paths::calls_dir().join("2026-11-18_090000-globex-pilot")).unwrap();
+        fs::create_dir_all(crate::calls::trash_dir().join("2026-11-18_090001-old-call.1")).unwrap();
+        let d = new_call("2026-11-18_090000", "Initech planning");
+        assert_eq!(d.file_name().unwrap(), "2026-11-18_090002-initech-planning");
+    }
+
+    #[test]
+    fn two_threads_creating_at_one_instant_get_two_stamps() {
+        let (_env, _) = paths::testenv::folders("recorder-stamp-race");
+        // Titles of their own: the folders' names differ, only the lock keeps their stamps apart.
+        let made: Vec<PathBuf> = std::thread::scope(|s| {
+            let h: Vec<_> = (0..8).map(|i| s.spawn(move || call_dir(&at("2026-11-18_120000"), Some(&format!("Call {i}"))).unwrap())).collect();
+            h.into_iter().map(|h| h.join().unwrap()).collect()
+        });
+        let stamps: std::collections::HashSet<String> = made.iter().map(|d| stamp_of(d)).collect();
+        assert_eq!(stamps.len(), 8, "{made:?}");
+    }
+
+    #[test]
+    fn a_lock_held_elsewhere_never_stops_a_new_call() {
+        let (_env, _) = paths::testenv::folders("recorder-stamp-lock-held");
+        fs::create_dir_all(paths::state_dir()).unwrap();
+        let _held = crate::app::FileLock::try_take(&paths::state_dir().join("new-call.lock")).unwrap().expect("the lock");
+        let t = Instant::now();
+        let d = call_dir(&at("2026-11-18_150000"), Some("Acme sync")).unwrap();
+        assert!(t.elapsed() < Duration::from_secs(3), "waited {:?}", t.elapsed());
+        assert_eq!(d.file_name().unwrap(), "2026-11-18_150000-acme-sync");
+        let next = call_dir(&at("2026-11-18_150000"), Some("Acme sync")).unwrap();
+        assert_eq!(next.file_name().unwrap(), "2026-11-18_150001-acme-sync", "still a fresh folder");
+    }
+
+    #[test]
+    fn a_lock_that_cant_be_opened_never_stops_a_new_call() {
+        let (_env, _) = paths::testenv::folders("recorder-stamp-lock-unopenable");
+        fs::create_dir_all(paths::state_dir().join("new-call.lock")).unwrap(); // a folder: no file to open
+        let d = call_dir(&at("2026-11-18_160000"), Some("Memo")).unwrap();
+        assert!(d.is_dir() && d.file_name().unwrap() == "2026-11-18_160000-memo");
+    }
+
+    #[test]
+    fn the_stamp_survives_a_retitle() {
+        let (_env, _) = paths::testenv::folders("recorder-stamp-retitle");
+        let first = new_call("2026-11-18_140000", "Memo");
+        let second = new_call("2026-11-18_140000", "Memo");
+        let stamp = stamp_of(&second);
+        crate::calls::update_meta(&second, |m| {
+            m["title"] = serde_json::json!("Northwind kickoff");
+            Ok(())
+        })
+        .unwrap();
+        let renamed = crate::calls::rename_to_title(&second).unwrap();
+        assert_eq!(renamed.file_name().unwrap(), "2026-11-18_140001-northwind-kickoff");
+        assert_eq!((stamp_of(&renamed), by_stamp(&stamp)), (stamp.clone(), Some(renamed)));
+        assert_eq!(by_stamp("2026-11-18_140000"), Some(first));
+    }
 
     #[test]
     fn the_final_meta_keeps_the_language_the_live_transcription_wrote() {
