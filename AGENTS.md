@@ -44,7 +44,7 @@ Behavioural rules for every change; for a trivial task, use judgment.
 | Architecture | .ai-run/guides/architecture/architecture.md | where code goes: paths, control files, CLI vs skill, feature gates, per-OS files |
 | Capture | .ai-run/guides/capture/capture-and-transcription.md | recording state machine, capture tracks, transcription engines and guards, live notes |
 | Claude Code plugin | .ai-run/guides/plugins/claude-code-plugin.md | plugin/ launchers, skills, status-line mod, dev build |
-| Data | .ai-run/guides/data/recall-store.md | Recall SQLite store schema changes and profile-scoped access |
+| Data | .ai-run/guides/data/intake-and-search.md | Intake (mail and channel facts, sender trust) and the search index: derived, working memory, profile-scoped |
 | Development | .ai-run/guides/development/dev-workflow.md | day-to-day build, run and debug: features, prerequisites, dev app beside Echo, UI review, runtimes, packaging |
 | Development | .ai-run/guides/development/rust-conventions.md | atomic writes, meta.json and state-file locking, call stamps, version bump |
 | Development | .ai-run/guides/development/threads-and-ledger.md | threads, clients and the work ledger: evidence-checked proposals, user edits pinned, Microsoft 365 sends |
@@ -104,7 +104,7 @@ PR; when the code and a reference differ, the code wins and the reference is fix
 | Architecture | add a module, CLI command, app request or platform code | "add an echoctl subcommand", "make the app react to a CLI request", "add Windows-only code" | .ai-run/guides/architecture/architecture.md | - |
 | Capture | change recording, capture, transcription or live notes | "change when a recording starts or stops", "add a speech engine", "change the vocabulary hint", "change live notes" | .ai-run/guides/capture/capture-and-transcription.md | - |
 | Claude Code plugin | change the Claude Code plugin in plugin/ | "edit a skill", "change the launcher", "change the status line" | - | .ai-run/guides/plugins/claude-code-plugin.md |
-| Data | change the Recall store | "add a column", "serve Recall data to a session" | - | .ai-run/guides/data/recall-store.md |
+| Data | change Intake or search | "read a new kind of source", "change how search ranks", "serve search to a session" | - | .ai-run/guides/data/intake-and-search.md |
 | Development | write or change files the app keeps | "write a new JSON state file", "change meta.json", "bump the version" | .ai-run/guides/development/rust-conventions.md | .ai-run/guides/development/dev-workflow.md |
 | Echo plugins | build or extend Echo plugins | "add a ctx service", "add a capability", "add a slot", "test a plugin locally", "give a plugin a Today widget", "add a widget kind" | .ai-run/guides/plugins/echo-plugins.md | .ai-run/guides/plugins/plugin-authoring.md |
 | Integration | run Claude Code or change AI profiles | "start a new Claude job", "change routing variables", "test a sign-in" | .ai-run/guides/integrations/claude-code-runs.md | - |
