@@ -1040,6 +1040,25 @@ mod tests {
     }
 
     #[test]
+    fn the_clipboard_tools_speak_utf8_without_a_locale() {
+        // Echo started from Finder has no LANG: pbpaste then gave "Исследование" as "????????????" (and pbcopy Mac Roman).
+        #[cfg(target_os = "macos")]
+        {
+            let mut c = super::terminals::pasteboard("/bin/sh");
+            // An inherited LC_ALL would override LC_CTYPE: the tools never get one.
+            assert!(c.get_envs().any(|(k, v)| k == "LC_ALL" && v.is_none()), "LC_ALL removed");
+            let out = c.args(["-c", "locale charmap"]).env_remove("LANG").output().unwrap();
+            assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "UTF-8");
+        }
+        let bytes = super::terminals::clipboard_bytes("Тест");
+        if cfg!(windows) {
+            assert_eq!(bytes, [0xFF, 0xFE, 0x22, 0x04, 0x35, 0x04, 0x41, 0x04, 0x42, 0x04], "UTF-16 with its mark for clip");
+        } else {
+            assert_eq!(bytes, "Тест".as_bytes());
+        }
+    }
+
+    #[test]
     fn paging_reaches_every_call_once_with_undated_folders_last() {
         let (_env, _root) = crate::paths::testenv::folders("window-calls-page-undated");
         for name in ["2026-10-20_100000-a", "2026-10-21_100000-b", "2026-10-22_100000-c", "old-dictation", "imported-standup"] {
