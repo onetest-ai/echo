@@ -14,11 +14,13 @@ pub mod embed;
 pub mod facts;
 pub mod files;
 pub mod mcp;
+pub mod retain;
 pub mod senders;
 pub mod sources;
 pub mod store;
 pub mod taxonomy;
 pub mod views;
+pub mod when;
 
 use anyhow::Result;
 use serde_json::Value;
@@ -141,6 +143,13 @@ pub fn sync() -> Result<store::Report> {
         facts::set_status(Some(&format!("moving the facts out of the index failed: {e:#}")), &[]);
     }
     let emb = embedder();
+    // A thread opened again: its documents leave the index whole first, so this sync reads them back (`retain`).
+    let closed = crate::projects::closed_threads();
+    match retain::restore(&store_path(), &closed) {
+        Ok(n) if n > 0 => eprintln!("recall: {n} sources of threads opened again read back"),
+        Ok(_) => {}
+        Err(e) => eprintln!("recall: retention: {e:#}"),
+    }
     let mut r = store::sync(&store_path(), call_inputs(), emb.as_ref().map(|e| e as &dyn embed::Embedder))?;
     // Thread sources (Teams channels, mail): only with a Microsoft 365 sign-in; their failures are
     // kept per source (`brain/sources.json`) and never stop the calls' sync.
@@ -199,6 +208,8 @@ pub fn sync() -> Result<store::Report> {
         Ok(_) => {}
         Err(e) => eprintln!("brain: history: {e:#}"),
     }
+    // Retention: sections past their horizon, and closed threads' (their cards stay), leave the index.
+    r.retired = retain::apply(&store_path(), chrono::Local::now().date_naive(), &closed)?;
     // Which sections mention which terms: no model; the sections written or moved to other threads since they
     // were last read (`term_scan`, cleared by every write of a section). A store from before Brain's meta keys
     // and entity-kind nodes gets its graph rebuilt once.
@@ -241,10 +252,11 @@ fn fingerprint() -> u64 {
             }
         }
     }
-    // Each thread's history date (supersession).
+    // Each thread's history date (supersession) and whether it is closed (retention), and the day (horizons).
     for p in crate::projects::list() {
-        (p.id, p.history_before).hash(&mut h);
+        (p.id, p.history_before, p.stage.closed()).hash(&mut h);
     }
+    chrono::Local::now().date_naive().hash(&mut h);
     for d in crate::calls::all_calls() {
         d.hash(&mut h);
         for f in ["meta.json", "segments.json", "notes.md", "chat.json", "meeting.json"] {
@@ -352,9 +364,9 @@ fn drop_old_folders() {
     }
 }
 
-pub fn search(q: &str, limit: usize, within: Option<&str>, scope: store::Scope) -> Result<Value> {
+pub fn search(q: &str, limit: usize, within: Option<&str>, scope: store::Scope, filters: &store::Filters) -> Result<Value> {
     let emb = embedder();
-    store::search_in(&store_path(), q, limit, within, scope, emb.as_ref().map(|e| e as &dyn embed::Embedder))
+    store::search_at(&store_path(), q, limit, within, scope, emb.as_ref().map(|e| e as &dyn embed::Embedder), store::History::Latest, None, filters)
 }
 
 pub fn status() -> Result<Value> {

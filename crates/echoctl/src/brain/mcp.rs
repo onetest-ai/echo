@@ -15,8 +15,12 @@ fn tools() -> Value {
     let s = |props: Value, req: &[&str]| json!({"type": "object", "properties": props, "required": req});
     json!([
         {"name": "list_scopes", "description": "The user's clients and threads (engagements), with their ids and how much each holds. Scope every search to a client or a thread when the question is about one.", "inputSchema": s(json!({}), &[])},
-        {"name": "search_sources", "description": "What exactly was said: search the user's calls (minutes, transcripts with speakers and times, chats), their threads' mail, Teams channels and documents — words in any language (common words skipped), ordered by meaning too when an embedding server is set. Scope it with `client` or `thread` (ids from list_scopes) when the question is about one. Documents a thread marks as history are left out unless `latest_only` is false, or `as_of` (YYYY-MM-DD) asks what was current on a day. Each hit has its source, text, date, speaker, its client and threads, and an echo:// link to the moment.",
-         "inputSchema": s(json!({"query": {"type": "string"}, "limit": {"type": "integer", "default": 5}, "client": {"type": "string"}, "thread": {"type": "string"}, "source_contains": {"type": "string"}, "latest_only": {"type": "boolean"}, "as_of": {"type": "string"}}), &["query"])},
+        {"name": "search_sources", "description": "What exactly was said: search the user's calls (minutes, transcripts with speakers and times, chats, and a card per call), their threads' mail, Teams channels and documents — words in any language (common words skipped), ordered by meaning too when an embedding server is set. Scope it with `client` or `thread` (ids from list_scopes) when the question is about one. Narrow it with `kind` (call, mail, channel, document), `section` (summary, decisions, action_items, open_questions, minutes, transcript, chat, mail, channel, document, card), `since` / `until` (YYYY-MM-DD; without them a date in the query, such as \"12 November\" or \"last week\", is used) and `person` (who said or wrote it). The index is working memory: transcripts are kept 45 days, minutes, mail and channel facts 90, a closed thread's sections leave it (each call keeps its card, each document a card); for older, read the call through its link with read_link (from its folder), or look in Knowledge. Documents a thread marks as history are left out unless `latest_only` is false, or `as_of` (YYYY-MM-DD) asks what was current on a day. Each hit has its source, section kind, text, date, speaker, its client and threads, and an echo:// link to the moment.",
+         "inputSchema": s(json!({"query": {"type": "string"}, "limit": {"type": "integer", "default": 5}, "client": {"type": "string"}, "thread": {"type": "string"}, "source_contains": {"type": "string"},
+                                 "kind": {"type": "array", "items": {"type": "string", "enum": ["call", "mail", "channel", "document"]}},
+                                 "section": {"type": "array", "items": {"type": "string", "enum": store::SECTION_KINDS}},
+                                 "since": {"type": "string"}, "until": {"type": "string"}, "person": {"type": "string"},
+                                 "latest_only": {"type": "boolean"}, "as_of": {"type": "string"}}), &["query"])},
         {"name": "list_sources", "description": "The sources — calls, mail conversations, Teams channel posts, folder documents — newest first; `client` / `thread` narrow them.", "inputSchema": s(json!({"contains": {"type": "string"}, "client": {"type": "string"}, "thread": {"type": "string"}, "offset": {"type": "integer"}}), &[])},
         {"name": "read_source", "description": "One source's sections in order (a call: its minutes, transcript, chat; a mail conversation or channel post: its messages' facts; a document: its pages).",
          "inputSchema": s(json!({"source": {"type": "string"}, "from_ord": {"type": "integer"}, "to_ord": {"type": "integer"}, "titles_only": {"type": "boolean"}, "max_chars": {"type": "integer"}}), &["source"])},
@@ -37,6 +41,19 @@ fn canonical(name: &str) -> &str {
 /// The scope a tool call asks for: a client or a thread (by id).
 fn scope_of(a: &Value) -> store::Scope<'_> {
     a["client"].as_str().filter(|s| !s.is_empty()).map(|c| ("client", c)).or_else(|| a["thread"].as_str().filter(|s| !s.is_empty()).map(|t| ("thread", t)))
+}
+
+/// A filter's values: an array, or one string (comma-separated).
+fn strings(v: &Value) -> Vec<String> {
+    match v {
+        Value::Array(a) => a.iter().filter_map(|x| x.as_str()).map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect(),
+        Value::String(s) => s.split(',').map(|x| x.trim().to_string()).filter(|x| !x.is_empty()).collect(),
+        _ => vec![],
+    }
+}
+
+fn text(v: &Value) -> Option<String> {
+    v.as_str().map(str::trim).filter(|s| !s.is_empty()).map(str::to_owned)
 }
 
 /// What this server may show: one AI profile's sources (strict routing), narrowed for a call's session
@@ -74,7 +91,8 @@ fn call(name: &str, a: &Value) -> Result<Value> {
                 (None, Some(false)) => store::History::All,
                 _ => store::History::Latest,
             };
-            let mut v = store::search_at(&path, q, a["limit"].as_u64().unwrap_or(5).clamp(1, 30) as usize, a["source_contains"].as_str(), scope, emb, history, Some(&allowed_ids))?;
+            let filters = store::Filters { kinds: strings(&a["kind"]), sections: strings(&a["section"]), since: text(&a["since"]), until: text(&a["until"]), person: text(&a["person"]) };
+            let mut v = store::search_at(&path, q, a["limit"].as_u64().unwrap_or(5).clamp(1, 30) as usize, a["source_contains"].as_str(), scope, emb, history, Some(&allowed_ids), &filters)?;
             v["guidance"] = json!("Cite each claim with its source's title, date and time (the hit's link opens the moment in Echo). Say 'not modeled' for what no hit supports.");
             Ok(v)
         }
@@ -265,6 +283,12 @@ mod tests {
             assert_eq!(r["result"]["isError"], true, "{gone}");
         }
         assert_eq!(canonical("search_knowledge"), "search_sources");
+        let search = tools().as_array().unwrap().iter().find(|t| t["name"] == "search_sources").unwrap().clone();
+        for f in ["client", "thread", "kind", "section", "since", "until", "person"] {
+            assert!(search["inputSchema"]["properties"][f].is_object(), "search_sources filters by {f}");
+        }
+        assert_eq!(strings(&json!("call, mail")), ["call", "mail"]);
+        assert_eq!(strings(&json!(["transcript", " "])), ["transcript"]);
         let r = answer(&json!({"jsonrpc": "2.0", "id": 5, "method": "tools/call", "params": {"name": "read_link", "arguments": {"link": "echo://thread/elsewhere"}}})).unwrap();
         assert_eq!(r["result"]["isError"], true, "a thread this reader can't see: {r}");
         assert_eq!(answer(&json!({"jsonrpc": "2.0", "id": 4, "method": "nope"})).unwrap()["error"]["code"], -32601);

@@ -92,8 +92,9 @@ inside `BEGIN IMMEDIATE` after checking `pragma_table_info`, and backfilled once
 
 ## Ids, archive
 
-- Chunk ids: `brain::chunk::chunk_id`.
-- A closed thread's sources are archived: `brain::store::archived_of`.
+- Chunk ids: `brain::chunk::chunk_id`. A document's card is `chunk_id(source, store::CARD_ORD)`.
+- A closed thread's sources are archived: `brain::store::archived_of`. What of them stays in the index is in
+  Retention.
 - The index has no snapshots (it is rebuilt from its sources) and no `related` table (dropped at `open`). At the app's
   start `brain::drop_old_folders` removes `recall/snapshots/` and `recall/assets/` (the old page images) when they are
   there; nothing else under `recall/` is touched.
@@ -104,11 +105,57 @@ inside `BEGIN IMMEDIATE` after checking `pragma_table_info`, and backfilled once
   layer, by PDFium), each page or slide with its tables; nothing is read from page images (a scan or a picture-only
   slide is the Knowledge plugin's). `READER_VERSION` 3 reads every file again once, from its text.
 
+## Retention
+
+The index is working memory, not an archive (`brain::retain`). Each section has a kind, `chunks.section`, given by
+`brain::store::section_kind` when the section is written. A store from before the column gets the kinds once, at
+`open`.
+
+| Section kinds | Kept (`retain::horizon`) |
+|---|---|
+| `transcript`, `chat` | `TALK_DAYS` (45) after the call's day |
+| `summary`, `decisions`, `action_items`, `open_questions`, `minutes` (any other minutes section) | `MINUTES_DAYS` (90) |
+| `mail`, `channel` | `FACTS_DAYS` (90) after the message's own day (its heading), else the source's |
+| `document` | while one of its threads is open |
+| `card` | always |
+
+- A call's card is the last section of its document, under `## Call card` (`store::CALL_CARD`). It holds the call's
+  title and day, its threads, its people (the speakers, then the invite's people, at most 12) and its summary's first
+  line.
+- A section whose threads are all closed leaves the index; its call's card stays. A closed thread's document gets a
+  card in place of its text: one section at `store::CARD_ORD` with its title, path, threads and headings (at most 40).
+- `brain::sync` runs `retain::restore` first and `retain::apply` last, with today's date. Its report's `retired`
+  counts the sections that left.
+  - `apply` deletes index rows only. A document that lost sections for its closed threads is marked in
+    `documents.retained` (`closed:<thread ids>`).
+  - `restore` drops a marked document whose closed threads changed, so the same sync reads it back with the same ids.
+    A call comes back from its folder, a file from its folder (its registry's `indexed_sha` is cleared), and mail and
+    posts from their Intake facts at the next read.
+- The call folders, the thread folders' files and Intake's facts are never touched.
+- The app's sync runs at least once a day and when a thread closes or opens again (`brain::fingerprint`).
+
 ## Search
 
 - `brain::store::search_at`: the candidates are the keyword (FTS5, BM25) top 30 (or the limit asked, when higher),
-  read best first until that many pass scope, access and history; the query's words skip `STOPWORDS` (English,
-  Ukrainian, Russian). A query of only stopwords searches nothing and says so in `note`.
+  read best first until that many pass scope, access, history and the filters; the query's words skip `STOPWORDS`
+  (English, Ukrainian, Russian). A query of only stopwords searches nothing and says so in `note`.
+- Filters (`store::Filters`; `echoctl brain search --kind/--section/--since/--until/--person`; search_sources'
+  `kind`, `section`, `since`, `until`, `person`) are applied in the candidates' SQL, before the cut:
+  - source kinds `call`, `mail`, `channel`, `document` (by the source id's prefix, `store::SOURCE_KINDS`);
+  - section kinds (`store::SECTION_KINDS`, as in Retention);
+  - `since` and `until`, days compared with the section's date;
+  - `person`, a part of the section's speaker: a transcript turn's names or a fact's author. Minutes and documents
+    have none.
+- Unknown kinds and malformed days are refused. The answer's `filters` gives what was applied.
+- With neither `since` nor `until`, a date in the query (`brain::when::in_query`) becomes the filter, and its words
+  leave the query; `filters.dates_from_query` says which words.
+  - Explicit dates: an ISO day, or a day with its month in English, Ukrainian or Russian (any form), with or without
+    a year. A day without a year is the latest such day not after today.
+  - Relative dates: today, yesterday, this week, last week (Monday to Sunday), the past 7 days and last month.
+  - A month or a number alone is never a date. Several dates span from the first to the last.
+- A range that reaches before the shortest horizon of the section kinds it may find adds `retain::OLDER` to `note`:
+  "older than the index keeps: see the call folders or Knowledge".
+- Each hit has its `section_kind`.
 - With an embedding server that answers, the candidates are re-ranked by `brain::store::rerank`: weighted reciprocal
   rank (k = 60) of the keyword rank (0.4) and the vector rank among the candidates (0.6). No section outside the
   candidates is added; without embeddings the keyword order stays.
