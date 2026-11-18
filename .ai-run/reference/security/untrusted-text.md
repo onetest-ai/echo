@@ -45,9 +45,9 @@ then canonicalised, links resolved and re-checked, kept inside its root; Windows
 
 A write into a plugin's granted folder (`grants::writable`, `writable_folder`) also refuses hidden names, the path as
 given and as it really is (a link inside the root, a Windows short name), but for the exact names `grants::hidden_ok`
-takes: `.gitignore`, `.obsidian/<name>.json`, `.claude/skills/<name>/<file>.md` (folders: `.obsidian`, `.claude`,
+takes: `.gitignore`, `.obsidian/<name>.json` (in any folder that isn't hidden, an ASCII name), `.claude/skills/<name>/<file>.md` (folders: `.obsidian`, `.claude`,
 `.claude/skills`, `.claude/skills/<name>`) — never Claude Code's settings, hooks, agents or commands, `.git`,
-`.mcp.json` or Obsidian's plugins, themes and the lists that switch its plugins on (`community-plugins.json`, `core-plugins.json`, in any case) (plugin-api.md § Folders and files).
+`.mcp.json` or Obsidian's plugins, themes and the lists that switch its plugins on (`community-plugins.json`, `core-plugins.json`, `core-plugins-migration.json`, in any case) (plugin-api.md § Folders and files).
 
 A skill is code Claude Code runs as well as text: its frontmatter can hold hooks, pre-approved tools, a shell or a model,
 and `` !`cmd` `` or a code block opened with `!` runs when it loads. So whatever a plugin puts in a skill — in a granted
