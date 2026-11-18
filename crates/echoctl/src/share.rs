@@ -820,7 +820,7 @@ mod tests {
             let kind = src.split('/').next().unwrap();
             let refs = json!({"kind": kind, "people": ["jane@acme.example"], "url": format!("https://outlook.example/{src}"), "subjects": [title], "threads": threads});
             let sec = crate::brain::facts::Section { head: format!("{day} 09:12 Jane Doe"), from: Some("Jane Doe".into()), at: format!("{day}T09:12:00Z"), link: "https://outlook.example/x".into(),
-                                                     facts: vec![crate::brain::digest::Fact { text: format!("{title}, a fact"), quote: None }] };
+                                                     facts: vec![crate::brain::digest::Fact { text: format!("{title}, a fact"), quote: None }], ..Default::default() };
             w.write(&crate::brain::facts::Facts::new(src.into(), kind, title.into(), Some(day.into()), refs, vec![sec])).unwrap();
         }
         assert!(!crate::brain::store_path().exists(), "served from the fact files alone");
@@ -858,7 +858,7 @@ mod tests {
         let pilot = acme_pilot();
         use crate::brain::{digest::Fact, facts::{Facts, Section}};
         let refs = json!({"kind": "mail", "conversation": "c1", "message": "AAMk-c1-2", "people": ["jane@acme.example", "kim@acme.example"], "url": "https://outlook.example/1", "subjects": ["Pilot dates", "RE: Pilot dates"], "threads": [{"id": pilot}]});
-        let sec = |head: &str, fact: Fact| Section { head: head.into(), from: head.splitn(3, ' ').nth(2).map(str::to_owned), at: String::new(), link: "https://outlook.example/1".into(), facts: vec![fact] };
+        let sec = |head: &str, fact: Fact| Section { head: head.into(), from: head.splitn(3, ' ').nth(2).map(str::to_owned), at: String::new(), link: "https://outlook.example/1".into(), facts: vec![fact], ..Default::default() };
         let f = Facts::new("mail/abc".into(), "mail", "Pilot dates".into(), Some("2026-11-11".into()), refs, vec![
             sec("2026-11-10 09:12 Jane Doe", Fact { text: "The pilot moves to 24 Nov".into(), quote: Some("moves to the 24th".into()) }),
             sec("2026-11-11 08:00 Kim Ito", Fact { text: "Kim confirms the room".into(), quote: None }),
@@ -937,6 +937,47 @@ mod tests {
             assert_eq!((s["stamp"].as_str(), s["id"].as_str()), (Some("2026-10-28_110000"), Some("call:2026-10-28_110000-aurora-kickoff")), "{id}");
         }
         assert!(source("call:2026-10-28_120000", &json!({})).is_err(), "a stamp no call has is nothing");
+    }
+
+    /// A made-up index's mail, read the way the index was read before Intake's files (its own SQL, as `share` did): the
+    /// same source moved into a fact file reads the same through `echo.read('source')`, link for link.
+    #[cfg(feature = "brain")]
+    #[test]
+    fn a_mail_moved_from_the_index_reads_as_the_index_gave_it() {
+        let (_env, _root) = crate::paths::testenv::folders("share-sources-moved");
+        let pilot = acme_pilot();
+        let md = "# Pilot dates\n\n### 2026-11-10 09:12 Jane Doe\n\n- The pilot moves to 24 Nov — “moves to the 24th”\n- Rooms are booked\n\n### 2026-11-11 08:00 Kim Ito\n\n- Kim confirms the room\n\n### 2026-11-11 09:30 Jane Doe\n\n- Jane thanks Kim\n";
+        let refs = json!({"kind": "mail", "conversation": "c1", "message": "AAMk-c1-3", "people": ["jane@acme.example", "kim@acme.example"], "url": "https://outlook.example/1", "subjects": ["Pilot dates"], "threads": [{"id": pilot}]});
+        let input = crate::brain::store::Input {
+            source: "mail/abc".into(), kind: "mail".into(), title: "Pilot dates".into(), event_date: Some("2026-11-11".into()), md: md.into(), refs,
+            link: Box::new(|c| format!("https://outlook.example/msg-{}", c.ord)), speaker: Box::new(|c| c.title.splitn(3, ' ').nth(2).map(str::to_owned)),
+        };
+        let store = crate::brain::store_path();
+        crate::brain::store::sync_kinds(&store, vec![input], None, &[]).unwrap();
+        // The old reading: the document's row and its sections in order.
+        let c = crate::brain::store::open(&store).unwrap();
+        let (title, date): (String, String) = c.query_row("SELECT title, event_date FROM documents WHERE source = 'mail/abc'", [], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
+        let rows: Vec<(String, String, Option<String>, String)> = c
+            .prepare("SELECT title, text, speaker, link FROM chunks WHERE source = 'mail/abc' ORDER BY ord").unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))).unwrap().map(|x| x.unwrap()).collect();
+        drop(c);
+        let text = rows.iter().map(|r| r.1.clone()).collect::<Vec<_>>().join("\n\n");
+        let messages: Vec<Value> = rows.iter().map(|(t, x, sp, l)| json!({"from": sp, "at": &t[..16], "text": x.trim(), "link": l})).collect();
+        let mut from: Vec<String> = vec![];
+        for (_, _, sp, _) in &rows {
+            if let Some(s) = sp.clone().filter(|s| !from.contains(s)) {
+                from.push(s);
+            }
+        }
+        crate::brain::facts::migrate().unwrap().unwrap();
+        let s = source("mail:mail/abc", &json!({})).unwrap();
+        assert_eq!((s["title"].as_str(), s["at"].as_str(), s["date"].as_str()), (Some(title.as_str()), Some(date.as_str()), Some(date.as_str())));
+        assert_eq!(s["text"], json!(text));
+        assert_eq!(s["messages"], json!(messages));
+        assert_eq!(s["from"], json!(from));
+        assert_eq!((s["url"].as_str(), s["m365_id"].as_str(), s["conversation_id"].as_str()), (Some("https://outlook.example/1"), Some("AAMk-c1-3"), Some("c1")));
+        assert_eq!(s["threads"][0]["id"], json!(pilot));
+        assert_eq!(crate::links::mail_url("mail/abc").as_deref(), Some("https://outlook.example/1"));
     }
 
     #[cfg(feature = "brain")]

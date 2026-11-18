@@ -5,7 +5,17 @@
 /** The plugins' tabs of Knowledge (its notes, its graph), before Recall's. */
 const knowledgeTabs = () => (Plugins.slots['knowledge.tab'] || []).map((x) => ({ ...x, tab: `${x.plugin}:${x.id}` }))
 const BRAIN_TABS = [['sources', 'Sources'], ['people', 'People']]
-const brainQuery = () => { const [k, v] = (S.br.scope || '').split(':'); return k && v ? `?${k}=${encodeURIComponent(v)}` : '' }
+/** The Recall view's scope as a query; Settings → Vocabulary's dictionary is never scoped. */
+const brainQuery = () => { if (S.view !== 'brain') return ''; const [k, v] = (S.br.scope || '').split(':'); return k && v ? `?${k}=${encodeURIComponent(v)}` : '' }
+/** The dictionary's own data for Settings → Vocabulary (`/api/brain/dictionary`: unscoped, with Intake on or off);
+ *  the Recall view keeps its overview. */
+const dictData = () => S.view === 'brain' ? S.br.data : S.br.dictData
+async function loadDict() {
+  const before = S.br.dictData ? (S.br.dictData.taxonomy || {}).version : null
+  try { const d = await get('api/brain/dictionary'); S.br.dictData = d; noteEditErrors(d) } catch { /* app restarting */ }
+  if (S.br.dictData && before !== (S.br.dictData.taxonomy || {}).version && S.br.dict) { S.br.dict.head = null; S.br.dict.lists = {} }
+  if (S.br.node) await loadBrainNode()
+}
 async function loadBrain() {
   const q = brainQuery()
   const before = S.br.data ? `${S.br.data.q}|${(S.br.data.taxonomy || {}).version}|${(S.br.data.status || {}).chunks}` : ''
@@ -67,7 +77,7 @@ function brainView() {
  *  other names and spellings lists the matches across groups. A click opens it to edit. Tens of thousands of
  *  terms: the app sends a page at a time (`browse::terms`). */
 function termsState() {
-  const key = brainQuery() + '|' + ((S.br.data || {}).taxonomy || {}).version
+  const key = brainQuery() + '|' + ((dictData() || {}).taxonomy || {}).version
   if (!S.br.dict || S.br.dict.key !== key) { termById.clear(); S.br.dict = { key, head: null, open: S.br.dict ? S.br.dict.open : new Set(), lists: {}, letters: S.br.dict ? S.br.dict.letters : {}, q: S.br.dict ? S.br.dict.q : '' } }
   return S.br.dict
 }
@@ -179,7 +189,7 @@ document.addEventListener('input', (e) => {
 function brItem(id) {
   const nd = S.br.nodeData
   if (nd && nd.id === id && nd.item) return nd.item
-  const tx = (S.br.data || {}).taxonomy || {}
+  const tx = (dictData() || {}).taxonomy || {}
   return (tx.topics || []).find((t) => t.id === id) || termById.get(id) || (tx.terms || []).find((t) => t.id === id) || null
 }
 /** A Brain section's source outside Echo (a Teams post, a mail): opened in its own app. */

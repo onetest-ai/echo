@@ -17,6 +17,8 @@ pub fn fingerprint() -> String {
     let stamp = |p: &std::path::Path| std::fs::metadata(p).map(|m| format!("{}:{:?};", m.len(), m.modified().ok())).unwrap_or_default();
     let db = super::store_path();
     let mut out = store::changed_stamp(&db);
+    // Intake on or off: the dictionary's counts come from the index only with it on (`taxonomy::view_in`).
+    out += if super::enabled() { "on;" } else { "off;" };
     // The taxonomy's folder: a new version, a dismissed move or a snoozed rebuild is written by a rename into it.
     out += &stamp(&db.with_file_name("taxonomy"));
     // The threads (a stage closes one: archived) and the clients.

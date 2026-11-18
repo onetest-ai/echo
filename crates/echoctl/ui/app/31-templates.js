@@ -415,11 +415,11 @@ PANEL_VIEWS.push({ id: 'vocabulary', label: 'Vocabulary', icon: BOOK, area: 'rig
 /** Settings → Vocabulary: the terms the panel shows, and the dictionary (`brainTerms`; a term opens to edit in the
  *  panel) — whether Intake is on or off: the dictionary hints transcription either way. */
 function vocabularySettings() {
-  const d = S.br.data
+  const d = S.br.dictData
   let dict
   if (!d) {
     // Read once, again at most every 5 s while it doesn't come (the app restarting).
-    if (!S.br.dictAt || Date.now() - S.br.dictAt > 5000) { S.br.dictAt = Date.now(); loadBrain().then(render) }
+    if (!S.br.dictAt || Date.now() - S.br.dictAt > 5000) { S.br.dictAt = Date.now(); loadDict().then(render) }
     dict = `<div class="skeleton" style="padding:20px">${'<i></i>'.repeat(3)}</div>`
   } else dict = d.error ? `<p class="error">${esc(d.error)}</p>` : brainTerms(d.taxonomy || {})
   return `<h2>Vocabulary</h2>${setCard('', [vocabularyPanel()])}<section class="set-sec"><h3>Dictionary</h3>${dict}</section>`
@@ -461,7 +461,7 @@ function knowledgeSettings() {
 function brainSettings(st) {
   const b = st.brain
   const head = '<h2>Intake</h2><p class="set-lead">What Echo reads from your threads\' mail and Teams channels: only you, colleagues and the senders you trust, kept as facts checked word for word against each message — never the message itself.</p>'
-  if (!b) return head + '<p class="set-sub">This build of Echo has no Intake.</p>'
+  if (!b) return head + knowledgeSettings() + '<p class="set-sub">This build of Echo has no Intake.</p>'
   loadSourceState()
   const src = m365.state || {}
   const who = brainSenders()
@@ -489,7 +489,7 @@ function brainSettings(st) {
     usageRow,
     setRow('What it holds', held, ''),
   ]) + setCard('Meaning (embeddings)', [
-    setRow('Server', 'Echo runs no model: it asks yours. Ollama (e.g. http://localhost:11434) or any OpenAI-compatible server. Without one, Recall searches by words only.', `${api}${field('brain_endpoint', s.endpoint, 'http://localhost:11434', 'Server address')}`),
+    setRow('Server', 'Echo runs no model: it asks yours. Ollama (e.g. http://localhost:11434) or any OpenAI-compatible server. Without one, search goes by words only.', `${api}${field('brain_endpoint', s.endpoint, 'http://localhost:11434', 'Server address')}`),
     setRow('Model', 'An embedding model that knows your languages (e.g. qwen3-embedding, bge-m3). Another model embeds everything again.', field('brain_model', s.model, 'qwen3-embedding', 'Model')),
     setRow('Key', 'Only for a server that wants one (sent as a bearer token; kept on this computer).', field('brain_key', '', s.key ? '•••• set — type to replace' : 'none', 'Key', 'password')),
   ]) + documentsSettings(b, s, field) + `<p class="set-foot">Sources come from your threads — their calls, Teams channels, mail and folders, set on each thread's Profile. Stored in <code>${esc(b.path || 'brain/')}</code>.</p>`

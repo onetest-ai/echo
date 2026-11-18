@@ -112,7 +112,7 @@ document.addEventListener('keydown', (e) => {
 /** A topic or term in the right panel: its description, where it comes up, the user's review
  *  (rename, merge, move, remove; a term's kind, variants, pins) and its latest sections. */
 function brainNodePanel() {
-  const d = S.br.data, id = S.br.node, tx = (d && d.taxonomy) || {}
+  const d = dictData(), id = S.br.node, tx = (d && d.taxonomy) || {}
   const x = brItem(id)
   if (!x) return id && !(S.br.nodeData && S.br.nodeData.id === id) ? '<div class="skeleton"><i></i><i></i><i></i></div>' : '<div class="wp-empty">Pick a topic or a term.</div>'
   const isTerm = !!x.name, name = x.name || x.label, layer = x.layer
@@ -210,7 +210,7 @@ PANEL_VIEWS.push({ id: 'brain-node', label: 'Topic', icon: ICON('<circle cx="12"
 function noteEditErrors(d) { const n = ((d || {}).edit_error || {}).n || 0; if (n > (S.br.errSeen || 0)) S.br.errSeen = n }
 /** The user's edit: the app makes the new version in the background (a large Brain takes seconds); the page
  *  reads the Brain again until it is done, and says why when it couldn't be done. */
-function brainEdit(body, reload = loadBrain, data = () => S.br.data) {
+function brainEdit(body, reload = S.view === 'brain' ? loadBrain : loadDict, data = dictData) {
   const seen = S.br.errSeen || 0
   send({ cmd: 'brain_taxonomy', body })
   S.br.edit = null
@@ -251,7 +251,7 @@ document.addEventListener('click', (e) => {
     return brainEdit({ layer: x.layer, term: true, name: x.name, op: 'merge', into, into_layer })
   }
   if (d.brDo) {
-    const tx = (S.br.data || {}).taxonomy || {}
+    const tx = (dictData() || {}).taxonomy || {}
     const x = brItem(S.br.node)
     if (!x) return
     const base = { layer: x.layer, term: !!x.name, [x.name ? 'name' : 'label']: x.name || x.label }

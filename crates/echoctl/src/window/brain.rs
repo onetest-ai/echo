@@ -58,6 +58,19 @@ pub(super) fn route(path: &str, req: &Request<Vec<u8>>) -> Option<Response<Cow<'
             }
             json_reply(v)
         }
+        // Settings → Vocabulary's dictionary: the whole of it, never a scope, with Intake on or off (its terms a page at
+        // a time, `browse/terms`).
+        "/api/brain/dictionary" => {
+            let mut tx = crate::brain::browse::view(None).unwrap_or_else(|e| json!({ "error": format!("{e:#}") }));
+            let n = tx.get_mut("terms").map(Value::take).and_then(|t| t.as_array().map(Vec::len)).unwrap_or(0);
+            tx["terms_n"] = json!(n);
+            let mut v = json!({ "taxonomy": tx });
+            v["topic_jobs"] = json!(if BRAIN_EDITS.load(std::sync::atomic::Ordering::SeqCst) > 0 { vec!["edit:taxonomy"] } else { vec![] });
+            if let Ok(e) = BRAIN_EDIT_ERROR.lock() {
+                v["edit_error"] = json!({"n": e.0, "text": e.1});
+            }
+            json_reply(v)
+        }
         // The Brain a piece at a time (`brain::browse`): sources grouped and paged, a folder's files, the
         // dictionary by group and letter.
         p if p.starts_with("/api/brain/browse/") => {

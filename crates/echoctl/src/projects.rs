@@ -626,6 +626,20 @@ pub fn list() -> Vec<Project> {
     out
 }
 
+/// Every project, or why not all of them could be read (the folder, or one project's file): what takes data away
+/// trusts only a whole list (`brain::sources`).
+pub fn list_whole() -> Result<Vec<Project>> {
+    let mut out = vec![];
+    for e in fs::read_dir(dir()).with_context(|| format!("reading {}", dir().display()))? {
+        let e = e?;
+        if e.path().join(PROFILE).exists() {
+            out.push(load(&e.file_name().to_string_lossy())?);
+        }
+    }
+    out.sort_by(|a, b| (a.client.as_deref().unwrap_or("~"), a.name.to_lowercase()).cmp(&(b.client.as_deref().unwrap_or("~"), b.name.to_lowercase())));
+    Ok(out)
+}
+
 pub fn brief(id: &str) -> Result<String> {
     let p = dir().join(id).join(BRIEF);
     profile_path(id)?;
@@ -1683,7 +1697,9 @@ mod tests {
         let scope = crate::brain::taxonomy::LearnedScope { subjects: vec!["aurora weekly".into()], people: vec![], calls: vec![] };
         crate::brain::taxonomy::learn(&[crate::brain::taxonomy::Learn { term: "Stargate".into(), layer: crate::brain::taxonomy::SHARED.into(), threads: vec![p.id.clone()], scope }], "test").unwrap();
         assert!(!crate::brain::enabled(), "Intake is off");
+        let _ = fs::remove_file(crate::brain::store_path());
         assert_eq!(terms_for_meeting(&meeting("Aurora weekly", &[])), vec!["Stargate"]);
+        assert!(!crate::brain::store_path().exists(), "the hint never opens or makes the index with Intake off");
     }
 
     #[test]

@@ -135,7 +135,7 @@ pub fn sync() -> Result<store::Report> {
     anyhow::ensure!(enabled(), "Intake is off (Settings → Intake)");
     let _one = crate::app::FileLock::try_take(&lock)?.ok_or_else(|| anyhow::anyhow!("the Brain is being updated already"))?;
     // Intake's facts out of the index into their files, once, before a sync writes any.
-    if let Err(e) = facts::migrate() {
+    if let Err(e) = facts::migrate_locked() {
         eprintln!("intake: {e:#}");
     }
     let emb = embedder();

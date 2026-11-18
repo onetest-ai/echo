@@ -1,7 +1,8 @@
 //! Intake's facts: what the quarantine reader (`digest`) kept of a mail conversation or a channel post, one JSON file
 //! per source under `<home>/recall/intake/facts/<source>.json` (`mail/<short>`, `channel/<short>/<post>`). A message
 //! past the reading window can't be read again, so these files are the only copy: the index (`store`) is fed from
-//! them and stays derived. Before a sync changes any of them the folder is copied to `facts.bak/` (one rolling copy).
+//! them and stays derived. Before a sync changes any of them the folder is copied to a dated generation under
+//! `facts.bak/` (`backup`). A source read again is merged into its file, never put in its place (`merge`).
 //! The facts the index held before these files are moved here once (`migrate`).
 
 use super::{chunk, digest, store};
@@ -15,8 +16,14 @@ use std::path::{Path, PathBuf};
 /// The file format; a change to it stays compatible (fields only added, with a default).
 pub const VERSION: u32 = 1;
 
-/// One message's facts: its heading (`YYYY-MM-DD HH:MM <who>`), its author, its time, its link in Outlook or Teams.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+fn is_false(b: &bool) -> bool {
+    !*b
+}
+
+/// One message's facts: its heading (`YYYY-MM-DD HH:MM <who>`), its author, its time (RFC 3339), its link in Outlook
+/// or Teams, its sender as Who may speak names them (a mail's address, a Teams author's id), whether it was read
+/// unauthenticated ("Read anyway"), and whether its facts are the index's text as it was (`raw`, from the move).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Section {
     pub head: String,
     #[serde(default)]
@@ -27,6 +34,12 @@ pub struct Section {
     pub link: String,
     #[serde(default)]
     pub facts: Vec<digest::Fact>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sender: Option<String>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub unverified: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub raw: bool,
 }
 
 /// A source's facts: what `share` and `links` serve and what the index is fed.
@@ -48,6 +61,9 @@ pub struct Facts {
     /// Every thread it is under is closed (its archive).
     #[serde(default)]
     pub archived: bool,
+    /// Moved from the index as its text was, its facts not given back exactly (`migrate`).
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub migrated_raw: bool,
 }
 
 fn version() -> u32 {
@@ -69,16 +85,18 @@ pub struct Piece {
 
 impl Facts {
     pub fn new(source: String, kind: &str, title: String, event_date: Option<String>, refs: Value, sections: Vec<Section>) -> Facts {
-        Facts { version: VERSION, source, kind: kind.into(), title, event_date, refs, sections, archived: false }
+        Facts { version: VERSION, source, kind: kind.into(), title, event_date, refs, sections, archived: false, migrated_raw: false }
     }
 
-    /// The Markdown the index reads: the title, then a section per message with its facts (and their checked quotes).
+    /// The Markdown the index reads: the title, then a section per message with its facts (and their checked quotes);
+    /// a raw section's text as it was.
     pub fn md(&self) -> String {
         let mut md = format!("# {}\n\n", self.title);
         for s in self.sections.iter().filter(|s| !s.facts.is_empty()) {
             md.push_str(&format!("### {}\n\n", s.head));
             for f in &s.facts {
                 match &f.quote {
+                    _ if s.raw => md.push_str(&format!("{}\n", f.text)),
                     Some(q) => md.push_str(&format!("- {} — “{q}”\n", f.text)),
                     None => md.push_str(&format!("- {}\n", f.text)),
                 }
@@ -86,6 +104,20 @@ impl Facts {
             md.push('\n');
         }
         md
+    }
+
+    /// Take out the sections of a sender the user ignored, or only those read unauthenticated when they kept that out
+    /// (a section from before senders were kept: by its author's name). Whether any went.
+    pub fn drop_sender(&mut self, key: &str, name: &str, only_unverified: bool) -> bool {
+        let n = self.sections.len();
+        self.sections.retain(|s| {
+            let theirs = match &s.sender {
+                Some(k) => k == key,
+                None => !name.is_empty() && s.from.as_deref() == Some(name),
+            };
+            !(theirs && (!only_unverified || s.unverified))
+        });
+        self.sections.len() != n
     }
 
     fn links(&self) -> BTreeMap<String, String> {
@@ -125,6 +157,36 @@ impl Facts {
     }
 }
 
+/// A source read again, merged into what was kept of it: every section kept, one read again (the same message: its
+/// heading and link) replaced, new ones added, in time order — a message the new read lacks (deleted, or past what
+/// Microsoft 365 keeps) never goes. Its title, refs and date are the new read's, its people and subjects both reads'.
+pub fn merge(old: Facts, mut new: Facts) -> Facts {
+    let same = |a: &Section, b: &Section| a.head == b.head && a.link == b.link;
+    let mut sections = old.sections;
+    for s in std::mem::take(&mut new.sections) {
+        match sections.iter_mut().find(|o| same(o, &s)) {
+            Some(o) => *o = s,
+            None => sections.push(s),
+        }
+    }
+    sections.sort_by(|a, b| a.head.get(..16).cmp(&b.head.get(..16)));
+    new.sections = sections;
+    for k in ["people", "subjects"] {
+        let mut all: Vec<Value> = old.refs[k].as_array().cloned().unwrap_or_default();
+        for v in new.refs[k].as_array().cloned().unwrap_or_default() {
+            if !all.contains(&v) {
+                all.push(v);
+            }
+        }
+        if !all.is_empty() {
+            new.refs[k] = json!(all);
+        }
+    }
+    new.event_date = new.event_date.max(old.event_date);
+    new.migrated_raw = old.migrated_raw && new.sections.iter().any(|s| s.raw);
+    new
+}
+
 /// Whether every thread in these refs is closed (and there is one).
 pub fn archived(refs: &Value, closed: &BTreeMap<String, Value>) -> bool {
     let ts: Vec<&str> = refs["threads"].as_array().into_iter().flatten().filter_map(|t| t["id"].as_str()).collect();
@@ -141,7 +203,7 @@ pub fn dir() -> PathBuf {
     intake_dir().join("facts")
 }
 
-/// The rolling copy taken before a sync changes the facts.
+/// Where the generations of the facts are kept (`backup`).
 pub fn backup_dir() -> PathBuf {
     intake_dir().join("facts.bak")
 }
@@ -211,20 +273,66 @@ fn copy_dir(from: &Path, to: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
-/// Copy the facts to `facts.bak/`, replacing the copy before: made whole beside it first, then put in its place.
+/// Generations of the facts kept: the newest days' (and always the fullest one).
+const GENERATIONS: usize = 7;
+
+fn count_files(d: &Path) -> usize {
+    let mut v = vec![];
+    files(d, &mut v);
+    v.len()
+}
+
+/// The generations under `facts.bak/`, oldest first: `YYYY-MM-DD`, and `YYYY-MM-DD-HHMMSSmmm` for a copy kept beside
+/// its day's (it had less than half its files).
+pub fn generations() -> Vec<String> {
+    let mut out: Vec<String> = std::fs::read_dir(backup_dir())
+        .map(|rd| rd.flatten().filter(|e| e.path().is_dir()).map(|e| e.file_name().to_string_lossy().into_owned()).filter(|n| n.len() >= 10 && n.as_bytes()[0].is_ascii_digit()).collect())
+        .unwrap_or_default();
+    out.sort();
+    out
+}
+
+/// Copy the facts to today's generation under `facts.bak/` (made whole beside it under a name of its own first). A copy
+/// with less than half the files of today's earlier one never takes its place: both are kept. The newest
+/// `GENERATIONS` days are kept, and always the generation with the most files.
 pub fn backup() -> Result<()> {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static N: AtomicU64 = AtomicU64::new(0);
     let from = dir();
     if !from.is_dir() {
         return Ok(());
     }
-    let tmp = intake_dir().join(".facts.bak.tmp");
+    let root = backup_dir();
+    std::fs::create_dir_all(&root)?;
+    let tmp = root.join(format!(".copy.{}.{}.tmp", std::process::id(), N.fetch_add(1, Ordering::Relaxed)));
     let _ = std::fs::remove_dir_all(&tmp);
-    copy_dir(&from, &tmp)?;
-    let to = backup_dir();
-    if to.exists() {
-        std::fs::remove_dir_all(&to)?;
+    if let Err(e) = copy_dir(&from, &tmp) {
+        let _ = std::fs::remove_dir_all(&tmp);
+        return Err(e.into());
     }
+    let n = count_files(&tmp);
+    let now = chrono::Local::now();
+    let day = root.join(now.format("%Y-%m-%d").to_string());
+    let to = if !day.exists() {
+        day
+    } else if n * 2 < count_files(&day) {
+        root.join(format!("{}", now.format("%Y-%m-%d-%H%M%S%3f")))
+    } else {
+        std::fs::remove_dir_all(&day)?;
+        day
+    };
     std::fs::rename(&tmp, &to)?;
+    // Prune: generations of days past the newest GENERATIONS go, but never the fullest one.
+    let gens = generations();
+    let mut days: Vec<&str> = gens.iter().map(|g| &g[..10]).collect();
+    days.dedup();
+    let keep_days: Vec<&str> = days.iter().rev().take(GENERATIONS).copied().collect();
+    let fullest = gens.iter().max_by_key(|g| count_files(&root.join(g))).cloned();
+    for g in &gens {
+        if !keep_days.contains(&&g[..10]) && Some(g) != fullest.as_ref() {
+            let _ = std::fs::remove_dir_all(root.join(g));
+        }
+    }
     Ok(())
 }
 
@@ -297,21 +405,30 @@ fn base_title(t: &str) -> &str {
 /// A document of the index: source, kind, title, date, refs.
 type DocRow = (String, String, Option<String>, Option<String>, Option<String>);
 
-/// Move the mail and channel facts the index (`knowledge.sqlite`) held into fact files, once: a source that has a file
-/// keeps it; every document must then have its file, each written one giving the index's sections again, before it is
-/// marked done (`intake/migrated.json`). The index is only read. `None`: done before, or another process is at it.
+/// Move the mail and channel facts the index (`knowledge.sqlite`) held into fact files, once, never while a sync runs
+/// (it takes the sync's lock, `brain.lock`). `None`: done before, or a sync holds the lock (it moves them itself).
 pub fn migrate() -> Result<Option<Value>> {
+    if intake_dir().join("migrated.json").exists() {
+        return Ok(None);
+    }
+    std::fs::create_dir_all(paths::config_dir())?;
+    let Some(_sync) = crate::app::FileLock::try_take(&paths::config_dir().join("brain.lock"))? else { return Ok(None) };
+    migrate_locked()
+}
+
+/// `migrate`, its caller holding the sync's lock. A source that has a file keeps it. Each document is written from its
+/// facts when they give the index's sections back text for text, else as its sections' text was (`migrated_raw`); one
+/// that can't have a file is listed as skipped, with why. It is marked done (`intake/migrated.json`, with the counts)
+/// once every document is accounted for, so the index is read once. The index is only read.
+pub fn migrate_locked() -> Result<Option<Value>> {
     let marker = intake_dir().join("migrated.json");
     if marker.exists() {
         return Ok(None);
     }
     std::fs::create_dir_all(intake_dir())?;
-    let Some(_one) = crate::app::FileLock::try_take(&intake_dir().join(".migrate.lock"))? else { return Ok(None) };
-    if marker.exists() {
-        return Ok(None);
-    }
     let store = super::store_path();
-    let (mut docs, mut written, mut errors) = (0usize, 0usize, vec![]);
+    let (mut docs, mut written, mut had) = (0usize, 0usize, 0usize);
+    let (mut raw, mut skipped): (Vec<String>, Vec<Value>) = (vec![], vec![]);
     if store.exists() {
         let c = rusqlite::Connection::open_with_flags(&store, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX)?;
         c.busy_timeout(std::time::Duration::from_secs(10))?;
@@ -321,16 +438,20 @@ pub fn migrate() -> Result<Option<Value>> {
             .collect::<Result<_, _>>()?;
         let closed = crate::projects::closed_threads();
         let mut w = Writer::default();
-        let sources: Vec<String> = rows.iter().map(|r| r.0.clone()).collect();
         for (source, kind, title, date, refs) in rows {
             docs += 1;
+            if path_of(&source).is_none() {
+                skipped.push(json!({"source": source, "why": "not a name a file can have"}));
+                continue;
+            }
+            if read(&source).is_some() {
+                had += 1;
+                continue;
+            }
             let chunks: Vec<(String, String, Option<String>, Option<String>)> = c
                 .prepare("SELECT coalesce(title, ''), coalesce(text, ''), speaker, link FROM chunks WHERE source = ?1 ORDER BY ord")?
                 .query_map([&source], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?
                 .collect::<Result<_, _>>()?;
-            if read(&source).is_some() {
-                continue;
-            }
             // A section's parts ("(part n)") back into one.
             let mut sections: Vec<(String, String, Option<String>, String)> = vec![];
             for (t, text, sp, link) in &chunks {
@@ -344,62 +465,80 @@ pub fn migrate() -> Result<Option<Value>> {
                 }
             }
             let refs: Value = refs.and_then(|r| serde_json::from_str(&r).ok()).unwrap_or_else(|| json!({}));
-            let mut f = Facts::new(
-                source.clone(),
-                &kind,
-                title.unwrap_or_default(),
-                date,
-                refs,
+            let make = |raw: bool| -> Vec<Section> {
                 sections
-                    .into_iter()
-                    .map(|(head, text, sp, link)| Section { at: head.get(..16).filter(|a| a.as_bytes().get(4) == Some(&b'-')).unwrap_or("").to_string(), from: sp, link, facts: parse_facts(&text), head })
-                    .collect(),
-            );
+                    .iter()
+                    .map(|(head, text, sp, link)| Section {
+                        at: rfc3339_of(head),
+                        from: sp.clone(),
+                        link: link.clone(),
+                        facts: if raw { vec![digest::Fact { text: text.clone(), quote: None }] } else { parse_facts(text) },
+                        head: head.clone(),
+                        raw,
+                        ..Default::default()
+                    })
+                    .collect()
+            };
+            let mut f = Facts::new(source.clone(), &kind, title.unwrap_or_default(), date, refs, make(false));
             f.archived = archived(&f.refs, &closed);
-            if path_of(&source).is_none() {
-                errors.push(format!("{source}: not a name a file can have"));
-                continue;
-            }
             let again = f.pieces();
-            // Facts that wouldn't give the index's sections back stay only in the index (untouched) until it is fixed.
             if again.len() != chunks.len() || again.iter().zip(&chunks).any(|(p, c)| p.text != c.1) {
-                errors.push(format!("{source}: {} sections in the index, {} from its facts", chunks.len(), again.len()));
-                continue;
+                // Its facts wouldn't give the index's text back: kept as that text, flagged.
+                f.sections = make(true);
+                f.migrated_raw = true;
+                raw.push(source.clone());
             }
-            w.write(&f)?;
-            written += 1;
-        }
-        drop(c);
-        let have = sources.iter().filter(|s| read(s).is_some()).count();
-        if errors.is_empty() && have != docs {
-            errors.push(format!("{have} fact files for {docs} documents"));
+            match w.write(&f) {
+                Ok(()) => written += 1,
+                Err(e) => skipped.push(json!({"source": source, "why": format!("{e:#}")})),
+            }
         }
     }
-    if !errors.is_empty() {
-        bail!("Intake's facts weren't all moved from the index ({} of {docs}): {}", errors.len(), errors.join("; "));
+    anyhow::ensure!(written + had + skipped.len() == docs, "Intake's facts: {written} written, {had} kept, {} skipped of {docs} documents", skipped.len());
+    if !skipped.is_empty() {
+        eprintln!("intake: {} of {docs} documents couldn't be moved into fact files (intake/migrated.json says why)", skipped.len());
     }
-    let report = json!({"at": chrono::Utc::now().to_rfc3339(), "documents": docs, "written": written});
+    let report = json!({"at": chrono::Utc::now().to_rfc3339(), "documents": docs, "written": written, "kept": had, "raw": raw, "skipped": skipped});
     paths::write_atomic(&marker, serde_json::to_string_pretty(&report)?.as_bytes())?;
     Ok(Some(report))
 }
 
+/// A section heading's time as RFC 3339 ("YYYY-MM-DD HH:MM …" is UTC, as the reader wrote it); empty without one.
+fn rfc3339_of(head: &str) -> String {
+    match (head.get(..10), head.get(11..16)) {
+        (Some(d), Some(t)) if d.as_bytes().get(4) == Some(&b'-') && t.as_bytes().get(2) == Some(&b':') => format!("{d}T{t}:00Z"),
+        _ => String::new(),
+    }
+}
+
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeSet;
+
+    fn sec(head: &str, link: &str, fact: &str, sender: &str) -> Section {
+        Section {
+            head: head.into(),
+            from: speaker(head),
+            at: rfc3339_of(head),
+            link: link.into(),
+            facts: vec![digest::Fact { text: fact.into(), quote: None }],
+            sender: Some(sender.into()),
+            ..Default::default()
+        }
+    }
 
     fn sample(source: &str, threads: Value) -> Facts {
+        let mut first = sec("2026-11-10 09:12 Jane Doe", "https://outlook.example/1", "The pilot moves to 24 Nov", "jane@acme.example");
+        first.facts[0].quote = Some("moves to the 24th".into());
         Facts::new(
             source.into(),
             source.split('/').next().unwrap(),
             "Pilot dates".into(),
             Some("2026-11-11".into()),
             json!({"kind": "mail", "conversation": "c1", "message": "AAMk-1", "people": ["jane@acme.example"], "url": "https://outlook.example/1", "subjects": ["Pilot dates"], "threads": threads}),
-            vec![
-                Section { head: "2026-11-10 09:12 Jane Doe".into(), from: Some("Jane Doe".into()), at: "2026-11-10T09:12:00Z".into(), link: "https://outlook.example/1".into(),
-                          facts: vec![digest::Fact { text: "The pilot moves to 24 Nov".into(), quote: Some("moves to the 24th".into()) }] },
-                Section { head: "2026-11-11 08:00 Kim Ito".into(), from: Some("Kim Ito".into()), at: "2026-11-11T08:00:00Z".into(), link: "https://outlook.example/2".into(),
-                          facts: vec![digest::Fact { text: "Kim confirms the room".into(), quote: None }] },
-            ],
+            vec![first, sec("2026-11-11 08:00 Kim Ito", "https://outlook.example/2", "Kim confirms the room", "kim@acme.example")],
         )
     }
 
@@ -423,40 +562,120 @@ mod tests {
         assert_eq!(pieces[0].text, "- The pilot moves to 24 Nov — “moves to the 24th”");
         assert_eq!(pieces[1].link, "https://outlook.example/2");
         // An older file without the newer fields still reads.
-        std::fs::write(path_of("mail/old").unwrap(), r#"{"source": "mail/old", "kind": "mail"}"#).unwrap();
-        assert_eq!(read("mail/old").unwrap().version, VERSION);
+        std::fs::write(path_of("mail/old").unwrap(), r#"{"source": "mail/old", "kind": "mail", "sections": [{"head": "2026-11-01 10:00 Ann"}]}"#).unwrap();
+        let old = read("mail/old").unwrap();
+        assert_eq!((old.version, old.sections[0].sender.clone(), old.sections[0].unverified), (VERSION, None, false));
         // Ids that aren't plain never become paths.
         for bad in ["mail/../x", "mail/.x", "call/x", "mail", "mail/a\\b", "mail/"] {
             assert!(path_of(bad).is_none(), "{bad}");
         }
     }
 
+    fn gen_files(g: &str) -> usize {
+        count_files(&backup_dir().join(g))
+    }
+
     #[test]
-    fn a_change_backs_the_facts_up_once_and_the_copy_rolls() {
+    fn the_backup_keeps_dated_generations_and_a_shrunk_copy_never_replaces_a_fuller_one() {
         let (_env, _root) = crate::paths::testenv::folders("intake-facts-backup");
-        let f = sample("mail/one", json!([]));
         let mut w = Writer::default();
-        w.write(&f).unwrap();
-        assert!(!backup_dir().exists(), "nothing to back up before the first file");
-        // The next sync: its first change copies the facts as they were, once.
+        for i in 0..4 {
+            w.write(&sample(&format!("mail/m{i}"), json!([]))).unwrap();
+        }
+        assert!(generations().is_empty(), "nothing to back up before the first file");
+        // The next sync: its first change copies the facts as they were, once, into today's generation.
         let mut w = Writer::default();
-        let mut g = f.clone();
+        let mut g = read("mail/m0").unwrap();
         g.title = "Pilot dates moved".into();
         w.write(&g).unwrap();
-        let before: Facts = serde_json::from_slice(&std::fs::read(backup_dir().join("mail/one.json")).unwrap()).unwrap();
+        let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+        assert_eq!(generations(), vec![today.clone()]);
+        assert_eq!(gen_files(&today), 4);
+        let before: Facts = serde_json::from_slice(&std::fs::read(backup_dir().join(&today).join("mail/m0.json")).unwrap()).unwrap();
         assert_eq!(before.title, "Pilot dates");
-        w.write(&sample("mail/two", json!([]))).unwrap();
-        assert!(!backup_dir().join("mail/two.json").exists(), "backed up once a sync, before its first change");
+        w.write(&sample("mail/m4", json!([]))).unwrap();
+        assert_eq!(gen_files(&today), 4, "backed up once a sync, before its first change");
         // Nothing changed: no new copy.
         let mut w = Writer::default();
         w.write(&g).unwrap();
-        let still: Facts = serde_json::from_slice(&std::fs::read(backup_dir().join("mail/one.json")).unwrap()).unwrap();
-        assert_eq!(still.title, "Pilot dates");
-        // A removal backs up too: the copy rolls to what the folder held.
-        assert!(w.remove("mail/two").unwrap());
-        assert!(backup_dir().join("mail/two.json").exists() && read("mail/two").is_none());
-        assert!(!w.remove("mail/two").unwrap());
-        assert!(!intake_dir().join(".facts.bak.tmp").exists());
+        assert_eq!(gen_files(&today), 4);
+        // A later sync replaces today's copy with the folder as it is now (5 files).
+        assert!(w.remove("mail/m4").unwrap());
+        assert_eq!(gen_files(&today), 5);
+        // The facts wiped (a bug, a bad list): the copy of 1 file is kept beside today's, never in its place.
+        let mut w = Writer::default();
+        for i in 0..3 {
+            w.remove(&format!("mail/m{i}")).unwrap();
+        }
+        let mut w = Writer::default();
+        w.write(&sample("mail/m9", json!([]))).unwrap();
+        let gens = generations();
+        assert_eq!(gens.len(), 2, "{gens:?}");
+        assert_eq!(gen_files(&today), 4, "the fuller copy stays");
+        assert!(gens[1].starts_with(&today) && gen_files(&gens[1]) == 1);
+        // Older days past seven go, but never the fullest generation.
+        for d in 1..=9 {
+            let day = (chrono::Local::now() - chrono::Duration::days(d)).format("%Y-%m-%d").to_string();
+            std::fs::create_dir_all(backup_dir().join(&day).join("mail")).unwrap();
+            if d == 9 {
+                for i in 0..20 {
+                    std::fs::write(backup_dir().join(&day).join(format!("mail/x{i}.json")), "{}").unwrap();
+                }
+            }
+        }
+        let fullest = (chrono::Local::now() - chrono::Duration::days(9)).format("%Y-%m-%d").to_string();
+        let mut w = Writer::default();
+        w.write(&sample("mail/m10", json!([]))).unwrap();
+        let gens = generations();
+        let days: BTreeSet<&str> = gens.iter().map(|g| &g[..10]).collect();
+        assert_eq!(days.len(), 8, "seven days and the fullest: {gens:?}");
+        assert!(gens.contains(&fullest));
+        assert!(!std::fs::read_dir(backup_dir()).unwrap().flatten().any(|e| e.file_name().to_string_lossy().ends_with(".tmp")));
+    }
+
+    #[test]
+    fn a_source_read_again_keeps_every_section_the_new_read_lacks() {
+        let old = sample("mail/m", json!([{"id": "acme-pilot"}]));
+        // The new read lacks Jane's message (deleted, or past what Microsoft 365 keeps), says Kim's again in other
+        // words, and brings a new one.
+        let mut new = sample("mail/m", json!([{"id": "acme-pilot"}, {"id": "acme-ops"}]));
+        new.title = "Pilot dates and rooms".into();
+        new.event_date = Some("2026-11-12".into());
+        new.refs["people"] = json!(["kim@acme.example", "lee@acme.example"]);
+        new.sections = vec![
+            sec("2026-11-11 08:00 Kim Ito", "https://outlook.example/2", "Kim confirms room 4", "kim@acme.example"),
+            sec("2026-11-12 10:00 Lee Park", "https://outlook.example/3", "Lee books lunch", "lee@acme.example"),
+        ];
+        let m = merge(old, new);
+        assert_eq!(m.sections.iter().map(|s| s.head.as_str()).collect::<Vec<_>>(), ["2026-11-10 09:12 Jane Doe", "2026-11-11 08:00 Kim Ito", "2026-11-12 10:00 Lee Park"], "kept, in time order");
+        assert_eq!(m.sections[0].facts[0].text, "The pilot moves to 24 Nov", "the section the new read lacks stays");
+        assert_eq!(m.sections[1].facts[0].text, "Kim confirms room 4", "the same message read again is replaced");
+        assert_eq!((m.title.as_str(), m.event_date.as_deref()), ("Pilot dates and rooms", Some("2026-11-12")));
+        assert_eq!(m.refs["people"], json!(["jane@acme.example", "kim@acme.example", "lee@acme.example"]));
+        assert_eq!(m.refs["threads"].as_array().unwrap().len(), 2);
+        // A date never goes back.
+        let mut older = sample("mail/m", json!([]));
+        older.event_date = Some("2026-01-01".into());
+        assert_eq!(merge(m.clone(), older).event_date.as_deref(), Some("2026-11-12"));
+    }
+
+    #[test]
+    fn ignoring_a_sender_takes_out_only_their_sections_and_keep_out_only_their_unauthenticated_ones() {
+        let mut f = sample("mail/m", json!([]));
+        let mut unver = sec("2026-11-12 07:00 Kim Ito", "https://outlook.example/4", "Kim forwards a digest", "kim@acme.example");
+        unver.unverified = true;
+        f.sections.push(unver);
+        // From before senders were kept: by the author's name.
+        let mut old = sec("2026-11-09 07:00 Kim Ito", "https://outlook.example/0", "Kim says hello", "x");
+        old.sender = None;
+        f.sections.insert(0, old);
+        let mut keep_out = f.clone();
+        assert!(keep_out.drop_sender("kim@acme.example", "Kim Ito", true));
+        assert_eq!(keep_out.sections.len(), 3, "only the unauthenticated one: {:?}", keep_out.sections);
+        assert!(!keep_out.sections.iter().any(|s| s.unverified));
+        assert!(f.drop_sender("kim@acme.example", "Kim Ito", false));
+        assert_eq!(f.sections.iter().map(|s| s.from.as_deref().unwrap()).collect::<Vec<_>>(), ["Jane Doe"], "Jane's stays");
+        assert!(!f.drop_sender("nobody@acme.example", "Nobody", false));
     }
 
     /// A made-up index with two mails (one of a long section split in parts), a post and a call.
@@ -489,7 +708,7 @@ mod tests {
         let store = super::super::store_path();
         let before = std::fs::read(&store).unwrap();
         let r = migrate().unwrap().unwrap();
-        assert_eq!((r["documents"].as_u64(), r["written"].as_u64()), (Some(3), Some(3)));
+        assert_eq!((r["documents"].as_u64(), r["written"].as_u64(), r["raw"].as_array().unwrap().len()), (Some(3), Some(3), 0));
         let all = all();
         assert_eq!(all.iter().map(|f| f.source.as_str()).collect::<Vec<_>>(), ["channel/cccc/17000", "mail/aaaa", "mail/bbbb"], "mail and posts only");
         // Each file gives the index's sections back, text for text.
@@ -501,7 +720,7 @@ mod tests {
         let a = &all[1];
         assert_eq!(a.sections[0].facts[0], digest::Fact { text: "The pilot moves to 24 Nov".into(), quote: Some("moves to the 24th".into()) });
         assert_eq!(a.sections[0].facts[1].text, "Line one\ncontinued");
-        assert_eq!((a.sections[0].from.as_deref(), a.sections[0].at.as_str(), a.sections[0].link.as_str()), (Some("Jane Doe"), "2026-11-10 09:12", "https://outlook.example/0"));
+        assert_eq!((a.sections[0].from.as_deref(), a.sections[0].at.as_str(), a.sections[0].link.as_str()), (Some("Jane Doe"), "2026-11-10T09:12:00Z", "https://outlook.example/0"));
         assert_eq!(a.refs["threads"][0]["id"], "acme-pilot");
         assert_eq!(all[2].sections.len(), 1, "a section split in parts is one again");
         assert_eq!(std::fs::read(&store).unwrap(), before, "the index is only read");
@@ -513,20 +732,39 @@ mod tests {
         assert!(migrate().unwrap().is_none());
         std::fs::remove_file(intake_dir().join("migrated.json")).unwrap();
         let again = migrate().unwrap().unwrap();
-        assert_eq!((again["documents"].as_u64(), again["written"].as_u64()), (Some(3), Some(0)), "idempotent: what has a file keeps it");
+        assert_eq!((again["documents"].as_u64(), again["written"].as_u64(), again["kept"].as_u64()), (Some(3), Some(0), Some(3)), "idempotent: what has a file keeps it");
         assert_eq!(read("mail/aaaa").unwrap().title, "Changed since");
     }
 
     #[test]
-    fn a_move_that_cant_give_the_sections_back_isnt_marked_done() {
-        let (_env, _root) = crate::paths::testenv::folders("intake-facts-migrate-bad");
+    fn a_document_whose_facts_cant_give_its_text_back_is_moved_as_its_text_and_the_move_completes() {
+        let (_env, _root) = crate::paths::testenv::folders("intake-facts-migrate-raw");
         old_index();
-        // A section's text the facts can't give back (rows changed by hand): the move says so and runs again next time.
         let c = store::open(&super::super::store_path()).unwrap();
-        c.execute("INSERT INTO chunks(id, source, ord, title, text) VALUES (1, 'mail/aaaa', 9, '', '')", []).unwrap();
+        // A section whose text isn't the reader's lines (written by hand), and a document no file can be named for.
+        c.execute("UPDATE chunks SET text = 'A note\n\nwith a blank line' WHERE source = 'channel/cccc/17000'", []).unwrap();
+        c.execute("INSERT INTO documents(source, kind, title) VALUES ('mail/../evil', 'mail', 'x')", []).unwrap();
         drop(c);
-        assert!(migrate().is_err());
-        assert!(!intake_dir().join("migrated.json").exists());
-        assert!(read("mail/aaaa").is_none() && read("mail/bbbb").is_some(), "only what gives its sections back gets a file");
+        let r = migrate().unwrap().unwrap();
+        assert_eq!((r["documents"].as_u64(), r["written"].as_u64()), (Some(4), Some(3)));
+        assert_eq!(r["raw"], json!(["channel/cccc/17000"]));
+        assert_eq!(r["skipped"][0]["source"], "mail/../evil");
+        let post = read("channel/cccc/17000").unwrap();
+        assert!(post.migrated_raw && post.sections[0].raw);
+        assert_eq!(post.pieces()[0].text, "A note\n\nwith a blank line", "its text as the index had it");
+        assert!(intake_dir().join("migrated.json").exists(), "done: the index isn't scanned at every sync");
+    }
+
+    #[test]
+    fn the_move_and_a_sync_never_run_together() {
+        let (_env, _root) = crate::paths::testenv::folders("intake-facts-migrate-lock");
+        old_index();
+        std::fs::create_dir_all(crate::paths::config_dir()).unwrap();
+        // A sync holds its lock: the move waits for it (the sync moves them itself, `migrate_locked`).
+        let sync = crate::app::FileLock::try_take(&crate::paths::config_dir().join("brain.lock")).unwrap().unwrap();
+        assert!(migrate().unwrap().is_none());
+        assert!(all().is_empty() && !intake_dir().join("migrated.json").exists());
+        drop(sync);
+        assert_eq!(migrate().unwrap().unwrap()["written"], 3);
     }
 }
