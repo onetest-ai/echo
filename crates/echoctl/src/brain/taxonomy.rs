@@ -642,6 +642,8 @@ mod tests {
             doc("call/2", "globex", "## B\nPilot desk review with the ops team.\n"),
             doc("call/3", "acme", "## C\nThe pilot desk and the (MERCHANT PORTAL) share a login.\n"),
             doc("call/4", "acme", four),
+            // A name only in the minutes' header line, which the full-text index leaves out.
+            doc("call/6", "acme", "## G\n**Who:** [Kim Login](echo://person/kim@acme.example), Sam Rivera\nNothing else was said.\n"),
         ];
         store::sync(&path, docs("## D\nPortal merchants, not the product.\n"), None).unwrap();
         let term = |layer: &str, name: &str, variants: &[&str]| Term { layer: layer.into(), name: name.into(), kind: "product".into(), variants: variants.iter().map(|v| v.to_string()).collect(), ..Default::default() };
@@ -668,7 +670,8 @@ mod tests {
         assert_eq!(full(), [s("call/1", "term__merchant_portal"), s("call/3", "term__merchant_portal"), s("call/3", "term__acme__pilot_desk"), s("call/2", "term__globex__pilot_desk")].into());
         // An edit: a new spelling finds more; only that term is read again.
         edit(&json!({"op": "set", "term": true, "name": "Ledger", "layer": SHARED, "variants": ["login"]})).unwrap();
-        assert!(full().contains(&s("call/3", "term__ledger")));
+        let edited = full();
+        assert!(edited.contains(&s("call/3", "term__ledger")) && edited.contains(&s("call/6", "term__ledger")), "{edited:?}");
         // A merge: the merged term's mentions are the other's now.
         edit(&json!({"op": "merge", "term": true, "name": "Ledger", "layer": SHARED, "into": "Merchant portal"})).unwrap();
         let after = full();

@@ -12,7 +12,7 @@ pub enum BrainCmd {
     Status,
     /// Bring it up to date with the calls (only what changed; vectors for sections without one)
     Sync,
-    /// Search it: keywords in any language and meaning (when an embedding server is set), fused
+    /// Search it: keywords in any language, re-ranked by meaning when an embedding server is set
     Search {
         query: String,
         #[arg(long, default_value_t = 8)]

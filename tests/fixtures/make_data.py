@@ -533,8 +533,8 @@ def talk(lines, gap=8.0, start=5.0, lang="en"):
     return segs
 
 
-def minutes_md(title, summary, decisions=(), actions=(), questions=()):
-    out = f"# {title}\n\n## Summary\n" + "".join(f"- {s}\n" for s in summary)
+def minutes_md(title, summary, decisions=(), actions=(), questions=(), who=None):
+    out = f"# {title}\n\n" + (f"**Who:** {who}\n\n" if who else "") + "## Summary\n" + "".join(f"- {s}\n" for s in summary)
     if decisions:
         out += "\n## Decisions\n" + "".join(f"- {s}\n" for s in decisions)
     if actions:
@@ -1117,7 +1117,8 @@ def build_calls(d, H):
          RENEWAL_NEGOTIATION, ("notes", "none", "tried"), ("call", "one", "echo"), meeting_type={"type": "client", "by": "echo"},
          notes=minutes_md("Acme renewal negotiation", ["Acme wants a cap on the yearly increase [00:21]"], questions=["Will finance approve without the cap? [00:53]"]), thread_by="subject acme-renewal")
     call("vandelay-partner", day(2, 15), 35, "Partner sync with Vandelay", [p["kai"]], LONG_TALK[:6], ("notes", "none", "tried"), ("call", "none", "echo"), exclude=["globex-pilot"],
-         meeting_type={"type": "partner", "by": "echo"}, notes=minutes_md("Partner sync with Vandelay", ["Vandelay takes the identity work [00:05]"]))
+         meeting_type={"type": "partner", "by": "echo"}, notes=minutes_md("Partner sync with Vandelay", ["Vandelay takes the identity work [00:05]"],
+                                                                               who="[Zora Quist](echo://person/zora@vandelay.example), Sam Rivera (Me)"))
     call("hiring-panel", day(4, 9), 50, "Initech hiring panel", [p["priya"], p["tom"], p["lena"]], None, ("notes", "none", "tried"), ("call", "one", "guess"),
          segments=[dict(s, lang=line[2]) if len(line) > 2 else s for s, line in zip(talk([(x[0], x[1]) for x in HIRING_PANEL]), HIRING_PANEL)],
          languages=["en", "uk", "ru"], notes=minutes_md("Initech hiring panel", ["Lena runs the technical interview [00:29]"]), thread_by="subject initech-hiring")
