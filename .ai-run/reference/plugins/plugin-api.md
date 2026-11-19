@@ -632,11 +632,14 @@ No line on the sheet: handing a file over is the user's own act. Evidence: `jsho
 - `ctx.files.read(file, {max})` → its text (1 MB by default, 4 MB at most); `file` a handle or its id.
 - `await ctx.files.text(file, {pages, max})` → `{text, pages, truncated}`: the text of a PDF, Word, PowerPoint or
   spreadsheet file, HTML, Markdown or plain text (a file of another name when its first 8 KB hold no NUL), read by Echo's
-  own readers off the plugin's time slice: no model, no network. `pages` (one page `3` or a range `"2-5"`, 1-based, either
-  end may be left out) picks pages of a PDF or deck; in the answer `pages` is the file's page count, `null` for a file
-  without pages. `truncated` when `max` characters' worth of bytes (1 MB by default, 4 MB at most) cut the text. Refused:
-  a file over 50 MB or taking over 60 s, a file without text, an HTML page with almost none (a script-drawn page), a PDF
-  where PDFium isn't installed. Needs nothing on the sheet. Evidence: `jshost::files::text`
+  own readers: no model, no network. The file is read in a child process of Echo (`echoctl files-text`), killed after
+  60 s, so a reader that hangs or crashes never reaches Echo; one extraction at a time for a plugin, two in all (another
+  is refused with why). `pages` (a whole number `3` or a range `"2-5"` / `"7-"`, 1-based) picks pages of a PDF or deck;
+  a file without pages, a malformed or negative number, or a range starting past the last page is refused; in the answer
+  `pages` is the file's page count, `null` for a file without pages. `truncated` when `max` bytes of text (1 MB by
+  default, 4 MB at most) cut the text. Refused: a file over 50 MB, an Office file that unpacks to over 200 MB or holds
+  over 5000 parts, an old `.xls`, a file without text, an HTML page with almost none (a script-drawn page), a PDF where
+  PDFium isn't installed. Needs nothing on the sheet. Evidence: `jshost::files::text`, `jshost::files::child_main`
 - `await ctx.fs.copyIn(file, root, path, {createNew})` → `{path, size}`: its bytes as they are (50 MB at most) into a folder
   it was given, with `folders.write`, as `ctx.fs.write` (never through a link, never a hidden file but those above); never over a file there — unless `createNew: false` (the default is `true`). Evidence:
   `jshost::files::copy_in`
