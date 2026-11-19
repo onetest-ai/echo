@@ -28,12 +28,12 @@ tags: [calls, search, recall, panel]
 
 | # | Action | Expected Result |
 |---|--------|----------------|
-| 1 | Navigate to `{{base_url}}/#calls`, type `security review`, press Enter | Results as in TC-233; "Acme security review" is open with three moments |
+| 1 | Navigate to `{{base_url}}/#calls`, type `security review`, press Enter | Results as in TC-233; "Acme security review" is a closed row with "1 moment"; click it: its one moment shows |
 | 2 | Click the moment "Our security team wants to review the questionnaire answers…" | It is selected (violet); the right panel opens on a tab "What was said" (search icon, first tab) |
 | 3 | Read the panel | A calls icon and "Acme security review"; "Yesterday, <time>", "40 min" and its people; chips "Acme" and "Acme rollout"; "TRANSCRIPT 0:50"; three turns: 0:35 Sam Rivera ("Agreed. The SSO checklist…"), 0:50 Remote highlighted with "security" and "review" marked, 1:05 Sam Rivera ("Then we keep the pilot…") |
-| 4 | Read the row under the turns | A button "Open at 0:50", then icon buttons "Copy link" (tooltip "Copy the link to this moment (echo://)"), "Ask Claude" and "More"; below, "ALSO IN THIS CALL" with the call's two other moments |
+| 4 | Read the row under the turns | A button "Open at 0:50", then icon buttons "Copy link" (tooltip "Copy the link to this moment (echo://)"), "Ask Claude" and "More"; no "ALSO IN THIS CALL" (the call has no other moment with the words) |
 | 5 | Click "More" | A menu with "Copy what was said" and "Search only Acme"; Escape closes it |
-| 6 | Click a moment under "Also in this call" | The panel shows that moment (its time in "TRANSCRIPT m:ss") |
+| 6 | Open the source row "Acme weekly sync" that has "2 moments" and click its first moment | The panel shows it, and under it "ALSO IN THIS CALL" with the other moment; clicking that one shows it in the panel (its time in "TRANSCRIPT m:ss") |
 | 7 | Click "Open at …" | The call "Acme security review" opens on its Transcript tab with the turn of that time highlighted; the results stay in the list |
 
 ## Expected Final State

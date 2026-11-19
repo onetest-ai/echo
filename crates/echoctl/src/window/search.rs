@@ -121,9 +121,20 @@ fn sources(hits: &[Value], words: &[String]) -> Vec<Value> {
             .and_then(|c| c.query_row("SELECT title, event_date FROM documents WHERE source = ?1", [source], |r| Ok((r.get(0)?, r.get(1)?))).ok())
             .unwrap_or((None, None))
     };
+    // A hit whose own text has none of the words matched through its source's title: no moment of what was said.
+    let said = |h: &Value| words.is_empty() || has_word(h["text"].as_str().unwrap_or(""), words);
     let mut out: Vec<Value> = vec![];
     for h in hits {
         let source = h["source"].as_str().unwrap_or("");
+        if !said(h) {
+            if hits.iter().any(|x| x["source"] == source && said(x)) {
+                continue;
+            }
+            // Only the title matched: a call is listed under its titles; another source keeps its first hit to be found.
+            if kind_of(source) == "call" || out.iter().any(|s| s["source"] == source) {
+                continue;
+            }
+        }
         let at = match out.iter().position(|s| s["source"] == source) {
             Some(i) => i,
             None => {
@@ -431,6 +442,28 @@ mod tests {
         let long_ago = (chrono::Local::now().date_naive() - chrono::Duration::days(200)).to_string();
         let old = get(&format!("/api/search?q=cutover&until={long_ago}"));
         assert_eq!((old["older"].as_bool(), old["sources"].as_array().map(Vec::len)), (Some(true), Some(0)));
+    }
+
+    #[test]
+    fn a_hit_that_matched_only_the_title_is_no_moment_when_the_source_has_a_real_one() {
+        let (_env, _root) = crate::paths::testenv::folders("window-search-title-only");
+        crate::brain::save_settings(&crate::brain::embed::Settings { enabled: Some(true), ..Default::default() }).unwrap();
+        let day = chrono::Local::now().date_naive().to_string();
+        let call_md = "# Acme budget review\n\n## Transcript\n\n### [00:05] Dana Lee\n\n[00:05] Dana Lee (Acme): Welcome all.\n\n### [02:04] Dana Lee\n\n[02:04] Dana Lee (Acme): Understood, a risk.\n\n### [04:03] Dana Lee\n\n[04:03] Dana Lee (Acme): The budget review is Friday.\n\n### [06:10] Dana Lee\n\n[06:10] Dana Lee (Acme): Thanks.\n";
+        let doc = "# Quarterly budget review\n\n### Part one\n\n- Nothing else here\n";
+        let inputs = vec![
+            input("call/2026-01-01_0000", "call", "Acme budget review", &day, call_md, json!({"kind": "call", "call": "c1", "client": "acme"}), None),
+            input("call/2026-01-02_0000", "call", "Globex budget review", &day, &call_md.replace("The budget review is Friday.", "Nothing."), json!({"kind": "call", "call": "c2"}), None),
+            input("doc/n2", "document", "Quarterly budget review", &day, doc, json!({}), None),
+        ];
+        store::sync(&crate::brain::store_path(), inputs, None).unwrap();
+        let v = get("/api/search?q=budget%20review");
+        let by = |t: &str| v["sources"].as_array().unwrap().iter().find(|s| s["title"] == t).cloned();
+        let acme = by("Acme budget review").expect("the call with a real hit");
+        let m = acme["moments"].as_array().unwrap();
+        assert_eq!((m.len(), m[0]["t"].as_f64()), (1, Some(243.0)), "{v}");
+        assert!(by("Globex budget review").is_none(), "a call matched by its title alone is only under the titles: {v}");
+        assert_eq!(by("Quarterly budget review").expect("a document matched by title stays findable")["moments"].as_array().unwrap().len(), 1, "{v}");
     }
 
     #[test]
