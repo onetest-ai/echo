@@ -498,6 +498,17 @@ enum Cmd {
     #[cfg(feature = "transcribe")]
     #[command(hide = true)]
     GpuCheck,
+    /// (internal) The text of a file for a plugin (`ctx.files.text`): the host runs this as a child it can stop
+    /// (`jshost::files::text`); one JSON line on stdout
+    #[cfg(all(feature = "js", feature = "brain"))]
+    #[command(hide = true, name = "files-text")]
+    FilesText {
+        path: std::path::PathBuf,
+        #[arg(long)]
+        pages: Option<String>,
+        #[arg(long, default_value_t = 1 << 20)]
+        max: usize,
+    },
     /// (internal) The minutes run's guard: Claude Code asks it before every tool call of a run
     /// Echo started (`guard.rs`); exit 2 refuses the call
     #[command(hide = true)]
@@ -754,6 +765,8 @@ fn main() -> Result<()> {
         Cmd::Doctor { json, request, probe, open, no_ai } => permissions::doctor(json, request, probe, open.as_deref(), no_ai),
         Cmd::Model { cmd } => cli::app::model(cmd),
         Cmd::Config(args) => cli::app::config(args),
+        #[cfg(all(feature = "js", feature = "brain"))]
+        Cmd::FilesText { path, pages, max } => std::process::exit(jshost::files::child_main(&path, pages.as_deref(), max)),
         Cmd::RunGuard => std::process::exit(guard::command()),
         Cmd::WrapperRun { args } => std::process::exit(ai::wrapper::relay(&args)),
         Cmd::Proof { args } => std::process::exit(ai::wrapper::proof_command(&args)),

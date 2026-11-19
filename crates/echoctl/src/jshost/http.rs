@@ -51,12 +51,13 @@ pub(super) fn admit(id: &str, url: &str, plain_get: bool) -> Result<Reach> {
 }
 
 /// An answer's head as `get_capped` read it: its status, type (`text/html`: lower case, no parameters), charset (as
-/// the server named it) and `Content-Encoding` (lower case, "" for none).
+/// the server named it), `Content-Encoding` (lower case, "" for none) and `Location` (as the server wrote it).
 pub(super) struct Head {
     pub status: u16,
     pub kind: String,
     pub charset: Option<String>,
     pub encoding: String,
+    pub location: Option<String>,
 }
 
 /// A plain GET for `ctx.web` (a page, its pictures, a file): `fetch`'s curl and checks — reached as `reach` let it,
@@ -134,7 +135,7 @@ pub(super) fn get_capped(
                 let mut parts = ctype.split(';');
                 let kind = parts.next().unwrap_or("").trim().to_ascii_lowercase();
                 let charset = parts.filter_map(|p| p.split_once('=')).find(|(k, _)| k.trim().eq_ignore_ascii_case("charset")).map(|(_, v)| v.trim().trim_matches('"').to_string());
-                let h = Head { status, kind, charset, encoding: field("content-encoding").unwrap_or_default().to_ascii_lowercase() };
+                let h = Head { status, kind, charset, encoding: field("content-encoding").unwrap_or_default().to_ascii_lowercase(), location: field("location") };
                 if let Err(e) = accept(&h) {
                     stop(&mut child);
                     return Err(e);

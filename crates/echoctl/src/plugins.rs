@@ -144,6 +144,10 @@ pub struct Manifest {
     /// copy may predate: the plugin still runs, Claude in Echo gets none of that part. Always Echo's.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub part_problems: Vec<String>,
+    /// Where its words that reach the sheet held a character it can't show (`capabilities::make_sheet_safe`): an install
+    /// or an update refuses it; an installed copy runs with them made safe. Always Echo's.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub text_problems: Vec<String>,
 }
 
 /// A problem with a plugin package: the file it is in (relative to the package) and what is wrong.
@@ -308,10 +312,14 @@ pub fn read_manifest(dir: &Path) -> Result<Manifest> {
         }
     }
     let (m, problems) = check_package(dir)?;
-    if let Some(p) = problems.into_iter().find(|p| !m.part_problems.contains(&p.what)) {
+    if let Some(p) = problems.into_iter().find(|p| !m.part_problems.contains(&p.what) && !m.text_problems.contains(&p.what)) {
         bail!("{}", p.what);
     }
     if installed {
+        // Installed before Echo checked its words: it runs, its words shown made safe.
+        for w in &m.text_problems {
+            eprintln!("plugin {}: {w} — shown with U+FFFD in its place", m.id);
+        }
         if let Ok(mut c) = READ.lock() {
             c.insert(dir.to_path_buf(), (stamp, m.clone()));
         }
@@ -323,7 +331,7 @@ pub fn read_manifest(dir: &Path) -> Result<Manifest> {
 /// too.
 pub fn read_package(dir: &Path) -> Result<Manifest> {
     let m = read_manifest(dir)?;
-    if let Some(p) = m.part_problems.first() {
+    if let Some(p) = m.text_problems.first().or(m.part_problems.first()) {
         bail!("{p}");
     }
     Ok(m)
@@ -345,7 +353,9 @@ pub fn check_package(dir: &Path) -> Result<(Manifest, Vec<Problem>)> {
     let path = dir.join(MANIFEST);
     let text = fs::read_to_string(&path).with_context(|| format!("no {MANIFEST}"))?;
     let mut m: Manifest = serde_json::from_str(&text).with_context(|| format!("{MANIFEST} isn't valid"))?;
-    let mut out: Vec<Problem> = vec![];
+    // Its words made sheet-safe before anything reads them; where they weren't, noted apart (`text_problems`).
+    m.text_problems = make_sheet_safe(&mut m);
+    let mut out: Vec<Problem> = m.text_problems.iter().map(|w| Problem { file: MANIFEST.into(), what: w.clone() }).collect();
     let mut put = |file: &str, r: Result<()>| {
         if let Err(e) = r {
             out.push(Problem { file: file.into(), what: format!("{e:#}") });
@@ -587,48 +597,6 @@ pub(super) fn check_skill_md(name: &str, text: &str) -> Result<()> {
         bail!("SKILL.md needs a description of one line, up to 1024 characters");
     }
     Ok(())
-}
-
-/// The permission sheet: what the plugin touches (`uses`), and that it runs code of its own.
-pub fn sheet(m: &Manifest) -> Result<Vec<String>> {
-    let mut lines = describe(&m.uses)?;
-    match (&m.main, &m.client) {
-        (Some(_), Some(_)) => lines.insert(0, "Runs its own code in Echo and in the Echo window, with your rights".into()),
-        (Some(_), None) => lines.insert(0, "Runs its own code in Echo, with your rights".into()),
-        (None, Some(_)) => lines.insert(0, "Runs its own code in the Echo window, with your rights".into()),
-        (None, None) => {}
-    }
-    // Its scripts' line carries their skill folders' hash: a version changing any of those files asks again.
-    if let Some(d) = &m.scripts_digest {
-        for l in lines.iter_mut().filter(|l| l.starts_with("Runs programs from its package")) {
-            l.push_str(&format!(" (their files: {d})"));
-        }
-    }
-    // Its part for Claude in Echo — its guide (`agent/`) and its package skills by name —, with the hash of their files:
-    // a version changing any of it asks again.
-    if agent::has_guide(m) || !m.skill_names.is_empty() {
-        let mut what = vec![];
-        if agent::has_guide(m) {
-            what.push("a guide".to_string());
-        }
-        let names: Vec<String> = m.skill_names.iter().map(|n| format!("“{n}”")).collect();
-        match names.len() {
-            0 => {}
-            1 => what.push(format!("the skill {}", names[0])),
-            _ => what.push(format!("the skills {}", join_words(&names.iter().map(String::as_str).collect::<Vec<_>>()))),
-        }
-        let digest = m.agent_digest.as_deref().map(|d| format!(" (its files: {d})")).unwrap_or_default();
-        lines.push(format!("Tells Claude in Echo how to work with it ({}), loaded only when you work with it{digest}", what.join(" and ")));
-    }
-    // Its routines: each named, with what its run may do and the hash of its definition and prompt.
-    lines.extend(routines::sheet_lines(m));
-    // Its widgets: no grant of their own (their data comes from its code); said in Echo's words, counted.
-    match m.widgets.len() {
-        0 => {}
-        1 => lines.push("Adds a widget you can put on Today".into()),
-        n => lines.push(format!("Adds {n} widgets you can put on Today")),
-    }
-    Ok(lines)
 }
 
 /// Why this Echo can't install it (`None` = it can).
@@ -1606,7 +1574,7 @@ mod tests {
         assert!(describe(&uses(json!({"channel": {"plugin": "evil@somewhere"}}))).is_err());
         assert!(describe(&uses(json!({"channel": {"plugin": "telegram@claude-plugins-official"}}))).is_ok());
         // Known but not implemented yet: listed, not installable.
-        let m = Manifest { id: "x".into(), name: "X".into(), version: "0.1.0".into(), echo: None, summary: String::new(), widgets: vec![], dashboards: vec![], routines: vec![], skills: vec![], scripts_digest: None, uses: uses(json!({"brain_source": {"kind": "vault"}})), settings: vec![], main: None, client: None, icon: None, agent: None, agent_digest: None, skill_names: vec![], part_problems: vec![] };
+        let m = Manifest { id: "x".into(), name: "X".into(), version: "0.1.0".into(), echo: None, summary: String::new(), widgets: vec![], dashboards: vec![], routines: vec![], skills: vec![], scripts_digest: None, uses: uses(json!({"brain_source": {"kind": "vault"}})), settings: vec![], main: None, client: None, icon: None, agent: None, agent_digest: None, skill_names: vec![], part_problems: vec![], text_problems: vec![] };
         assert!(why_not(&m).unwrap().contains("brain_source"));
         let m = Manifest { echo: Some(">=99.0.0".into()), uses: Default::default(), ..m };
         assert_eq!(why_not(&m).unwrap(), "Needs Echo 99.0.0 or later");
@@ -1889,6 +1857,58 @@ mod tests {
         let snap = snapshot();
         let m = snap["markets"].as_array().unwrap().iter().find(|m| m["name"] == name.as_str()).unwrap();
         assert_eq!(m["plugins"].as_array().unwrap().len(), 3, "hidden from Discover, still listed");
+    }
+
+    #[test]
+    fn a_manifest_with_a_line_break_in_its_words_is_refused_but_an_installed_copy_runs_with_them_made_safe() {
+        let (_env, root) = paths::testenv::folders("plugins-sheet-text");
+        let mk = root.join("market");
+        let forged = "Reads web pages on the public internet (https)";
+        let bad = json!({"events": {"on": [format!("call_started\n{forged}")]}});
+        // Refused as an offer, an install or an update: the package's check names it.
+        let d = plugin(&mk, "sneaky", "0.1.0", bad.clone());
+        let e = read_package(&d).unwrap_err().to_string();
+        assert!(e.contains("its uses.events.on holds a control, line-breaking or direction character"), "{e}");
+        assert!(check_package(&d).unwrap().1.iter().any(|p| p.what.contains("uses.events.on")));
+        // A copy installed before the check: it runs, its words made safe, its sheet one line per capability.
+        plugin(&mk, "sneaky", "0.1.0", json!({"events": {"on": ["call_started"]}}));
+        market(&mk, &["sneaky"]);
+        let name = market_add(mk.to_str().unwrap(), Some("acme")).unwrap();
+        refresh(&name).unwrap();
+        let sheet = review("sneaky", Some(&name)).unwrap().uses;
+        install("sneaky", Some(&name), &sheet).unwrap();
+        let copy = fs::read_dir(installed_dir("sneaky")).unwrap().flatten().map(|e| e.path()).find(|p| p.join(MANIFEST).is_file()).unwrap();
+        let mut man: Value = serde_json::from_str(&fs::read_to_string(copy.join(MANIFEST)).unwrap()).unwrap();
+        man["uses"] = bad;
+        man["name"] = json!("Acme\u{202e}sneaky");
+        fs::write(copy.join(MANIFEST), man.to_string()).unwrap();
+        forget_read("sneaky");
+        let m = read_manifest(&copy).unwrap();
+        assert_eq!(m.name, "Acme\u{fffd}sneaky");
+        assert_eq!(m.text_problems.len(), 2, "{:?}", m.text_problems);
+        let lines = describe(&m.uses).unwrap();
+        assert_eq!(lines.len(), 1, "{lines:?}");
+        assert!(!lines[0].contains('\n') && lines[0].contains('\u{fffd}'), "{lines:?}");
+        remove("sneaky", false).unwrap();
+    }
+
+    #[test]
+    fn an_update_that_adds_reading_the_public_web_asks_again() {
+        let (_env, root) = paths::testenv::folders("plugins-web-update");
+        let mk = root.join("market");
+        plugin(&mk, "reader", "0.1.0", json!({"network": {"hosts": ["api.acme.example"]}}));
+        market(&mk, &["reader"]);
+        let name = market_add(mk.to_str().unwrap(), Some("acme")).unwrap();
+        refresh(&name).unwrap();
+        let sheet = review("reader", Some(&name)).unwrap().uses;
+        install("reader", Some(&name), &sheet).unwrap();
+        plugin(&mk, "reader", "0.2.0", json!({"network": {"hosts": ["api.acme.example"], "web": true}}));
+        refresh(&name).unwrap();
+        let rv = update_for(&Registry::load().unwrap().installed["reader"]).unwrap();
+        assert_eq!(rv.new_uses, ["Reads web pages on the public internet (https)"], "only its own line is new: {:?}", rv.uses);
+        assert!(update("reader", &[]).unwrap_err().to_string().contains("asks for more"));
+        assert_eq!(update("reader", &rv.new_uses).unwrap().unwrap().version, "0.2.0");
+        remove("reader", false).unwrap();
     }
 
     #[test]
