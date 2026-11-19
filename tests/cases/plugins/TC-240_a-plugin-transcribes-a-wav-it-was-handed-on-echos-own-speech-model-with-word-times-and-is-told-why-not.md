@@ -3,7 +3,7 @@ id: TC-240
 title: A plugin that asked for speech transcribes a WAV, webm/opus, ogg/opus, m4a or mp3 file it was handed on Echo's own speech model — text, language, segments and, when asked, word times — and is told why not for a file it wasn't handed, a file that isn't audio it reads, a language Echo doesn't know, or while Echo transcribes a call
 priority: high
 type: functional
-requirements: [F-PLUG-150, F-PLUG-151, F-PLUG-152]
+requirements: [F-PLUG-150, F-PLUG-151, F-PLUG-154]
 module: plugins
 run: agent
 platform: any

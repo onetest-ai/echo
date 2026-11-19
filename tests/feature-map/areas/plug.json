@@ -958,7 +958,7 @@
    "axes": []
   },
   {
-   "id": "F-PLUG-152",
+   "id": "F-PLUG-154",
    "feature": "`ctx.speech.transcribe` also takes compressed audio — webm/opus (a window's MediaRecorder), ogg (Opus or Vorbis), m4a/mp4 (AAC) and mp3 — read from the file's content, decoded to 16 kHz mono in pure Rust, with the 60-minute cap counted on the decoded audio as it decodes, and a damaged file refused with a reason; one lock (`plugins/.locks/speech.lock`) keeps the app and `echoctl plugin call` to one file at a time (#841)",
    "priority": "high",
    "check": "agent",
