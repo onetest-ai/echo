@@ -434,16 +434,17 @@ pictures, escaping and limits; `rendered: true`; `bytes` the DOM's HTML; `images
   It registers no IPC, custom scheme or devtools; only the DOM's HTML and the address the page ended at come back.
 - **Its network:** every connection goes through Echo's gate (`web::gate`), an HTTP CONNECT proxy on 127.0.0.1 alive
   for that render only:
-  - it answers only the render's own token, and only CONNECT, to port 443 or 80;
-  - every address of the name must be public (looked up again on each connection), and it connects to the address it
-    checked;
+  - it answers only the render's own token, and only CONNECT, to port 443;
+  - every address of the name must be public and none of this computer's own (looked up again on each connection),
+    and it connects to the address it checked;
   - an IPv6 address written as one is refused, as is any other request (403).
 
   The proxy never fails over to a direct connection. Network.framework sends this computer's own addresses around any
   proxy, so a content rule list blocks every address written as one that is on this computer or the user's network,
   as well as this computer's own interface addresses, `localhost`, `.local` and single-label names, and `file:`.
-  WebRTC is off in every frame (WebKit's own setting, and the constructors deleted at document start). A click on a
-  download link does nothing.
+  WebRTC is off in every frame (WebKit's own setting, and the constructors deleted at document start). A click on any
+  link (`a`, `area`, wherever it is held) does nothing: WebKit connects to a link's host when it is activated,
+  before the rule list applies.
 - **Nothing kept:** the store is new and in memory (cookies, storage, cache and service workers last only for that
   render).
 - **Denied:** downloads, popups, permissions (camera, microphone, location, notifications). The main frame goes only

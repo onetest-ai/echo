@@ -13,8 +13,8 @@
 //! Within `Caps`: connections in all and at once, distinct hosts, bytes both ways; and its time (`until`), when every
 //! tunnel is cut and nothing more is accepted.
 
-// Wired to `echoctl render-page` in the next step of #835.
-#![cfg_attr(not(test), allow(dead_code))]
+// Used by `echoctl render-page` (`web::render`, feature `tray`).
+#![cfg_attr(not(any(test, feature = "tray")), allow(dead_code))]
 
 use std::collections::HashSet;
 use std::io::{ErrorKind, Read, Write};

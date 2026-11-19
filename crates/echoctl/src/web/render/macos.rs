@@ -230,23 +230,13 @@ fn rules(own: &[Ipv4Addr]) -> String {
 
 /// This computer's IPv4 addresses (every interface's).
 fn own_ipv4() -> Vec<Ipv4Addr> {
-    let mut out = vec![];
-    unsafe {
-        let mut list: *mut libc::ifaddrs = std::ptr::null_mut();
-        if libc::getifaddrs(&mut list) != 0 {
-            return out;
-        }
-        let mut at = list;
-        while !at.is_null() {
-            let a = (*at).ifa_addr;
-            if !a.is_null() && i32::from((*a).sa_family) == libc::AF_INET {
-                out.push(Ipv4Addr::from(u32::from_be((*a.cast::<libc::sockaddr_in>()).sin_addr.s_addr)));
-            }
-            at = (*at).ifa_next;
-        }
-        libc::freeifaddrs(list);
-    }
-    out
+    crate::netif::addresses()
+        .into_iter()
+        .filter_map(|a| match a {
+            std::net::IpAddr::V4(v4) => Some(v4),
+            std::net::IpAddr::V6(_) => None,
+        })
+        .collect()
 }
 
 #[cfg(test)]

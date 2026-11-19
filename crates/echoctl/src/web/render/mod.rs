@@ -36,11 +36,17 @@ const SNAPSHOT_JS: &str = "(function(){var n=document.getElementsByTagName('*').
 /// Run at document start in every frame (about:blank and srcdoc ones too), before any of the page's code:
 /// - no WebRTC, WebTransport or notifications (on macOS the webview's own setting switches WebRTC off as well,
 ///   `macos::configuration`);
-/// - a click on a download link does nothing: WebKit connects to a download's host before any handler can refuse it,
-///   outside the rule list (a loopback canary saw it). The listener is the first on the window, capturing, so the
-///   page can't get in before it.
+/// - a link (`a`, `area`) is never followed by a click: on a link's activation WebKit connects to its host before the
+///   navigation is decided, outside the rule list (a loopback canary saw it, for download links and for links in no
+///   document, a fragment or a closed shadow root). Nobody clicks in a hidden render, so every click on a link is
+///   refused: on the window, capturing, first of all listeners; and in `click()` and `dispatchEvent` of a click, for an
+///   element in a link however it is held. The originals are called through `Reflect.apply` taken here, so a page that
+///   replaces `Function.prototype.call` gets nothing.
 const INIT_JS: &str = "(function(){for(var k of ['RTCPeerConnection','webkitRTCPeerConnection','RTCDataChannel','RTCIceCandidate','RTCSessionDescription','WebTransport','Notification']){try{delete window[k]}catch(e){}}\
-window.addEventListener('click',function(e){var t=e.target;for(var n=t;n&&n.nodeType===1;n=n.parentNode){var g=n.localName;if((g==='a'||g==='area')&&n.hasAttribute('download')){e.preventDefault();return}}},true);})();";
+var A=Reflect.apply;function L(n){for(;n;n=n.parentNode||n.host){var g=n.localName;if(g==='a'||g==='area')return true}return false}\
+window.addEventListener('click',function(e){var p=e.composedPath();for(var i=0;i<p.length;i++){var g=p[i].localName;if(g==='a'||g==='area'){e.preventDefault();return}}if(L(e.target))e.preventDefault()},true);\
+var C=HTMLElement.prototype.click;Object.defineProperty(HTMLElement.prototype,'click',{value:function(){if(!L(this))A(C,this,[])},writable:true,configurable:true});\
+var D=EventTarget.prototype.dispatchEvent;Object.defineProperty(EventTarget.prototype,'dispatchEvent',{value:function(e){if(e&&e.type==='click'&&L(this))return false;return A(D,this,[e])},writable:true,configurable:true});})();";
 
 /// What the render needs on the way: its gate, its time.
 pub(crate) struct Render {
@@ -116,7 +122,8 @@ fn net() -> Result<Net> {
     Ok(Net::system())
 }
 
-/// `<host>=http://127.0.0.1:<port>,…`: each host at 93.184.215.<n> (its n-th), which is its port on this computer.
+/// `<host>=http://127.0.0.1:<port>,…`: each host at 93.184.215.<n> (its n-th), which is its port on this computer, on
+/// port 80 too (the fakes speak plain http).
 #[cfg(debug_assertions)]
 fn test_net(map: &str) -> Result<Net> {
     use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpStream};
@@ -130,6 +137,9 @@ fn test_net(map: &str) -> Result<Net> {
     let fake = |n: usize| IpAddr::V4(Ipv4Addr::new(93, 184, 215, n as u8 + 1));
     let names = hosts.clone();
     Ok(Net {
+        own: Arc::new(Vec::new),
+        // The fakes speak plain http: the page is asked for that way (`jshost::web::rendered`).
+        ports: &[80, 443],
         lookup: Arc::new(move |host, _| names.iter().position(|(h, _)| h == host).map(|n| vec![fake(n)]).ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "not mapped in ECHOCTL_TEST_HOSTS"))),
         connect: Arc::new(move |at: SocketAddr, wait| match (0..hosts.len()).find(|n| fake(*n) == at.ip()) {
             Some(n) => TcpStream::connect_timeout(&SocketAddr::from(([127, 0, 0, 1], hosts[n].1)), wait),

@@ -147,6 +147,14 @@ try { const a = document.createElement('a'); a.href = C[0]; a.download = 'x.bin'
 try { const a = document.createElement('a'); a.href = C[0]; a.download = ''; a.click(); a.dispatchEvent(new MouseEvent('click', {bubbles: false})); } catch (e) {}
 try { const m = document.createElement('map'); m.name = 'm'; const ar = document.createElement('area'); ar.href = C[1]; ar.download = 'y'; m.appendChild(ar); document.body.appendChild(m); ar.click(); } catch (e) {}
 try { const a = blank.contentDocument.createElement('a'); a.href = C[0]; a.download = 'z'; blank.contentDocument.body.appendChild(a); a.click(); } catch (e) {}
+// Links followed by a click, held every way (WebKit connects to a link's host on its activation): in the page, in no
+// document, a span inside one, in a fragment, in a closed shadow root.
+try { const a = document.createElement('a'); a.href = C[0]; document.body.appendChild(a); a.click(); } catch (e) {}
+try { const a = document.createElement('a'); a.href = C[1]; a.click(); } catch (e) {}
+try { const a = document.createElement('a'); a.href = C[0]; const s = document.createElement('span'); a.appendChild(s); s.click(); s.dispatchEvent(new MouseEvent('click', {bubbles: true})); } catch (e) {}
+try { const f = document.createDocumentFragment(); const a = document.createElement('a'); a.href = C[0]; f.appendChild(a); a.click(); } catch (e) {}
+try { const h = document.createElement('div'); document.body.appendChild(h); const r = h.attachShadow({mode: 'closed'}); const a = document.createElement('a'); a.href = C[0]; r.appendChild(a); a.click(); } catch (e) {}
+try { Function.prototype.call = function () { try { const a = document.createElement('a'); a.href = C[0]; return this.apply(a, []); } catch (e) {} }; const a = document.createElement('a'); a.href = C[0]; a.click(); } catch (e) {}
 try { alert('hi'); confirm('ok?'); } catch (e) {}
 try { Notification.requestPermission(); } catch (e) {}
 try { navigator.mediaDevices.getUserMedia({audio: true, video: true}).catch(() => {}); } catch (e) {}
