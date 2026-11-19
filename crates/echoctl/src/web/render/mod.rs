@@ -7,10 +7,14 @@
 //! `{html, url, truncated, elements, stats}`; or why not on stderr, with exit 1. The child stops itself at `secs`, and
 //! the host kills its process group soon after (`jshost::render`).
 //!
-//! Per OS: macOS (WKWebView) in `macos.rs`; Windows (WebView2) not yet.
+//! Per OS: macOS (WKWebView) in `macos.rs`; Windows (WebView2) in `windows.rs`.
 
 #[cfg(target_os = "macos")]
 mod macos;
+#[cfg(windows)]
+mod windows;
+#[cfg(windows)]
+pub(crate) use self::windows::profile_dir;
 
 use std::time::{Duration, Instant};
 
@@ -104,11 +108,14 @@ fn run(r: Render) -> Result<()> {
     macos::run(r)
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(windows)]
+fn run(r: Render) -> Result<()> {
+    windows::run(r)
+}
+
+#[cfg(not(any(target_os = "macos", windows)))]
 fn run(_r: Render) -> Result<()> {
-    // Windows (WebView2) is the next step of #835: its browser flags, a temporary InPrivate profile, the request filter
-    // and a Job Object (design § Request interception per OS).
-    bail!("rendering a page isn't on Windows yet")
+    bail!("this system can't render a page")
 }
 
 /// The line printed when the page settled: its HTML (cut to `MAX_HTML`), the address it ended at, and the gate's stats.
@@ -137,7 +144,11 @@ pub(crate) fn answer(snapshot: &str, final_url: &str, gate: &Gate) -> Result<Val
 fn net() -> Result<Net> {
     #[cfg(debug_assertions)]
     if let Some(map) = std::env::var_os("ECHOCTL_TEST_HOSTS") {
-        return test_net(map.to_str().ok_or_else(|| anyhow::anyhow!("ECHOCTL_TEST_HOSTS isn't text"))?);
+        let net = test_net(map.to_str().ok_or_else(|| anyhow::anyhow!("ECHOCTL_TEST_HOSTS isn't text"))?)?;
+        // WebView2 reaches a fake's https through the gate only as TLS: the fake's plain http is put through it.
+        #[cfg(windows)]
+        let net = windows::test_tls(net)?;
+        return Ok(net);
     }
     Ok(Net::system())
 }
