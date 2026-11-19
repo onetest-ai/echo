@@ -42,8 +42,9 @@ scenario(test, 'S-05', 'Start and run a thread for a client: create it, brief, r
     try {
       await clients.goto(route(s.openOn.id, s.openOn.tab))
       await expect(clients.listHeading(t.threads)).toBeVisible()
+      // The list draws its client groups after its heading: wait for them, never read a half-drawn list.
+      await expect.poll(async () => (await clients.listLines()).filter((l) => s.groups.includes(l))).toEqual(s.groups)
       const lines = await clients.listLines()
-      expect(lines.filter((l) => s.groups.includes(l))).toEqual(s.groups)
       for (const g of s.groups) expect([g, under(lines, g, s.groups)]).toEqual([g, s.under[g]])
       await expect(clients.fold(s.own)).toHaveCount(0)
       for (const g of s.groups.filter((x) => x !== s.own)) await expect(clients.fold(g)).toHaveAccessibleName(t.hide)

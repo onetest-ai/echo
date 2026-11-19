@@ -81,7 +81,7 @@ pub(super) fn search(q: &str) -> Value {
         "older": note.contains(crate::brain::retain::OLDER),
         "listed": note.contains("the sources of those days"),
         "titles": titles,
-        "sources": sources(r["hits"].as_array().map(Vec::as_slice).unwrap_or(&[]), &words),
+        "sources": sources(r["hits"].as_array().map(Vec::as_slice).unwrap_or(&[]), &words, &titles),
     })
 }
 
@@ -113,17 +113,32 @@ fn kind_of(source: &str) -> &'static str {
     store::SOURCE_KINDS.iter().find(|k| source.starts_with(k.1)).map_or("document", |k| k.0)
 }
 
-/// The search's hits as their sources, in the order of each source's best hit, each with its hits as moments.
-fn sources(hits: &[Value], words: &[String]) -> Vec<Value> {
+/// The search's hits as their sources, each with its hits as moments, a source placed where its first moment is in the
+/// search's ranking. A hit whose own text has none of the words (it matched through its source's title or a heading) is
+/// a moment only when its source has no other: then its first such hit, unless the source is a call listed under its
+/// titles (`titles`, the calls' rows), found there.
+fn sources(hits: &[Value], words: &[String], titles: &[Value]) -> Vec<Value> {
     let docs = store::open(&crate::brain::store_path()).ok();
     let doc = |source: &str| -> (Option<String>, Option<String>) {
         docs.as_ref()
             .and_then(|c| c.query_row("SELECT title, event_date FROM documents WHERE source = ?1", [source], |r| Ok((r.get(0)?, r.get(1)?))).ok())
             .unwrap_or((None, None))
     };
+    // A hit whose own text has none of the words matched through its source's title: no moment of what was said.
+    let said = |h: &Value| words.is_empty() || has_word(h["text"].as_str().unwrap_or(""), words);
     let mut out: Vec<Value> = vec![];
     for h in hits {
         let source = h["source"].as_str().unwrap_or("");
+        if !said(h) {
+            if hits.iter().any(|x| x["source"] == source && said(x)) {
+                continue;
+            }
+            // Only the title matched: a call listed under the titles is found there; else the source keeps its first hit.
+            let titled = kind_of(source) == "call" && h["refs"]["call"].as_str().is_some_and(|c| titles.iter().any(|t| t["name"] == c));
+            if titled || out.iter().any(|s| s["source"] == source) {
+                continue;
+            }
+        }
         let at = match out.iter().position(|s| s["source"] == source) {
             Some(i) => i,
             None => {
@@ -140,8 +155,12 @@ fn sources(hits: &[Value], words: &[String]) -> Vec<Value> {
                 out.len() - 1
             }
         };
+        // A turn is one moment of its source, however many chunks hold it (two said in one second by one person are two).
+        let mo = moment_of(h, words);
         if let Some(m) = out[at]["moments"].as_array_mut() {
-            m.push(moment_of(h, words));
+            if mo["t"].is_null() || !m.iter().any(|x| ["section_kind", "t", "who", "text"].iter().all(|k| x[k] == mo[k])) {
+                m.push(mo);
+            }
         }
     }
     out
@@ -160,9 +179,35 @@ fn clock_in(s: &str) -> Option<f64> {
     s.match_indices('[').find_map(|(i, _)| clock_at_start(&s[i..]).map(|x| x.0))
 }
 
+/// Text as the index's tokenizer compares it (`unicode61 remove_diacritics 2`): lower case, a Latin letter's accents
+/// dropped (café = cafe); another script's letters kept whole (й stays й). The page's `sxFold` is the same.
+fn fold(s: &str) -> String {
+    use icu_normalizer::{ComposingNormalizerBorrowed, DecomposingNormalizerBorrowed};
+    let mut out = String::with_capacity(s.len());
+    let mut latin = false;
+    for c in DecomposingNormalizerBorrowed::new_nfd().normalize(s).chars() {
+        let mark = matches!(c, '\u{300}'..='\u{36f}' | '\u{1ab0}'..='\u{1aff}' | '\u{1dc0}'..='\u{1dff}' | '\u{20d0}'..='\u{20ff}' | '\u{fe20}'..='\u{fe2f}');
+        if mark && latin {
+            continue;
+        }
+        if !mark {
+            latin = c.is_ascii_alphabetic() || matches!(c, '\u{c0}'..='\u{24f}' | '\u{1e00}'..='\u{1eff}');
+        }
+        out.push(c);
+    }
+    ComposingNormalizerBorrowed::new_nfc().normalize(&out).to_lowercase()
+}
+
 /// Whether a line holds one of the words, whole (as the index matches them).
 fn has_word(line: &str, words: &[String]) -> bool {
-    line.split(|c: char| !c.is_alphanumeric()).any(|w| !w.is_empty() && words.iter().any(|x| x == &w.to_lowercase()))
+    words_in(line, words) > 0
+}
+
+/// How many of the words a line holds, each once (the line that holds most of the query is the moment).
+fn words_in(line: &str, words: &[String]) -> usize {
+    let line = fold(line);
+    let have: Vec<&str> = line.split(|c: char| !c.is_alphanumeric()).filter(|w| !w.is_empty()).collect();
+    words.iter().filter(|x| have.contains(&fold(x).as_str())).count()
 }
 
 /// A line as it reads: no list mark, no bold, no time chips, a Markdown link by its label.
@@ -186,7 +231,8 @@ fn moment_of(h: &Value, words: &[String]) -> Value {
     let kind = h["section_kind"].as_str().unwrap_or("");
     let text = h["text"].as_str().unwrap_or("");
     let lines: Vec<&str> = text.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with('#')).collect();
-    let line = lines.iter().find(|l| has_word(l, words)).or(lines.first()).copied().unwrap_or("");
+    // The line with most of the words (the first of equals); none has one: the chunk's first.
+    let line = lines.iter().copied().enumerate().filter(|(_, l)| has_word(l, words)).max_by_key(|(i, l)| (words_in(l, words), std::cmp::Reverse(*i))).map(|x| x.1).or(lines.first().copied()).unwrap_or("");
     let (mut t, mut said, mut who) = (None, line, h["speaker"].as_str().map(str::to_owned));
     // A transcript's or a chat's line: "[07:48] Omar Haddad (Acme): …".
     if let Some((at, rest)) = clock_at_start(line).filter(|_| kind == "transcript" || kind == "chat") {
@@ -276,7 +322,12 @@ fn turns_around(dir: &Path, t: f64, before: bool, words: &[String]) -> Vec<Value
     }
     // The index's clock drops the fraction of a second (`[00:35]` for 35.6 s): the turn that started within that second.
     let Some(last) = turns.iter().rposition(|x| x.0 < t + 1.0).or((!turns.is_empty()).then_some(0)) else { return vec![] };
-    let at = (0..=last).rev().take_while(|&i| turns[i].0 >= t.floor()).find(|&i| has_word(&turns[i].4, words)).unwrap_or(last);
+    // Of those, the one with most of the words (the first of equals), as the list's moment picks its line.
+    let first = (0..=last).rev().take_while(|&i| turns[i].0 >= t.floor()).last().unwrap_or(last);
+    let at = (first..=last).filter(|&i| has_word(&turns[i].4, words)).fold(None, |best: Option<(usize, usize)>, i| {
+        let n = words_in(&turns[i].4, words);
+        if best.is_none_or(|b| n > b.1) { Some((i, n)) } else { best }
+    }).map_or(last, |b| b.0);
     let from = if before { at.saturating_sub(1) } else { at };
     turns[from..(at + 2).min(turns.len())]
         .iter()
@@ -416,6 +467,99 @@ mod tests {
         let long_ago = (chrono::Local::now().date_naive() - chrono::Duration::days(200)).to_string();
         let old = get(&format!("/api/search?q=cutover&until={long_ago}"));
         assert_eq!((old["older"].as_bool(), old["sources"].as_array().map(Vec::len)), (Some(true), Some(0)));
+    }
+
+    /// A call's folder with its title, as the titles read it.
+    fn call_folder(name: &str, title: &str) {
+        let d = crate::paths::calls_dir().join(name);
+        std::fs::create_dir_all(&d).unwrap();
+        std::fs::write(d.join("meta.json"), json!({"title": title, "started_at": format!("{}T10:00:00+00:00", &name[..10])}).to_string()).unwrap();
+    }
+
+    #[test]
+    fn a_hit_that_matched_only_the_title_is_no_moment_when_the_source_has_a_real_one() {
+        let (_env, _root) = crate::paths::testenv::folders("window-search-title-only");
+        crate::brain::save_settings(&crate::brain::embed::Settings { enabled: Some(true), ..Default::default() }).unwrap();
+        let day = chrono::Local::now().date_naive().to_string();
+        let (globex, sync) = (format!("{day}_090000-globex-budget-review"), format!("{day}_100000-budget-sync"));
+        call_folder(&globex, "Globex budget review");
+        call_folder(&sync, "Budget sync");
+        let call_md = "# Acme budget review\n\n## Transcript\n\n### [00:05] Dana Lee\n\n[00:05] Dana Lee (Acme): Welcome all.\n\n### [02:04] Dana Lee\n\n[02:04] Dana Lee (Acme): Understood, a risk.\n\n### [04:03] Dana Lee\n\n[04:03] Dana Lee (Acme): The budget review is Friday.\n\n### [06:10] Dana Lee\n\n[06:10] Dana Lee (Acme): Thanks.\n";
+        let doc = "# Quarterly budget review\n\n### Part one\n\n- Nothing else here\n";
+        let inputs = vec![
+            input("call/2026-01-01_0000", "call", "Acme budget review", &day, call_md, json!({"kind": "call", "call": "c1", "client": "acme"}), None),
+            input("call/2026-01-02_0000", "call", "Globex budget review", &day, &call_md.replace("The budget review is Friday.", "Nothing."), json!({"kind": "call", "call": globex}), None),
+            input("call/2026-01-03_0000", "call", "Budget sync", &day, &call_md.replace("The budget review is Friday.", "Nothing."), json!({"kind": "call", "call": sync}), None),
+            input("doc/n2", "document", "Quarterly budget review", &day, doc, json!({}), None),
+        ];
+        store::sync(&crate::brain::store_path(), inputs, None).unwrap();
+        let v = get("/api/search?q=budget%20review");
+        let by = |t: &str| v["sources"].as_array().unwrap().iter().find(|s| s["title"] == t).cloned();
+        let acme = by("Acme budget review").expect("the call with a real hit");
+        let m = acme["moments"].as_array().unwrap();
+        assert_eq!((m.len(), m[0]["t"].as_f64()), (1, Some(243.0)), "{v}");
+        assert!(by("Globex budget review").is_none(), "a call matched by its title alone is only under the titles: {v}");
+        assert_eq!(by("Quarterly budget review").expect("a document matched by title stays findable")["moments"].as_array().unwrap().len(), 1, "{v}");
+        // "Budget sync" holds one word of two: not under the titles (they need every word), so it stays findable here.
+        assert!(v["titles"].as_array().unwrap().iter().all(|c| c["name"] != sync.as_str()), "{v}");
+        assert_eq!(by("Budget sync").expect("a call matched by its title but not listed under the titles stays findable")["moments"].as_array().unwrap().len(), 1, "{v}");
+    }
+
+    #[test]
+    fn a_word_matches_its_letters_with_or_without_accents_as_the_index_does() {
+        let w = |x: &str| vec![x.to_string()];
+        assert!(has_word("Le café ouvre", &w("cafe")) && has_word("Le cafe ouvre", &w("café")) && has_word("NAÏVE plan", &w("naive")));
+        assert!(has_word("Le cafe\u{301} ouvre", &w("cafe")), "a decomposed accent too");
+        assert!(!has_word("Это мой план", &w("мои")), "another script's letters stay whole, as the index keeps them");
+        // A hit found by the index through an accent is a moment, not a title-only hit.
+        let (_env, _root) = crate::paths::testenv::folders("window-search-accents");
+        crate::brain::save_settings(&crate::brain::embed::Settings { enabled: Some(true), ..Default::default() }).unwrap();
+        let day = chrono::Local::now().date_naive().to_string();
+        let md = "# Re: Offsite\n\n### 2026-11-16 09:12 Dana Lee\n\n- Lunch at the café on the corner\n";
+        store::sync(&crate::brain::store_path(), vec![input("mail/cc33", "mail", "Re: Offsite", &day, md, json!({}), Some("Dana Lee"))], None).unwrap();
+        let v = get("/api/search?q=cafe");
+        assert_eq!(v["sources"][0]["moments"][0]["text"], "Lunch at the café on the corner", "{v}");
+    }
+
+    #[test]
+    fn two_messages_said_in_one_second_by_one_person_are_two_moments_and_one_turn_in_two_chunks_is_one() {
+        let (_env, _root) = crate::paths::testenv::folders("window-search-same-second");
+        let hit = |id: &str, text: &str| json!({"chunk_id": id, "source": "call/x", "section_kind": "chat", "text": text, "breadcrumb_path": "Acme sync > Chat", "refs": {}});
+        let hits = [hit("1", "[10:00] Dana Lee: the cutover is Saturday"), hit("2", "[10:00] Dana Lee: the cutover starts at 6"), hit("3", "[10:00] Dana Lee: the cutover is Saturday")];
+        let out = sources(&hits, &["cutover".to_string()], &[]);
+        let texts: Vec<&str> = out[0]["moments"].as_array().unwrap().iter().map(|m| m["text"].as_str().unwrap()).collect();
+        assert_eq!(texts, ["the cutover is Saturday", "the cutover starts at 6"]);
+    }
+
+    #[test]
+    fn a_chunk_of_several_turns_shows_the_turn_with_most_of_the_words_in_the_list_and_the_panel() {
+        let words = vec!["security".to_string(), "review".to_string()];
+        let text = "[04:03] Dana Lee (Acme): The security checklist is ready.\n\n[04:17] Omar Haddad (Acme): Then the security review is on Friday.\n\n[04:33] Kim Park: Fine.\n";
+        let h = json!({"chunk_id": "1", "source": "call/x", "section_kind": "transcript", "text": text, "breadcrumb_path": "Acme sync > Transcript", "refs": {}});
+        let m = moment_of(&h, &words);
+        assert_eq!((m["who"].as_str(), m["t"].as_f64()), (Some("Omar Haddad"), Some(257.0)), "the turn with both words, not the first with one");
+        // No turn holds a word (a title-only match): the chunk's first turn.
+        assert_eq!(moment_of(&h, &["budget".to_string()])["who"], "Dana Lee");
+        // The panel's turn is the same one when the turns started in one second.
+        let (_env, root) = crate::paths::testenv::folders("window-search-most-words");
+        let d = root.join("c");
+        std::fs::create_dir_all(&d).unwrap();
+        std::fs::write(
+            d.join("segments.json"),
+            json!([
+                {"speaker": "remote", "name": "Dana Lee", "start": 257.1, "end": 257.5, "text": "The security checklist is ready."},
+                {"speaker": "remote", "name": "Omar Haddad", "start": 257.6, "end": 258.0, "text": "Then the security review is on Friday."},
+            ])
+            .to_string(),
+        )
+        .unwrap();
+        let turns = turns_around(&d, 257.0, false, &words);
+        assert_eq!(turns.len(), 1, "{turns:?}");
+        assert_eq!(turns[0]["who"], "Omar Haddad");
+        // Two turns with as many of the words: the first, as in the list.
+        assert_eq!(moment_of(&h, &["security".to_string()])["who"], "Dana Lee");
+        let first = turns_around(&d, 257.0, false, &["security".to_string()]);
+        assert_eq!(first.iter().find(|x| x["hit"] == true).map(|x| x["who"].clone()), Some(json!("Dana Lee")), "{first:?}");
     }
 
     #[test]
