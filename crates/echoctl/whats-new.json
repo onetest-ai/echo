@@ -1,5 +1,15 @@
 [
   {
+    "version": "0.10.1",
+    "items": [
+      { "icon": "filter", "title": "Search what was said", "text": "Press Enter in the Calls search to find words across your calls, mail, channels and documents, with filters for kind, client, thread, person and dates, and open each moment beside the list. ⌘K offers it too.", "open": "calls" },
+      { "icon": "sparkle", "title": "Sharper search for Claude", "text": "Search drops common words and the minutes' header links, and uses meaning only to reorder what the words found, so Claude gets fewer stray hits.", "open": "calls" },
+      { "icon": "shield", "title": "Recall becomes Intake", "text": "What Echo reads from your threads' mail and channels, and whom it trusts, now lives in Settings → Intake, kept in files with daily backups. Your dictionary moved to Settings → Vocabulary and always helps transcription.", "open": "settings/brain" },
+      { "icon": "layout", "title": "A leaner Recall", "text": "The Sources and People screens, Also discussed and the page reader are gone; people and relations come from the Knowledge plugin. Recall shows only while a plugin adds a tab.", "open": "calls" },
+      { "icon": "plugin", "title": "More for plugins", "text": "Plugins read each person's role, stance and reporting line, and each thread's AI profile; reading people is fast at any size, and a plugin call that runs too long now returns an error instead of hanging.", "open": "settings/plugins" }
+    ]
+  },
+  {
     "version": "0.10.0",
     "items": [
       { "icon": "plugin", "title": "Turn routines on as you install", "text": "Each routine a plugin brings has its own switch on the plugin's install sheet, so you no longer go to the Scheduler to start it.", "open": "settings/plugins" },
