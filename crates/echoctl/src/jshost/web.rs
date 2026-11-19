@@ -270,16 +270,16 @@ fn public_address(host: &str, port: u16, until: Instant) -> Result<IpAddr> {
     let wait = until.saturating_duration_since(Instant::now()).min(Duration::from_secs(LOOKUP_SECS));
     let name = host.to_string();
     let found = if wait.is_zero() { None } else { within(wait, move || (name.as_str(), port).to_socket_addrs().map(|a| a.map(|a| a.ip()).collect::<Vec<_>>())) };
-    let ips = found.ok_or_else(|| anyhow!("looking up {host} took too long"))?.map_err(|_| anyhow!("Echo couldn't find {host}"))?;
+    let ips = found.ok_or_else(|| anyhow!("looking up {host} took too long"))?.unwrap_or_default();
     all_public(host, &ips)
 }
 
-/// The address to reach `host` at, of those its name has: the first, when every one is public.
+/// The address to reach `host` at, of those its name has: the first, when every one is public. A name that points
+/// into the user's network and one that isn't found are refused in the same words: no name inside it can be told apart.
 fn all_public(host: &str, ips: &[IpAddr]) -> Result<IpAddr> {
     match ips.first() {
         Some(ip) if ips.iter().all(|i| public(*i)) => Ok(*ip),
-        Some(_) => bail!("{host} points to this computer or your own network"),
-        None => bail!("Echo couldn't find {host}"),
+        _ => bail!("Echo found no public address for {host} (never this computer or your own network)"),
     }
 }
 
@@ -349,12 +349,22 @@ fn web_reach(url: &str, until: Instant) -> Result<(Reach, Option<String>)> {
 }
 
 /// How plugin `id` reaches `url`: as `ctx.http.fetch` may (`first`: the address the user typed too, once), else — with
-/// `web` — as a page on the public internet (`web_reach`).
-fn page_reach(id: &str, url: &str, web: bool, first: bool, until: Instant) -> Result<(Reach, Option<String>)> {
-    let granted = if first { admit(id, url, true) } else { reach(id, url) };
+/// `web` — as a page on the public internet (`web_reach`); `public_only` (a redirect from a public page): only as that,
+/// never at an address of the plugin's grants. Whether it was reached as a public page.
+fn page_reach(id: &str, url: &str, web: bool, first: bool, public_only: bool, until: Instant) -> Result<(Reach, Option<String>, bool)> {
+    let granted = if public_only {
+        Err(anyhow!("a public page moved"))
+    } else if first {
+        admit(id, url, true)
+    } else {
+        reach(id, url)
+    };
     match granted {
-        Ok(r) => Ok((r, None)),
-        Err(_) if web => web_reach(url, until).map_err(|e| anyhow!("{id} reads only pages on the public internet and the addresses it may reach: {e:#}")),
+        Ok(r) => Ok((r, None, false)),
+        Err(_) if web => {
+            let (r, resolve) = web_reach(url, until).map_err(|e| anyhow!("{id} reads only pages on the public internet and the addresses it may reach: {e:#}"))?;
+            Ok((r, resolve, true))
+        }
         Err(e) => Err(e),
     }
 }
@@ -374,13 +384,15 @@ impl std::error::Error for Moved {}
 /// A plain GET of `url` through `get_capped`, `secs` in all. Without `uses.network.web` exactly that: only what the
 /// plugin may reach, no redirect followed. With it, a public page is reached too (`web_reach`), and a redirect (301,
 /// 302, 303, 307, 308) is followed up to `HOPS` times — its `Location` read against the address it came from, and
-/// that address checked again as the first was (never the typed one) before anything is asked of it. The address read
-/// last, how it was reached, its head and size.
+/// that address checked again before anything is asked of it: as the first was (never the typed one) when the first
+/// was one of the plugin's grants, else — a page reached as public — only as a public page (never into the addresses
+/// its grants name, the user's own network). Stopped at `secs`. The address read last, how it was reached, its head
+/// and size.
 #[allow(clippy::too_many_arguments)]
 fn get_page(id: &str, url: &str, max: u64, secs: u64, accept_types: &str, accept: &dyn Fn(&Head) -> Result<()>, sink: &mut dyn std::io::Write) -> Result<(String, Reach, Head, u64)> {
     let web = reads_web(id);
     let until = Instant::now() + Duration::from_secs(secs);
-    let (mut reach, mut resolve) = page_reach(id, url, web, true, until)?;
+    let (mut reach, mut resolve, public_only) = page_reach(id, url, web, true, false, until)?;
     let mut at = url.to_string();
     let mut hops = 0;
     loop {
@@ -388,7 +400,11 @@ fn get_page(id: &str, url: &str, max: u64, secs: u64, accept_types: &str, accept
             Some(to) if web && REDIRECTS.contains(&h.status) => Err(Moved(to.clone()).into()),
             _ => accept(h),
         };
-        let left = (until.saturating_duration_since(Instant::now()).as_millis().div_ceil(1000) as u64).clamp(1, secs);
+        let rest = until.saturating_duration_since(Instant::now());
+        if rest.is_zero() {
+            bail!("the answer took longer than {secs} s");
+        }
+        let left = (rest.as_millis().div_ceil(1000) as u64).min(secs);
         let err = match get_capped(id, &at, &reach, max, left, accept_types, resolve.as_deref(), &follow, sink) {
             Ok((head, n)) => return Ok((at, reach, head, n)),
             Err(e) => e,
@@ -399,7 +415,7 @@ fn get_page(id: &str, url: &str, max: u64, secs: u64, accept_types: &str, accept
         }
         hops += 1;
         let next = page::web_link(&at, to).ok_or_else(|| anyhow!("the page moved to “{}”, which isn't a web address Echo reads", to.chars().take(200).collect::<String>()))?;
-        (reach, resolve) = page_reach(id, &next, web, false, until).map_err(|e| anyhow!("the page moved to {next}, which Echo doesn't read: {e:#}"))?;
+        (reach, resolve, _) = page_reach(id, &next, web, false, public_only, until).map_err(|e| anyhow!("the page moved to {next}, which Echo doesn't read: {e:#}"))?;
         at = next;
     }
 }
@@ -538,6 +554,7 @@ mod tests {
                     "http" => "http://news.acme.example/page".into(),
                     "port" => format!("https://news.acme.example:{other}/page"),
                     "file" => "file:///etc/hosts".into(),
+                    "listed" => format!("http://127.0.0.1:{other}/page"),
                     _ => "https://cdn.acme.example/page".into(),
                 };
                 reply("302 Found", &format!("Location: {to}\r\n"), b"")
@@ -701,7 +718,13 @@ mod tests {
         let mk = root.join("market");
         let d = mk.join("plugins/crawler");
         std::fs::create_dir_all(&d).unwrap();
-        std::fs::write(d.join("echo-plugin.json"), json!({"id": "crawler", "name": "Crawler", "version": "0.1.0", "main": "main.js", "uses": {"network": {"web": true}}}).to_string()).unwrap();
+        std::fs::write(
+            d.join("echo-plugin.json"),
+            json!({"id": "crawler", "name": "Crawler", "version": "0.1.0", "main": "main.js", "uses": {"network": {"web": true, "hosts_from": ["site"]}},
+                   "settings": [{"key": "site", "label": "Site", "type": "string"}]})
+            .to_string(),
+        )
+        .unwrap();
         std::fs::write(
             d.join("main.js"),
             r#"
@@ -718,8 +741,11 @@ mod tests {
         let name = plugins::market_add(mk.to_str().unwrap(), Some("t")).unwrap();
         plugins::refresh(&name).unwrap();
         let sheet = plugins::review("crawler", Some(&name)).unwrap().uses;
-        assert_eq!(sheet, ["Runs its own code in Echo, with your rights", "Reads web pages on the public internet (https)"]);
+        assert_eq!(sheet.len(), 3, "{sheet:?}");
+        assert_eq!(sheet[2], "Reads web pages on the public internet (https)", "a line of its own");
         plugins::install("crawler", Some(&name), &sheet).unwrap();
+        // The user lists the other site (on this computer): the plugin's own grant.
+        plugins::set_setting("crawler", "site", &json!(format!("http://127.0.0.1:{other}"))).unwrap();
         sync();
         let up = (0..50).find_map(|_| call("crawler", "ping", &json!({})).ok().or_else(|| {
             std::thread::sleep(Duration::from_millis(50));
@@ -779,8 +805,14 @@ mod tests {
         }
         assert!(refused(read("http://news.acme.example/page")).contains("only over https"));
         assert!(refused(read(&format!("https://news.acme.example:{port}/page"))).contains(&format!("on port {port}")));
-        assert!(refused(read(&format!("http://127.0.0.1:{other}/page"))).contains("only over https"));
+        assert!(refused(read(&format!("http://127.0.0.1:{port}/page"))).contains("only over https"), "not listed");
+        // A public page never moves into an address the user listed for the plugin (their own network).
+        let e = refused(read("https://news.acme.example/away/listed"));
+        assert!(e.contains(&format!("the page moved to http://127.0.0.1:{other}/page")) && e.contains("only over https"), "{e}");
         assert_eq!(other_seen.conns.load(Ordering::SeqCst), conns, "nothing asked of this computer");
+        // A page at the listed address keeps its grant's rules, its own redirects followed there.
+        let p = read(&format!("http://127.0.0.1:{other}/hop/1")).unwrap();
+        assert_eq!(p["url"], json!(format!("http://127.0.0.1:{other}/page")));
         // ctx.http.fetch isn't widened.
         assert!(refused(call("crawler", "http", &json!({"url": "https://news.acme.example/page"}))).contains("may reach only"));
         drop(_map);
@@ -811,8 +843,10 @@ mod tests {
         assert!(all_public("intranet.acme.example", &[ip("10.0.0.7")]).unwrap_err().to_string().contains("your own network"));
         assert!(all_public("mixed.acme.example", &[ip("93.184.215.14"), ip("192.168.1.10")]).unwrap_err().to_string().contains("your own network"));
         assert!(all_public("v6.acme.example", &[ip("fd00::1")]).is_err());
-        assert!(all_public("none.acme.example", &[]).unwrap_err().to_string().contains("couldn't find"));
-    }
+        // A name inside the user's network and one not found read the same: no name can be probed.
+        let said = |h: &str, ips: &[IpAddr]| all_public(h, ips).unwrap_err().to_string().replace(h, "<host>");
+        assert_eq!(said("none.acme.example", &[]), said("intranet.acme.example", &[ip("10.0.0.7")]));
+        assert_eq!(said("none.acme.example", &[]), said("mixed.acme.example", &[ip("93.184.215.14"), ip("192.168.1.10")]));    }
 
     /// `ECHOCTL_TEST_HOSTS` until dropped, set only while the test holds the test environment (its lock: the variable is
     /// process-wide).

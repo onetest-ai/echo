@@ -372,9 +372,14 @@ written as one refused), whose every address is public by the same rule as a pag
 points into this computer or the user's network even in part is refused, looked up within the request's time), and
 Echo connects to the address it checked, never through a proxy. A host its other grants reach (`network.hosts`, a
 listed address, the typed one) keeps their rules. A redirect (301, 302, 303, 307, 308) is followed, 5 at most: its
-`Location` read against the address it came from, and the address it names checked again as the first was — by the
-plugin's grants (never the typed address again), else as a public https page — before anything is asked of it; the
-size and time caps are the whole read's. Rejected, with why: plain http ("… over plain http: Echo reads a page on the
+`Location` read against the address it came from, and the address it names checked again before anything is asked of
+it: when the read began at one of the plugin's grants, as the first was (its grants, never the typed address again,
+else as a public https page); when it began as a public page, only as a public https page — never into a
+`network.hosts` host or an address the user listed. The size and time caps are the whole read's: no redirect is
+followed past its time. A name that points into this computer or the user's network and one that isn't found are
+refused in the same words ("Echo found no public address for <host> (never this computer or your own network)"), so
+no name inside it can be probed. A word a manifest lists (an event, a kind, a setting) holds no control character or
+line separator, so it never adds a line to the sheet. Rejected, with why: plain http ("… over plain http: Echo reads a page on the
 public internet only over https"), another port ("… on port <n>: … only on ports 80 and 443"), this computer or the
 user's network ("<plugin> reads only pages on the public internet and the addresses it may reach: <host> is on this
 computer or your own network"), a redirect to any of these ("the page moved to <address>, which Echo doesn't read: …")

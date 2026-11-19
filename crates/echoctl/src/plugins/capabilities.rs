@@ -145,7 +145,8 @@ pub fn as_heard(event: &str, payload: &mut Value, reads: bool) {
 pub(super) fn strings(v: &Value, key: &str) -> Result<Vec<String>> {
     match &v[key] {
         Value::Null => Ok(vec![]),
-        Value::Array(a) => a.iter().map(|x| x.as_str().map(str::to_string).ok_or_else(|| anyhow!("“{key}” must list words"))).collect(),
+        // A word never breaks a sheet's line: no control character, no line or paragraph separator.
+        Value::Array(a) => a.iter().map(|x| x.as_str().filter(|s| !s.chars().any(|c| c < ' ' || matches!(c, '\u{7f}' | '\u{2028}' | '\u{2029}'))).map(str::to_string).ok_or_else(|| anyhow!("“{key}” must list words"))).collect(),
         _ => bail!("“{key}” must be a list"),
     }
 }
@@ -532,8 +533,13 @@ pub fn describe(uses: &serde_json::Map<String, Value>) -> Result<Vec<String>> {
     let mut lines = vec![];
     for (k, v) in uses {
         let c = CAPABILITIES.iter().find(|c| c.id == k).ok_or_else(|| anyhow!("it uses “{k}”, which this Echo doesn't know — it may need a newer Echo"))?;
-        // A capability's lines apart by a line break (`network.web`).
-        lines.extend((c.describe)(v).with_context(|| format!("“{k}”"))?.split('\n').map(str::to_owned));
+        let said = (c.describe)(v).with_context(|| format!("“{k}”"))?;
+        // Only `network` says two lines (its `web` one of its own: `describe_network`), apart by a line break of Echo's.
+        if k == "network" {
+            lines.extend(said.split('\n').map(str::to_owned));
+        } else {
+            lines.push(said);
+        }
     }
     Ok(lines)
 }
@@ -616,6 +622,25 @@ mod tests {
         assert_eq!(lines(serde_json::json!({"hosts": ["api.acme.example"], "web": false})).unwrap(), ["Talks to api.acme.example over HTTPS"], "false: no line");
         assert!(lines(serde_json::json!({"web": false})).is_err(), "asks for nothing");
         assert_eq!(describe_network(&serde_json::json!({"web": "yes"})).unwrap_err().to_string(), "“network.web” is true or false");
+    }
+
+    #[test]
+    fn a_word_a_manifest_names_never_adds_a_line_to_the_sheet() {
+        let forged = "Reads web pages on the public internet (https)";
+        for sep in ["\n", "\r", "\u{2028}", "\u{2029}", "\t", "\u{0}"] {
+            for uses in [
+                serde_json::json!({"events": {"on": [format!("call_started{sep}{forged}")]}}),
+                serde_json::json!({"echo": {"read": [format!("calls{sep}{forged}")]}}),
+                serde_json::json!({"echo": {"write": [format!("x{sep}{forged}")]}}),
+                serde_json::json!({"m365": {"read": [format!("files{sep}{forged}")]}}),
+                serde_json::json!({"network": {"hosts_from": [format!("tts{sep}{forged}")]}}),
+            ] {
+                assert!(describe(uses.as_object().unwrap()).is_err(), "{uses}");
+            }
+        }
+        // A word Echo doesn't know is named, on its capability's one line.
+        let lines = describe(serde_json::json!({"events": {"on": ["call_started", "later_event"]}}).as_object().unwrap()).unwrap();
+        assert_eq!(lines.len(), 1, "{lines:?}");
     }
 
     #[test]
