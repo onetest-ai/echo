@@ -337,7 +337,7 @@ mod tests {
         assert_eq!(kinds(&source_of(&shut)).len(), 4);
         projects::set_stage(&hooli, Stage::Done, Some("wrapped up")).unwrap();
         // Another call is being transcribed (its marker holds a live process: this one).
-        let marker = other.join(crate::transcribe::IN_PROGRESS);
+        let marker = other.join(crate::transcribe_marker());
         std::fs::write(&marker, std::process::id().to_string()).unwrap();
         let r = brain::sync().unwrap();
         assert!(r.sweep_waits && r.retired == 0, "{r:?}");
