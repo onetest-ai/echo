@@ -33,9 +33,10 @@ fn missing_run_env(under_claude_code: bool, config_set: bool, home_set: bool) ->
 }
 
 /// A development build started by Claude Code (`CLAUDECODE`) without the run's folders exits before it resolves the
-/// real config dir or data folder. A release build, and a person's own terminal, never stop here; nor do unit tests,
-/// whose variables `testenv` sets and restores process-wide while other tests run (the binary's own tests check it).
-fn refuse_real_folders() {
+/// real config dir or data folder, or changes the user's own files elsewhere (start at login, the shell's PATH, the
+/// CLI link). A release build, and a person's own terminal, never stop here; nor do unit tests, whose variables
+/// `testenv` sets and restores process-wide while other tests run (the binary's own tests check it).
+pub(crate) fn refuse_real_folders() {
     if !cfg!(all(debug_assertions, not(test))) {
         return;
     }

@@ -59,6 +59,24 @@ fn without_the_runs_env_a_write_command_refuses_and_writes_nothing() {
 }
 
 #[test]
+fn without_the_runs_env_autostart_off_leaves_the_start_at_login_as_it_is() {
+    let root = fresh("autostart");
+    let user = root.join("user");
+    let agents = user.join("Library/LaunchAgents");
+    std::fs::create_dir_all(&agents).unwrap();
+    let plist = agents.join("ai.onetest.echo.plist");
+    std::fs::write(&plist, "the installed Echo's").unwrap();
+    for run_env in [vec![], vec![("ECHOCTL_CONFIG_DIR", root.join("config"))]] {
+        let run_env: Vec<(&str, &Path)> = run_env.iter().map(|(k, v)| (*k, v.as_path())).collect();
+        let out = echoctl(&user, &run_env, &["app", "autostart", "off"]);
+        assert_eq!(out.status.code(), Some(2), "{run_env:?}: {}", String::from_utf8_lossy(&out.stderr));
+        assert_eq!(std::fs::read_to_string(&plist).unwrap(), "the installed Echo's", "{run_env:?}: start at login untouched");
+        assert_eq!(files(&agents), vec![plist.display().to_string()], "{run_env:?}: nothing else in LaunchAgents");
+    }
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
 fn with_the_runs_env_it_works_under_claude_code() {
     let root = fresh("allow");
     let user = root.join("user");

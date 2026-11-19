@@ -54,7 +54,11 @@ An agent's worktree builds with `CARGO_TARGET_DIR=<worktree>/target`; `serve.sh`
 
 - A debug build (`target/debug/echoctl`) started from Claude Code (`CLAUDECODE` set, as in every Bash tool call) needs
   both `ECHOCTL_CONFIG_DIR` and `ECHOCTL_HOME`; without either it exits with code 2 before it reads or writes a folder,
-  and names the missing variable (`paths::refuse_real_folders`).
+  and names the missing variable (`paths::refuse_real_folders`). The same holds for the user's own files it would
+  change elsewhere: start at login (`app autostart`), the shell's PATH line (`claude_setup::add_to_path`) and the CLI
+  link (`app install-cli`).
+- Claude Code runs Echo starts get both variables (`ai::build_command`), so their `echoctl` calls work from a dev app
+  started without them.
 - Load the env first: `set -a; . <dir>/env; set +a` (served test data's `env` also unsets `CLAUDECODE`).
 - Not affected: a release build (`scripts/build-plugin.sh` builds one for `claude --plugin-dir plugin`), a dev build in
   your own terminal, `cargo test`'s unit tests (compiled out of them; integration tests running the binary set both).

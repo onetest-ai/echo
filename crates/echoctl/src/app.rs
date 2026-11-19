@@ -854,6 +854,7 @@ pub fn autostart_enabled() -> bool {
 
 /// `echoctl app autostart [on|off]`: start the app at login.
 pub fn set_autostart(on: bool) -> Result<()> {
+    paths::refuse_real_folders();
     #[cfg(target_os = "macos")]
     {
         let plist = launch_agent();
