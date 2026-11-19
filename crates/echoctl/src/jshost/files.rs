@@ -5,6 +5,7 @@
 //! host half reads the text (`ctx.files.read`) or copies the bytes into a folder it was given (`ctx.fs.copyIn`).
 
 use super::*;
+use anyhow::Context as _;
 use std::io::{Read, Write};
 
 /// How long a handle lasts: long enough for a sheet the user fills before adding, not a lasting grant.
@@ -75,6 +76,290 @@ pub(super) fn read(plugin: &str, file: &Value, max: Option<u64>) -> Result<Value
     Ok(json!(String::from_utf8_lossy(&buf)))
 }
 
+/// `ctx.claude.run({images})`: the pictures behind its handles, each checked as `read` checks one, as Claude's image
+/// blocks — 10 at most, each a PNG, JPEG, GIF or WebP of 3.75 MB at most (5 MB base64-encoded).
+pub(super) fn images(plugin: &str, list: &Value) -> Result<Vec<Value>> {
+    let list = match list {
+        Value::Null => return Ok(vec![]),
+        Value::Array(l) => l,
+        _ => bail!("a run's images are a list of file handles"),
+    };
+    if list.len() > crate::claudejob::IMAGES_MAX {
+        bail!("a run takes {} pictures at most, not {}", crate::claudejob::IMAGES_MAX, list.len());
+    }
+    list.iter()
+        .map(|f| {
+            let (path, h) = own(plugin, f)?;
+            let name = h["name"].as_str().unwrap_or("").to_string();
+            let mut buf = vec![];
+            crate::grants::open_regular(&path)?.take(crate::claudejob::IMAGE_BYTES + 1).read_to_end(&mut buf)?;
+            if buf.len() as u64 > crate::claudejob::IMAGE_BYTES {
+                bail!("“{name}” is over 3.75 MB: a run takes pictures up to 3.75 MB (5 MB base64-encoded, what every platform takes)");
+            }
+            crate::claudejob::image_block(&buf, &name)
+        })
+        .collect()
+}
+
+/// The largest file `ctx.files.text` reads, how long it works on one, what it unpacks at most from an Office file
+/// (its parts, summed: a zip bomb stops here) and how many parts such a file holds.
+const TEXT_MAX_FILE: u64 = 50 << 20;
+const TEXT_TIME: Duration = Duration::from_secs(60);
+const TEXT_MAX_UNPACKED: u64 = 200 << 20;
+const TEXT_MAX_PARTS: usize = 5000;
+/// The most of the reader's answer the host takes (its text is cut at 4 MB, as JSON a little more).
+const TEXT_MAX_ANSWER: u64 = 16 << 20;
+/// Extractions at once: one a plugin, two in all.
+const TEXT_AT_ONCE: usize = 2;
+
+/// `pages` of `ctx.files.text`: a whole number (`3`, `"3"`) or a range (`"2-5"`, `"7-"`: from page 7 on), 1-based.
+/// → (from, to), `to` `usize::MAX` for "to the end"
+fn page_range(v: &Value) -> Result<Option<(usize, usize)>> {
+    let t = match v {
+        Value::Null => return Ok(None),
+        Value::Number(n) => n.as_u64().map(|n| n.to_string()).unwrap_or_else(|| n.to_string()),
+        Value::String(s) => s.trim().to_string(),
+        _ => bail!("pages is a number or a range like \"2-5\""),
+    };
+    let bad = || anyhow!("pages is a whole number or a range like \"2-5\" (1 is the first page), not “{}”", t.chars().take(40).collect::<String>());
+    let num = |x: &str| -> Result<usize> { x.trim().parse::<usize>().ok().filter(|n| *n >= 1).ok_or_else(bad) };
+    match t.split_once('-') {
+        Some((a, "")) => Ok(Some((num(a)?, usize::MAX))),
+        Some((a, b)) => {
+            let (a, b) = (num(a)?, num(b)?);
+            if a > b {
+                return Err(bad());
+            }
+            Ok(Some((a, b)))
+        }
+        None => num(&t).map(|n| Some((n, n))),
+    }
+}
+
+/// The text of the file at `path` as Echo's own readers see it (`brain::files`: PDF through pdfium, Word, PowerPoint,
+/// spreadsheets, HTML, plain text); a file of another name is text when it has no NUL in its first 8 KB. No model, no
+/// network. → the text and the page count of a paged file. Runs in the child process `echoctl files-text`.
+#[cfg(feature = "brain")]
+fn text_of(path: &Path, range: Option<(usize, usize)>) -> Result<(String, Option<usize>)> {
+    use crate::brain::files as bf;
+    let file = crate::grants::open_regular(path)?;
+    if file.metadata()?.len() > TEXT_MAX_FILE {
+        bail!("the file is over 50 MB: a plugin reads the text of files up to 50 MB");
+    }
+    let ext = bf::ext(path);
+    if !bf::FORMATS.contains(&ext.as_str()) {
+        if range.is_some() {
+            bail!("this file has no pages: leave pages out");
+        }
+        let mut head = vec![];
+        (&file).take(8192).read_to_end(&mut head)?;
+        if head.contains(&0) {
+            bail!("not a file with text in it (.{ext})");
+        }
+        let mut all = vec![];
+        crate::grants::open_regular(path)?.take(TEXT_MAX_FILE).read_to_end(&mut all)?;
+        return Ok((String::from_utf8_lossy(&all).replace("\r\n", "\n"), None));
+    }
+    if ext == "xls" {
+        bail!("an old .xls file isn't read: save it as .xlsx");
+    }
+    // An Office file is a zip: what it unpacks to, and its parts, are counted before any reader opens it.
+    if ["docx", "pptx", "xlsx", "xlsm"].contains(&ext.as_str()) {
+        let z = zip::ZipArchive::new(&file).map_err(|e| anyhow!("not a readable Office file (truncated download?): {e}"))?;
+        if z.len() > TEXT_MAX_PARTS {
+            bail!("the file holds {} parts: a plugin reads Office files of {TEXT_MAX_PARTS} at most", z.len());
+        }
+        let mut z = z;
+        let mut unpacked = 0u64;
+        for i in 0..z.len() {
+            unpacked = unpacked.saturating_add(z.by_index_raw(i).map(|f| f.size()).unwrap_or(0));
+        }
+        if unpacked > TEXT_MAX_UNPACKED {
+            bail!("the file unpacks to over 200 MB: a plugin reads Office files that unpack to 200 MB at most");
+        }
+    }
+    drop(file);
+    let parsed = bf::read(path)?;
+    if let (Some(why), true) = (&parsed.skip, parsed.md.is_none() && parsed.pages.is_empty()) {
+        bail!("nothing to read in it: {why}");
+    }
+    if parsed.pages.is_empty() {
+        if range.is_some() {
+            bail!("this file has no pages: leave pages out");
+        }
+        return Ok((parsed.md.unwrap_or_default(), None));
+    }
+    let total = parsed.pages.len();
+    let (a, b) = range.unwrap_or((1, usize::MAX));
+    if a > total {
+        bail!("the file has {total} page{}: pages starts at {a}", if total == 1 { "" } else { "s" });
+    }
+    let mut out = vec![];
+    for p in parsed.pages.iter().filter(|p| p.n >= a && p.n <= b) {
+        let mut m = p.text.clone();
+        for t in &p.tables {
+            m.push_str(&format!("\n\n{t}"));
+        }
+        out.push(m.trim().to_string());
+    }
+    Ok((out.join("\n\n"), Some(total)))
+}
+
+#[cfg(not(feature = "brain"))]
+fn text_of(_: &Path, _: Option<(usize, usize)>) -> Result<(String, Option<usize>)> {
+    bail!("this build of Echo has no document readers")
+}
+
+/// Cut `text` at `max` bytes, at a character.
+fn cut(text: &mut String, max: usize) -> bool {
+    if text.len() <= max {
+        return false;
+    }
+    let mut at = max;
+    while !text.is_char_boundary(at) {
+        at -= 1;
+    }
+    text.truncate(at);
+    true
+}
+
+/// `echoctl files-text <path> [--pages A-B] [--max N]`, the child process the host starts for `ctx.files.text`: the
+/// answer as one JSON line on stdout, or why not on stderr with exit 1. A reader that crashes (PDFium on a crafted
+/// file) takes only this process with it.
+pub fn child_main(path: &Path, pages: Option<&str>, max: usize) -> i32 {
+    #[cfg(debug_assertions)]
+    {
+        // (tests) a reader that hangs or crashes.
+        if let Some(s) = std::env::var("ECHOCTL_TEST_TEXT_SLEEP").ok().and_then(|s| s.parse::<u64>().ok()) {
+            std::thread::sleep(Duration::from_secs(s));
+        }
+        if std::env::var_os("ECHOCTL_TEST_TEXT_CRASH").is_some() {
+            std::process::abort();
+        }
+    }
+    let r = (|| {
+        let range = page_range(&pages.map_or(Value::Null, |p| json!(p)))?;
+        text_of(path, range)
+    })();
+    match r {
+        Ok((mut text, pages)) => {
+            let truncated = cut(&mut text, max);
+            println!("{}", json!({"text": text, "pages": pages, "truncated": truncated}));
+            0
+        }
+        Err(e) => {
+            eprintln!("{e:#}");
+            1
+        }
+    }
+}
+
+static READING: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+/// A place among the extractions running: one a plugin, `TEXT_AT_ONCE` in all; given back when it drops.
+#[derive(Debug)]
+struct Reading(String);
+
+impl Reading {
+    fn take(plugin: &str) -> Result<Reading> {
+        let mut all = READING.lock().unwrap_or_else(|e| e.into_inner());
+        if all.iter().any(|p| p == plugin) {
+            bail!("{plugin} is reading a file already: wait for it to end");
+        }
+        if all.len() >= TEXT_AT_ONCE {
+            bail!("Echo is reading {TEXT_AT_ONCE} files for plugins already: try again in a moment");
+        }
+        all.push(plugin.to_string());
+        Ok(Reading(plugin.to_string()))
+    }
+}
+
+impl Drop for Reading {
+    fn drop(&mut self) {
+        let mut all = READING.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(i) = all.iter().position(|p| *p == self.0) {
+            all.remove(i);
+        }
+    }
+}
+
+/// The program that reads: Echo itself (in a unit test, the `echoctl` that sits beside the test program).
+fn reader_exe() -> Result<PathBuf> {
+    let exe = std::env::current_exe().context("Echo's own program can't be found")?;
+    // (a unit test) the `echoctl` in the folder of the build above the test program, which `cargo test` has built.
+    #[cfg(test)]
+    let exe = {
+        let name = if cfg!(windows) { "echoctl.exe" } else { "echoctl" };
+        exe.ancestors().skip(1).map(|d| d.join(name)).find(|p| p.is_file()).ok_or_else(|| anyhow!("no echoctl beside the test program"))?
+    };
+    Ok(exe)
+}
+
+/// `ctx.files.text(file, {pages, max})` → `{text, pages, truncated}`: the text of a handed file (PDF, Word, PowerPoint,
+/// spreadsheet, HTML, Markdown, plain text). `pages` in the options picks one page or a range of a PDF or deck (a file
+/// without pages, or a range past its last page, is refused); in the answer it is the file's page count (`null` for a
+/// file without pages). `truncated` when `max` (1 MB of text by default, 4 MB at most) cut it. The file is read in a
+/// child process of Echo that is killed after 60 s, so a crash or a hang in a reader never reaches Echo; a file over
+/// 50 MB, or an Office file unpacking to over 200 MB, is refused.
+pub(super) fn text(plugin: &str, file: &Value, opts: &Value) -> Result<Value> {
+    let (path, _) = own(plugin, file)?;
+    let range = page_range(&opts["pages"])?;
+    let max = opts["max"].as_u64().filter(|m| *m > 0).unwrap_or(1 << 20).min(4 << 20);
+    let size = crate::grants::open_regular(&path)?.metadata()?.len();
+    if size > TEXT_MAX_FILE {
+        bail!("the file is {} MB: a plugin reads the text of files up to 50 MB", size.div_ceil(1 << 20));
+    }
+    let _place = Reading::take(plugin)?;
+    let mut cmd = std::process::Command::new(reader_exe()?);
+    cmd.arg("files-text").arg(&path).arg("--max").arg(max.to_string());
+    if let Some((a, b)) = range {
+        cmd.arg("--pages").arg(format!("{a}-{}", if b == usize::MAX { String::new() } else { b.to_string() }));
+    }
+    cmd.stdin(std::process::Stdio::null()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped());
+    #[cfg(windows)]
+    let mut cmd = {
+        use crate::app::NoWindow;
+        cmd.no_window()
+    };
+    let mut child = cmd.spawn().context("the reader couldn't start")?;
+    let drain = |s: Option<Box<dyn Read + Send>>| {
+        std::thread::spawn(move || {
+            let mut b = vec![];
+            if let Some(s) = s {
+                let _ = s.take(TEXT_MAX_ANSWER).read_to_end(&mut b);
+            }
+            b
+        })
+    };
+    let out = drain(child.stdout.take().map(|s| Box::new(s) as Box<dyn Read + Send>));
+    let err = drain(child.stderr.take().map(|s| Box::new(s) as Box<dyn Read + Send>));
+    #[cfg(debug_assertions)]
+    let limit = std::env::var("ECHOCTL_TEST_TEXT_SECS").ok().and_then(|s| s.parse().ok()).map_or(TEXT_TIME, Duration::from_secs);
+    #[cfg(not(debug_assertions))]
+    let limit = TEXT_TIME;
+    let started = Instant::now();
+    let status = loop {
+        match child.try_wait()? {
+            Some(s) => break s,
+            None if started.elapsed() > limit => {
+                let _ = child.kill();
+                let _ = child.wait();
+                bail!("reading the file took over 60 seconds");
+            }
+            None => std::thread::sleep(Duration::from_millis(20)),
+        }
+    };
+    let (out, err) = (out.join().unwrap_or_default(), err.join().unwrap_or_default());
+    if status.success() {
+        return serde_json::from_slice(&out).map_err(|_| anyhow!("the reader failed: its answer wasn't readable"));
+    }
+    let said = String::from_utf8_lossy(&err);
+    match (status.code(), said.lines().next().map(str::trim).filter(|l| !l.is_empty())) {
+        (Some(1), Some(why)) => bail!("{why}"),
+        _ => bail!("the reader failed on this file ({status})"),
+    }
+}
+
 /// `ctx.fs.copyIn(file, root, rel, {createNew})`: the file's bytes, as they are, into `rel` of a folder the plugin was
 /// given (`uses.folders.write`, `grants::writable`: never through a link). Never over a file there unless
 /// `createNew: false` asked for it. Written whole into a hidden file of its own beside it first (made new: a link
@@ -82,13 +367,27 @@ pub(super) fn read(plugin: &str, file: &Value, max: Option<u64>) -> Result<Value
 /// over it.
 pub(super) fn copy_in(plugin: &str, file: &Value, root: &str, rel: &str, create_new: bool) -> Result<Value> {
     uses_flag(plugin, "folders", "write")?;
+    copy_to(plugin, file, rel, create_new, &|| {
+        let to = crate::grants::writable(plugin, root, rel)?;
+        if !to.is_dir() && crate::grants::in_skills(root, rel, &to) {
+            bail!("“{rel}”: nothing is copied into a skill; a skill is written whole (ctx.fs.write)");
+        }
+        Ok(to)
+    })
+}
+
+/// `ctx.store.copyIn(file, rel, {createNew})`: the same into the plugin's own store, where `jshost::writable_store_path`
+/// allows a write (never its `settings.json` or Echo's files there, never out of the store).
+pub(super) fn copy_in_store(plugin: &str, file: &Value, rel: &str, create_new: bool) -> Result<Value> {
+    copy_to(plugin, file, rel, create_new, &|| writable_store_path(plugin, rel))
+}
+
+/// The copy: `resolve` names the file to write each time it is asked (again after the folders above it are made).
+fn copy_to(plugin: &str, file: &Value, rel: &str, create_new: bool, resolve: &dyn Fn() -> Result<PathBuf>) -> Result<Value> {
     let (src, _) = own(plugin, file)?;
-    let to = crate::grants::writable(plugin, root, rel)?;
+    let to = resolve()?;
     if to.is_dir() {
         bail!("“{rel}” is a folder");
-    }
-    if crate::grants::in_skills(root, rel, &to) {
-        bail!("“{rel}”: nothing is copied into a skill; a skill is written whole (ctx.fs.write)");
     }
     if create_new && std::fs::symlink_metadata(&to).is_ok() {
         bail!("“{rel}” is there already");
@@ -101,7 +400,7 @@ pub(super) fn copy_in(plugin: &str, file: &Value, root: &str, rel: &str, create_
     let dir = to.parent().ok_or_else(|| anyhow!("“{rel}” has no folder"))?;
     std::fs::create_dir_all(dir)?;
     // The folder made may be reached through a link made meanwhile: checked again as it is now.
-    let to = crate::grants::writable(plugin, root, rel)?;
+    let to = resolve()?;
     static N: AtomicU64 = AtomicU64::new(0);
     let name = to.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     let tmp = to.with_file_name(format!(".{name}.{}.{}.part", std::process::id(), N.fetch_add(1, Ordering::Relaxed)));
@@ -161,6 +460,7 @@ mod tests {
             export function apply(ctx) {
               ctx.command('read', (a, { files }) => files.map((f) => ctx.files.read(f, { max: a.max })))
               ctx.command('readOne', (a) => ctx.files.read(a.file))
+              ctx.command('text', async (a) => await ctx.files.text(a.file, a.opts))
               ctx.command('copy', async (a, { files }) => await ctx.fs.copyIn(files[0], ctx.fs.folders()[0], a.to, a.opts))
               ctx.command('copyId', async (a) => await ctx.fs.copyIn(a.file, ctx.fs.folders()[0], a.to))
               ctx.command('pick', async (a) => await ctx.system.pickFiles('add sources', a))
@@ -174,6 +474,12 @@ mod tests {
               ctx.system.pickFiles('x').then(() => { atStart = 'picked' }, (e) => { atStart = e.message })
               ctx.widgets.provide('w', () => { ctx.system.pickFiles('x').then(() => { inWidget = 'picked' }, (e) => { inWidget = e.message }); return { value: 1 } })
               ctx.command('unasked', () => ({ atStart, inWidget }))
+              ctx.command('talk', async (a, { files }) => {
+                const got = []
+                const r = await ctx.claude.run({ prompt: a.prompt, tools: 'none', profile: 'work', images: files, resume: a.resume, onText: (t) => got.push(t), dir: 'runs/talk' })
+                return { answer: r.answer, got }
+              })
+              ctx.command('forget', (a) => ctx.claude.forget(a.resume))
             }
         "#;
         std::fs::write(d.join("echo-plugin.json"), json!({"id": id, "name": id, "version": "0.1.0", "main": "main.js", "uses": uses}).to_string()).unwrap();
@@ -193,6 +499,73 @@ mod tests {
             }
         }
         Err("never loaded".into())
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn a_plugins_run_gets_the_pictures_it_holds_streams_its_answer_and_continues_its_conversation() {
+        let (_env, root) = paths::testenv::folders("jshost-claude-images");
+        let _fake = crate::ai::fake::install(&root);
+        let p = crate::ai::fake::profile("work", None, &crate::ai::fake::signed_in("pat@example.com"));
+        install(&root, "talker", json!({"claude": {}}));
+        install(&root, "other", json!({}));
+        sync();
+        let session = "5fa9ec63-6e9d-48b0-ba0f-8ddd18c3b0b9";
+        let delta = |t: &str| json!({"type": "stream_event", "parent_tool_use_id": null, "session_id": session, "event": {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": t}}});
+        let reply = [delta("A red "), delta("square."), json!({"type": "result", "result": "A red square.", "is_error": false, "session_id": session})];
+        // Its lines after its message on stdin (no reply of its own to it), or at once without pictures.
+        std::fs::write(crate::ai::fake::file(&p, "p.reply"), "").unwrap();
+        std::fs::write(crate::ai::fake::file(&p, "p.result"), format!("{}\n", reply.iter().map(|l| l.to_string()).collect::<Vec<_>>().join("\n"))).unwrap();
+        let pic = |name: &str, bytes: &[u8]| {
+            std::fs::write(root.join(name), bytes).unwrap();
+            make("talker", &root.join(name)).unwrap()
+        };
+        let png = pic("red.png", b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR");
+        let gif = pic("dot.gif", b"GIF89a\x01\0\x01\0");
+        // Its pictures with the prompt, its answer piece by piece and whole, its conversation begun.
+        let out = run("talker", "talk", json!({"prompt": "What is it?", "resume": "lesson-1"}), &[png.clone(), gif.clone()]).unwrap();
+        assert_eq!(out["answer"], "A red square.");
+        let got: Vec<&str> = out["got"].as_array().unwrap().iter().map(|t| t.as_str().unwrap()).collect();
+        assert!(!got.is_empty() && got.concat() == "A red square.", "in order, gathered as it came: {got:?}");
+        let turn: Value = serde_json::from_str(std::fs::read_to_string(crate::ai::fake::file(&p, "p.turns")).unwrap().lines().last().unwrap()).unwrap();
+        let kinds: Vec<&str> = turn["message"]["content"].as_array().unwrap().iter().map(|c| c["source"]["media_type"].as_str().unwrap_or("text")).collect();
+        assert_eq!(kinds, ["image/png", "image/gif", "text"]);
+        let args = || std::fs::read_to_string(crate::ai::fake::file(&p, "p.args")).unwrap().split('\0').map(str::to_owned).collect::<Vec<String>>();
+        assert!(!args().contains(&"--resume".to_string()) && args().contains(&"--include-partial-messages".to_string()));
+        // Its next turn continues that session; with no pictures, the prompt after `-p` as before.
+        run("talker", "talk", json!({"prompt": "And now?", "resume": "lesson-1"}), &[]).unwrap();
+        let a = args();
+        assert!(a.windows(2).any(|w| w[0] == "--resume" && w[1] == session) && a[1] != "--input-format", "{a:?}");
+        // Forgotten: true once, then false; the next turn begins anew.
+        assert_eq!(run("talker", "forget", json!({"resume": "lesson-1"}), &[]).unwrap(), json!(true));
+        assert_eq!(run("talker", "forget", json!({"resume": "lesson-1"}), &[]).unwrap(), json!(false));
+        run("talker", "talk", json!({"prompt": "Again", "resume": "lesson-1"}), &[]).unwrap();
+        assert!(!args().contains(&"--resume".to_string()));
+        assert!(run("talker", "talk", json!({"prompt": "x", "resume": "a b"}), &[]).unwrap_err().contains("a conversation (resume) is 1 to 64"));
+        // Refused before Claude Code starts: over 10 pictures, one over 3.75 MB, one that isn't a picture, another's handle.
+        let runs = || std::fs::read_to_string(crate::ai::fake::file(&p, "p.turns")).unwrap().lines().count();
+        let before = runs();
+        let eleven = vec![png.clone(); 11];
+        assert!(run("talker", "talk", json!({"prompt": "x"}), &eleven).unwrap_err().contains("10 pictures at most, not 11"));
+        let mut big = b"\x89PNG\r\n\x1a\n".to_vec();
+        big.resize(crate::claudejob::IMAGE_BYTES as usize + 1, 0);
+        let big = pic("big.png", &big);
+        assert!(run("talker", "talk", json!({"prompt": "x"}), &[big]).unwrap_err().contains("“big.png” is over 3.75 MB"));
+        let text = pic("notes.txt", b"plain words");
+        assert!(run("talker", "talk", json!({"prompt": "x"}), &[text]).unwrap_err().contains("“notes.txt” isn't a PNG, JPEG, GIF or WebP"));
+        let theirs = make("other", &root.join("red.png")).unwrap();
+        assert!(service_async("talker", "claude.run", &json!({"prompt": "x", "tools": "none", "images": [theirs]})).unwrap_err().to_string().contains("isn't a file handed to talker"));
+        // A stream number only Echo gives, to that plugin, once.
+        let refused = |n: u64| service_async("talker", "claude.run", &json!({"prompt": "x", "tools": "none", "stream": n})).unwrap_err().to_string();
+        assert!(refused(424242).contains("a run's stream is Echo's to give"));
+        assert!(refused(service_async::stream_for("other")).contains("a run's stream is Echo's to give"));
+        assert!(service_async("talker", "claude.run", &json!({"prompt": "x", "tools": "none", "stream": "7"})).is_err());
+        let n = service_async::stream_for("talker");
+        assert!(service_async("talker", "claude.run", &json!({"prompt": "x", "tools": "none", "profile": "work", "stream": n})).is_ok());
+        assert!(refused(n).contains("a run's stream is Echo's to give"), "once");
+        assert_eq!(runs(), before, "no run started");
+        // Forgetting needs `claude`.
+        assert!(service_async("other", "claude.forget", &json!("lesson-1")).unwrap_err().to_string().contains("“claude”"));
     }
 
     #[test]
@@ -357,6 +730,125 @@ mod tests {
         let unasked = (0..100).find_map(|_| run("picker", "unasked", json!({}), &[]).ok().filter(|v| v["atStart"] != "waiting" && v["inWidget"] != "waiting").or_else(|| { std::thread::sleep(Duration::from_millis(50)); None }));
         assert_eq!(unasked, Some(json!({"atStart": refused, "inWidget": refused})));
         plugins::remove("picker", true).unwrap();
+        sync();
+    }
+
+    #[cfg(feature = "brain")]
+    #[test]
+    fn text_of_a_handed_file_comes_from_echos_readers_capped_and_only_for_its_plugin() {
+        use std::io::Write as _;
+        let (_env, root) = paths::testenv::folders("jshost-files-text");
+        install(&root, "reader", json!({}));
+        install(&root, "other", json!({}));
+        sync();
+        let handle = |plugin: &str, name: &str, bytes: &[u8]| {
+            let f = root.join(name);
+            std::fs::write(&f, bytes).unwrap();
+            make(plugin, &f).unwrap()
+        };
+        let text = |h: &Value, opts: Value| run("reader", "text", json!({"file": h["file"], "opts": opts}), &[]);
+        // Plain text, Markdown and HTML pass through (HTML as the Brain reads it); an unknown name with text is text.
+        let md = handle("reader", "Brief.md", "# Acme kickoff\r\nScope: Aurora".as_bytes());
+        assert_eq!(text(&md, json!({})).unwrap(), json!({"text": "# Acme kickoff\nScope: Aurora", "pages": null, "truncated": false}));
+        let html = handle("reader", "Page.html", format!("<html><body><h1>Globex plan</h1><p>Phase two {}</p><script>evil()</script></body></html>", "of the rollout. ".repeat(20)).as_bytes());
+        assert!(text(&handle("reader", "Short.html", b"<p>Too short</p>"), json!({})).unwrap_err().contains("nothing to read in it"));
+        let t = text(&html, json!({})).unwrap();
+        assert!(t["text"].as_str().unwrap().contains("Globex plan") && t["text"].as_str().unwrap().contains("Phase two") && !t["text"].as_str().unwrap().contains("evil"), "{t}");
+        let bare = handle("reader", "fetched-0001", b"Fetched words");
+        assert_eq!(text(&bare, json!({})).unwrap()["text"], "Fetched words");
+        assert!(text(&handle("reader", "blob.bin", &[1, 0, 2, 0]), json!({})).unwrap_err().contains("not a file with text"));
+        // Word: its paragraphs; a made-up file built here.
+        let mut docx = std::io::Cursor::new(vec![]);
+        {
+            let mut z = zip::ZipWriter::new(&mut docx);
+            z.start_file("word/document.xml", zip::write::SimpleFileOptions::default()).unwrap();
+            z.write_all(br#"<?xml version="1.0"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>Umbrella budget</w:t></w:r></w:p><w:p><w:r><w:t>Q3 is approved</w:t></w:r></w:p></w:body></w:document>"#).unwrap();
+            z.finish().unwrap();
+        }
+        let d = text(&handle("reader", "Budget.docx", docx.get_ref()), json!({})).unwrap();
+        assert!(d["text"].as_str().unwrap().contains("Umbrella budget") && d["text"].as_str().unwrap().contains("Q3 is approved") && d["pages"].is_null(), "{d}");
+        // A file that is not what its name says: an error, never a panic or a hang.
+        assert!(text(&handle("reader", "Broken.docx", b"not a zip"), json!({})).is_err());
+        assert!(text(&handle("reader", "Broken.pdf", b"not a pdf"), json!({})).is_err());
+        // The cap on the text: cut at a character, and said.
+        let long = handle("reader", "Long.txt", "é".repeat(100).as_bytes());
+        let c = text(&long, json!({"max": 51})).unwrap();
+        assert_eq!((c["text"].as_str().unwrap().chars().count(), c["truncated"].clone()), (25, json!(true)));
+        // pages: a whole number or a range; anything else refused before the file is read.
+        for bad in [json!("0"), json!("5-2"), json!("x"), json!({"a": 1}), json!("1-2-3"), json!("-4"), json!(-1), json!(2.5), json!("2.5")] {
+            assert!(text(&md, json!({"pages": bad})).unwrap_err().contains("pages is a"), "{bad}");
+        }
+        assert_eq!(page_range(&json!("2-5")).unwrap(), Some((2, 5)));
+        assert_eq!(page_range(&json!(3)).unwrap(), Some((3, 3)));
+        assert_eq!(page_range(&json!("7-")).unwrap(), Some((7, usize::MAX)));
+        assert_eq!(page_range(&Value::Null).unwrap(), None);
+        // A file without pages is no place for `pages`.
+        assert!(text(&md, json!({"pages": 1})).unwrap_err().contains("has no pages"));
+        assert!(text(&bare, json!({"pages": "1-2"})).unwrap_err().contains("has no pages"));
+        // An old .xls isn't read; an Office file that isn't a zip is an error.
+        assert!(text(&handle("reader", "Old.xls", b"x"), json!({})).unwrap_err().contains(".xls"));
+        // An Office file that unpacks to over 200 MB, or holds too many parts: refused before a reader opens it.
+        let zip_of = |entries: usize, each: u64| {
+            let mut out = std::io::Cursor::new(vec![]);
+            let mut z = zip::ZipWriter::new(&mut out);
+            let o = zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+            for i in 0..entries {
+                z.start_file(format!("word/p{i}.xml"), o).unwrap();
+                let chunk = vec![b'a'; 1 << 20];
+                let mut left = each;
+                while left > 0 {
+                    let n = left.min(chunk.len() as u64) as usize;
+                    z.write_all(&chunk[..n]).unwrap();
+                    left -= n as u64;
+                }
+            }
+            z.finish().unwrap();
+            out.into_inner()
+        };
+        assert!(text(&handle("reader", "Bomb.docx", &zip_of(1, 201 << 20)), json!({})).unwrap_err().contains("unpacks to over 200 MB"));
+        assert!(text(&handle("reader", "Many.docx", &zip_of(TEXT_MAX_PARTS + 1, 0)), json!({})).unwrap_err().contains("parts"));
+        // A reader that hangs is killed when its time is up; one that crashes takes only itself (told apart).
+        std::env::set_var("ECHOCTL_TEST_TEXT_SECS", "1");
+        std::env::set_var("ECHOCTL_TEST_TEXT_SLEEP", "30");
+        let t = Instant::now();
+        let slow = text(&md, json!({}));
+        assert!(slow.unwrap_err().contains("took over 60 seconds") && t.elapsed() < Duration::from_secs(10), "the child is killed, not waited for");
+        // One extraction at a time for a plugin: a second while the first runs is refused (and its place given back after).
+        std::env::set_var("ECHOCTL_TEST_TEXT_SECS", "3");
+        std::env::set_var("ECHOCTL_TEST_TEXT_SLEEP", "2");
+        let first = {
+            let h = md.clone();
+            std::thread::spawn(move || text(&h, json!({})))
+        };
+        std::thread::sleep(Duration::from_millis(700));
+        assert!(text(&md, json!({})).unwrap_err().contains("reading a file already"));
+        assert_eq!(first.join().unwrap().unwrap()["text"], "# Acme kickoff\nScope: Aurora");
+        std::env::remove_var("ECHOCTL_TEST_TEXT_SECS");
+        std::env::remove_var("ECHOCTL_TEST_TEXT_SLEEP");
+        std::env::set_var("ECHOCTL_TEST_TEXT_CRASH", "1");
+        let crashed = text(&md, json!({})).unwrap_err();
+        std::env::remove_var("ECHOCTL_TEST_TEXT_CRASH");
+        assert!(crashed.contains("the reader failed") && !crashed.contains("60 seconds"), "{crashed}");
+        assert_eq!(text(&md, json!({})).unwrap()["truncated"], false, "the next one runs");
+        // Two in all: a third plugin's is refused while two run.
+        {
+            let _a = Reading::take("p1").unwrap();
+            let _b = Reading::take("p2").unwrap();
+            assert!(Reading::take("p3").unwrap_err().to_string().contains("2 files"));
+        }
+        assert!(Reading::take("p3").is_ok());
+        // Over 50 MB: refused without reading.
+        let big = root.join("Big.txt");
+        std::fs::File::create(&big).unwrap().set_len(TEXT_MAX_FILE + 1).unwrap();
+        let bh = make("reader", &big).unwrap();
+        assert!(text(&bh, json!({})).unwrap_err().contains("up to 50 MB"));
+        // Another plugin's handle, and one past its hour: not handles.
+        assert!(run("other", "text", json!({"file": md["file"]}), &[]).unwrap_err().contains("isn't a file handed to other"));
+        handles().get_mut(md["file"].as_str().unwrap()).unwrap().made -= KEEP;
+        assert!(text(&md, json!({})).unwrap_err().contains("over an hour ago"));
+        for id in ["reader", "other"] {
+            plugins::remove(id, true).unwrap();
+        }
         sync();
     }
 }

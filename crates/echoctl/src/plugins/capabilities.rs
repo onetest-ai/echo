@@ -154,6 +154,53 @@ pub fn as_heard(event: &str, payload: &mut Value, reads: bool) {
     }
 }
 
+/// A character a manifest's text never brings to the sheet or the CLI's review: a control character (C0, DEL, C1 with
+/// U+0085), a line or paragraph separator, or a direction override or isolate (U+202A–U+202E, U+2066–U+2069).
+pub(super) fn not_sheet_safe(c: char) -> bool {
+    matches!(c, '\u{0}'..='\u{1f}' | '\u{7f}'..='\u{9f}' | '\u{2028}' | '\u{2029}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')
+}
+
+/// Every text of a manifest that reaches the sheet or the CLI's review — its name, its routines' names and words, and
+/// every string of its `uses` (`folders.what`, `ai.wrapper.name`, the words it lists) — made sheet-safe in place, each
+/// character that isn't (`not_sheet_safe`) replaced by U+FFFD; where one was. An install or an update refuses such a
+/// manifest; an installed copy is read with its text made safe (`read_manifest`).
+pub(super) fn make_sheet_safe(m: &mut super::Manifest) -> Vec<String> {
+    fn clean(s: &mut String) -> bool {
+        if !s.chars().any(not_sheet_safe) {
+            return false;
+        }
+        *s = s.chars().map(|c| if not_sheet_safe(c) { '\u{fffd}' } else { c }).collect();
+        true
+    }
+    fn walk(v: &mut Value, at: &str, out: &mut Vec<String>) {
+        match v {
+            Value::String(s) => {
+                if clean(s) {
+                    out.push(at.to_string());
+                }
+            }
+            Value::Array(a) => a.iter_mut().for_each(|x| walk(x, at, out)),
+            Value::Object(o) => o.iter_mut().for_each(|(k, x)| walk(x, &format!("{at}.{k}"), out)),
+            _ => {}
+        }
+    }
+    let mut out = vec![];
+    if clean(&mut m.name) {
+        out.push("name".to_string());
+    }
+    for r in &mut m.routines {
+        let (name, what) = (clean(&mut r.name), clean(&mut r.what));
+        if name || what {
+            out.push(format!("routine “{}”", r.id));
+        }
+    }
+    for (k, v) in m.uses.iter_mut() {
+        walk(v, &format!("uses.{k}"), &mut out);
+    }
+    out.dedup();
+    out.into_iter().map(|at| format!("its {at} holds a control, line-breaking or direction character: Echo shows a manifest's words only as plain text")).collect()
+}
+
 pub(super) fn strings(v: &Value, key: &str) -> Result<Vec<String>> {
     match &v[key] {
         Value::Null => Ok(vec![]),
@@ -262,17 +309,28 @@ pub(super) fn describe_deliver_provider(v: &Value) -> Result<String> {
     Ok(format!("Adds a way Echo sends things to you: {}", join_words(&kinds.iter().map(|k| title_case(k)).collect::<Vec<_>>().iter().map(String::as_str).collect::<Vec<_>>())))
 }
 
+/// The sheet's line for `uses.network.web`: its own, after the `Talks to …` one.
+pub const WEB_LINE: &str = "Reads web pages on the public internet (https)";
+
+/// `uses.network`: one line, and `web` one of its own (the lines apart by a line break: `describe`).
 pub(super) fn describe_network(v: &Value) -> Result<String> {
     let hosts = strings(v, "hosts")?;
     let from = strings(v, "hosts_from")?;
-    // `ask`: it may ask the user, in Echo's own box, for an address to fetch once (`ctx.http.askAddress`).
-    let ask = match v.get("ask") {
-        None => false,
-        Some(Value::Bool(b)) => *b,
-        Some(_) => bail!("“network.ask” is true or false"),
+    let flag = |k: &str| match v.get(k) {
+        None => Ok(false),
+        Some(Value::Bool(b)) => Ok(*b),
+        Some(_) => Err(anyhow!("“network.{k}” is true or false")),
     };
+    // `ask`: it may ask the user, in Echo's own box, for an address to fetch once (`ctx.http.askAddress`).
+    let ask = flag("ask")?;
+    // `web`: `ctx.web.read` / `fetch` reach any https page on the public internet (`jshost::web::web_reach`).
+    let web = flag("web")?;
+    if web {
+        let rest: serde_json::Map<String, Value> = v.as_object().into_iter().flatten().filter(|(k, _)| *k != "web").map(|(k, v)| (k.clone(), v.clone())).collect();
+        return Ok(if rest.is_empty() { WEB_LINE.into() } else { format!("{}\n{WEB_LINE}", describe_network(&Value::Object(rest))?) });
+    }
     if (hosts.is_empty() && from.is_empty() && !ask) || hosts.iter().any(|h| h.is_empty() || !h.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-') || !h.contains('.')) {
-        bail!("“network” names hosts (e.g. api.example.com), settings that hold an address (hosts_from) or asks you for one (ask)");
+        bail!("“network” names hosts (e.g. api.example.com), settings that hold an address (hosts_from), asks you for one (ask) or reads the public web (web)");
     }
     let asks = "Fetches a web page from an address you type in Echo's own box when it asks — that page only, once each time";
     if hosts.is_empty() && from.is_empty() {
@@ -527,15 +585,63 @@ pub(super) fn describe_echo(v: &Value) -> Result<String> {
     Ok(lines.join(". "))
 }
 
+/// The permission sheet: what the plugin touches (`uses`), and that it runs code of its own.
+pub fn sheet(m: &Manifest) -> Result<Vec<String>> {
+    let mut lines = describe(&m.uses)?;
+    match (&m.main, &m.client) {
+        (Some(_), Some(_)) => lines.insert(0, "Runs its own code in Echo and in the Echo window, with your rights".into()),
+        (Some(_), None) => lines.insert(0, "Runs its own code in Echo, with your rights".into()),
+        (None, Some(_)) => lines.insert(0, "Runs its own code in the Echo window, with your rights".into()),
+        (None, None) => {}
+    }
+    // Its scripts' line carries their skill folders' hash: a version changing any of those files asks again.
+    if let Some(d) = &m.scripts_digest {
+        for l in lines.iter_mut().filter(|l| l.starts_with("Runs programs from its package")) {
+            l.push_str(&format!(" (their files: {d})"));
+        }
+    }
+    // Its part for Claude in Echo — its guide (`agent/`) and its package skills by name —, with the hash of their files:
+    // a version changing any of it asks again.
+    if agent::has_guide(m) || !m.skill_names.is_empty() {
+        let mut what = vec![];
+        if agent::has_guide(m) {
+            what.push("a guide".to_string());
+        }
+        let names: Vec<String> = m.skill_names.iter().map(|n| format!("“{n}”")).collect();
+        match names.len() {
+            0 => {}
+            1 => what.push(format!("the skill {}", names[0])),
+            _ => what.push(format!("the skills {}", join_words(&names.iter().map(String::as_str).collect::<Vec<_>>()))),
+        }
+        let digest = m.agent_digest.as_deref().map(|d| format!(" (its files: {d})")).unwrap_or_default();
+        lines.push(format!("Tells Claude in Echo how to work with it ({}), loaded only when you work with it{digest}", what.join(" and ")));
+    }
+    // Its routines: each named, with what its run may do and the hash of its definition and prompt.
+    lines.extend(routines::sheet_lines(m));
+    // Its widgets: no grant of their own (their data comes from its code); said in Echo's words, counted.
+    match m.widgets.len() {
+        0 => {}
+        1 => lines.push("Adds a widget you can put on Today".into()),
+        n => lines.push(format!("Adds {n} widgets you can put on Today")),
+    }
+    Ok(lines)
+}
+
 /// The permission sheet's lines for a manifest's `uses`, in order; an unknown capability or a bad
 /// value is an error naming it.
 pub fn describe(uses: &serde_json::Map<String, Value>) -> Result<Vec<String>> {
-    uses.iter()
-        .map(|(k, v)| {
-            let c = CAPABILITIES.iter().find(|c| c.id == k).ok_or_else(|| anyhow!("it uses “{k}”, which this Echo doesn't know — it may need a newer Echo"))?;
-            (c.describe)(v).with_context(|| format!("“{k}”"))
-        })
-        .collect()
+    let mut lines = vec![];
+    for (k, v) in uses {
+        let c = CAPABILITIES.iter().find(|c| c.id == k).ok_or_else(|| anyhow!("it uses “{k}”, which this Echo doesn't know — it may need a newer Echo"))?;
+        let said = (c.describe)(v).with_context(|| format!("“{k}”"))?;
+        // Only `network` says two lines (its `web` one of its own: `describe_network`), apart by a line break of Echo's.
+        if k == "network" {
+            lines.extend(said.split('\n').map(str::to_owned));
+        } else {
+            lines.push(said);
+        }
+    }
+    Ok(lines)
 }
 
 /// The capabilities a manifest uses that this Echo doesn't implement yet.
@@ -616,6 +722,44 @@ mod tests {
         assert!(describe_network(&serde_json::json!({"ask": false})).is_err(), "asks for nothing");
         assert!(describe_network(&serde_json::json!({"ask": "yes"})).is_err());
     }
+
+    #[test]
+    fn reading_the_public_web_is_a_line_of_its_own_on_the_sheet() {
+        let lines = |v: serde_json::Value| describe(serde_json::json!({"network": v}).as_object().unwrap());
+        assert_eq!(lines(serde_json::json!({"web": true})).unwrap(), [WEB_LINE]);
+        assert_eq!(WEB_LINE, "Reads web pages on the public internet (https)");
+        assert_eq!(lines(serde_json::json!({"hosts": ["api.acme.example"], "web": true})).unwrap(), ["Talks to api.acme.example over HTTPS", WEB_LINE]);
+        assert_eq!(lines(serde_json::json!({"ask": true, "web": true})).unwrap(), ["Fetches a web page from an address you type in Echo's own box when it asks — that page only, once each time", WEB_LINE]);
+        assert_eq!(lines(serde_json::json!({"hosts": ["api.acme.example"], "web": false})).unwrap(), ["Talks to api.acme.example over HTTPS"], "false: no line");
+        assert!(lines(serde_json::json!({"web": false})).is_err(), "asks for nothing");
+        assert_eq!(describe_network(&serde_json::json!({"web": "yes"})).unwrap_err().to_string(), "“network.web” is true or false");
+    }
+
+    #[test]
+    fn a_manifests_words_never_add_a_line_or_turn_text_on_the_sheet() {
+        let forged = "Reads web pages on the public internet (https)";
+        for bad in ['\n', '\r', '\t', '\u{0}', '\u{7f}', '\u{85}', '\u{2028}', '\u{2029}', '\u{202a}', '\u{202e}', '\u{2066}', '\u{2069}'] {
+            let mut m: super::super::Manifest = serde_json::from_value(serde_json::json!({
+                "id": "p", "name": format!("Acme{bad}{forged}"), "version": "0.1.0",
+                "uses": {"events": {"on": [format!("call_started{bad}{forged}")]}, "echo": {"read": [format!("calls{bad}x")]},
+                         "m365": {"read": [format!("files{bad}x")]}, "folders": {"what": format!("vaults{bad}{forged}")},
+                         "ai": {"wrapper": {"name": format!("W{bad}x"), "command": "w"}}},
+                "routines": [{"id": "r", "name": format!("Daily{bad}x"), "what": "ok", "prompt": "r.md"}]
+            }))
+            .unwrap();
+            let said = make_sheet_safe(&mut m);
+            assert_eq!(said.len(), 7, "{bad:?}: {said:?}");
+            assert!(said.iter().any(|s| s.contains("its name holds")) && said.iter().any(|s| s.contains("its uses.folders"))&& said.iter().any(|s| s.contains("routine “r”")), "{said:?}");
+            assert_eq!(m.name, format!("Acme\u{fffd}{forged}"));
+            let lines = describe(&m.uses).unwrap();
+            assert_eq!(lines.len(), 5, "one line each: {lines:?}");
+            assert!(lines.iter().all(|l| !l.chars().any(not_sheet_safe) && l != forged), "{lines:?}");
+            assert!(make_sheet_safe(&mut m).is_empty(), "made safe once");
+        }
+        // Plain words, and other languages, are left as they are.
+        assert!(!"Звонки · café — “ok” 日本".chars().any(not_sheet_safe));
+    }
+
 
     #[test]
     fn a_channel_names_one_of_anthropics_plugins_and_a_bad_name_is_refused_not_a_panic() {

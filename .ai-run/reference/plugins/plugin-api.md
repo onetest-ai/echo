@@ -15,7 +15,23 @@ both, this after the rules. Where this and Echo's code differ, the code wins: fi
 - `main` and `client` point at a `.js`/`.mjs` inside the plugin folder; any other file it ships is read with
   `ctx.package.read(path)` / `ctx.package.list(dir)`. Evidence: `jshost::package_file`
 - A setting is `{key, label, type, default?, help?}`: `key` unique (a–z 0–9 `-` `_`), `type` `string` (default), `bool`,
-  `folder` or `secret`; read with `ctx.settings.get(key)`. Evidence: `plugins::set_setting`
+  `folder` or `secret`; read with `ctx.settings.get(key)`, which gives what the user set, else the setting's `default`,
+  else `null` — never a default for a `secret` or an address list the plugin may reach (only the user enters those).
+  Before this, an unset setting gave `null` even when the manifest had a `default`: a plugin that wrote `get(key) ?? fallback`
+  now gets the manifest's default where it got its fallback, so the two may differ.
+  Evidence: `plugins::set_setting`, `plugins::setting`
+- A settings page's "Test connection": the plugin's host half registers `ctx.command('__testSettings', async ({section}) => …)`
+  and reads what it needs itself (`ctx.settings.get('token')`, secrets included); its answer is `true`, a message
+  (ok), or `{ok, message}`. Its window half runs it with `ctx.call('__testSettings', {section})` and is given only
+  `{ok, message}` — whatever else the host half answered is dropped, `message` is cut at 300 characters, and in it each
+  value the user keeps as a secret (3 characters or more) is replaced by `••••` — as it is, URL-encoded, JSON-escaped,
+  and in base64 (of the secret, of `:secret` and of `*:secret`), longest first — and every URL loses its query string and
+  fragment. A host half that throws gives `{ok: false, message}` (its own words, masked); a plugin that has no such
+  command gives "this plugin has no connection test". The same masking applies when the command runs from an Inbox
+  item's button (`plugin_call`: a failed test's notice). The `message` is free text for the user: it must not echo
+  request details (headers, bodies, URLs with keys). The masking guards against accidents only: the host half is the
+  plugin's own code, trusted with the secrets, and can leak one through any channel it has. Evidence: `plugins::test_answer`,
+  `plugins::call_notice`
 - A plugin and a marketplace tree hold plain files only (no links or special files): 400 files / 20 MB a plugin,
   5000 / 64 MB a marketplace. Evidence: `plugins::check_tree`
 - `echoctl plugin check <folder>` runs an install's checks of the package (manifest, `uses`, widgets, dashboards, skills,
@@ -29,6 +45,13 @@ Each `uses` key is a line on the permission sheet, in Echo's words; the user agr
 update adding a line asks again (`echoctl plugin update --yes`). Only these keys are known; `brain_source` and `export`
 are not granted. Evidence: `plugins::CAPABILITIES`, `plugins::describe_folders`, `plugins::sheet`
 
+A manifest's words that reach the sheet or the CLI's review — its `name`, its routines' `name` and `what`, and every
+string in `uses` (`folders.what`, `ai.wrapper.name`, the words it lists) — hold no control character (C0, DEL, C1
+with U+0085), line or paragraph separator (U+2028, U+2029) or direction override or isolate (U+202A–U+202E,
+U+2066–U+2069): an install, an update and `echoctl plugin check` refuse one that does ("its <field> holds a control,
+line-breaking or direction character …"). A copy installed before this check still loads, each such character shown
+as U+FFFD, and Echo logs it. Evidence: `capabilities::make_sheet_safe`, `plugins::read_manifest`
+
 | Key | Shape and use |
 |---|---|
 | `claude` | runs Claude (§ Claude runs); the sheet: "Runs Claude Code on your AI profiles, acting on its own as you set routines in Settings (Auto, or skipping every permission check)", then with `{"skip": true}` "; a run you mark so may skip every permission check" (only then is a run's own `tools: "skip"` honoured), then ". In a folder you gave it, Claude works with that folder's own Claude Code setup: it reads the folder and, if the plugin may change it, edits files there or in a copy for you to review — as you set routines; on your click in its screens it opens Claude Code there in Echo's Claude panel for you to ask, as you set Claude in the window" (§ Claude runs: `ctx.claude.session`; no capability of its own: `claude` and `folders` cover it) |
@@ -36,7 +59,7 @@ are not granted. Evidence: `plugins::CAPABILITIES`, `plugins::describe_folders`,
 | `events.on` | the events it hears (§ Events) |
 | `deliver.to` | where it sends to the user |
 | `deliver_provider.kinds` | the delivery kinds it provides (§ Delivery) |
-| `network.hosts`, `network.hosts_from`, `network.ask` | the `https://` hosts it fetches (§ Network); string settings without a default whose addresses the user lists; `ask: true`: it may ask the user for one address to fetch once (§ Network, A typed address) |
+| `network.hosts`, `network.hosts_from`, `network.ask`, `network.web` | the `https://` hosts it fetches (§ Network); string settings without a default whose addresses the user lists; `ask: true`: it may ask the user for one address to fetch once (§ Network, A typed address); `web: true`: `ctx.web.read` and `ctx.web.fetch` read any https page on the public internet, its redirects followed (§ Reading a web page, The public web) — a line of its own on the sheet, "Reads web pages on the public internet (https)", so an update adding it asks again. Evidence: `capabilities::describe_network`, `capabilities::WEB_LINE` |
 | `channel.plugin` | the Claude Code plugin it installs (§ Claude runs) |
 | `sessions`, `sessions.commands` | its runtime skills for Echo's sessions; its commands Claude in Echo may run (§ Claude in Echo) |
 | `folders.what`, `folders.write` | folders the user picks, read-only, or changed with `folders.write` (§ Folders and files) |
@@ -174,6 +197,12 @@ Evidence: `plugins::EVENTS`, `plugins::as_heard`, `share::minutes_payload`, `sha
   `ctx.widgets.set` / `clear` and `ctx.threads.set`; `work.json` is what `ctx.work.provide` answered. The same for
   `client-values.json` (write and remove), changed through `ctx.clients.set`.
   Evidence: `jshost::not_echos`, `jshost::inbox_file`, `jshost::widgets_file`
+- `ctx.store.usage(dir?)` (the same as `ctx.store.size`) → `{bytes, files}`: what the plugin keeps in its store, or in
+  its folder `dir`; its own files only (not `settings.json`). `ctx.cache.size()` is that of `cache/`. Evidence: `jshost::service`
+- `await ctx.store.copyIn(file, path, {createNew})` → `{path, size}`: a file handed to it (a handle: `ctx.system.pickFiles`,
+  `ctx.web.fetch`, a saved picture, `--file`) kept as it is in its store, 50 MB at most, as `ctx.store.write` writes
+  (store paths only, never Echo's own files there, never over a file unless `createNew: false`, the default is `true`),
+  off the time slice. Evidence: `jshost::files::copy_in_store`
 - `await ctx.store.walk(path, {ext, hidden, max, sha})` → `[{path, size, mtime, sha?}]`: as `ctx.fs.walk`, under the
   store's folder `path` (`""` the store) — its paths relative to the store (what `ctx.store.read` takes), off the
   time slice, 20,000 rows by default and 100,000 at most, dot names only with `hidden`, no link followed and nothing
@@ -295,16 +324,18 @@ too). A plugin never sets the address: not by its settings, its store or its win
 
 ### Reading a web page (`ctx.web`)
 
-No capability of its own and no line on the sheet: reading a page is a GET under the network grants above, made
-through the same check and the same curl as `ctx.http.fetch` (`http::admit`, `http::get_capped`) — a host in
-`network.hosts` over https, an address the user listed (its pinned key too), or the page the user typed in Echo's box
-(`askAddress`, once). Like every fetch it follows no redirect, and in a run Echo started it is allowed or refused as
-`ctx.http.fetch` is. Each request is a plain GET: no cookies, no credentials or sign-ins, no headers of the plugin's,
+Reading a page is a GET under the network grants above, made through the same check and the same curl as
+`ctx.http.fetch` (`http::admit`, `http::get_capped`) — a host in `network.hosts` over https, an address the user listed
+(its pinned key too), or the page the user typed in Echo's box (`askAddress`, once) — and, only with `uses.network.web`,
+any https page on the public internet (The public web, below). Without `network.web` it follows no redirect, as every
+fetch; in a run Echo started it is allowed or refused as `ctx.http.fetch` is (`network.web` too: no dialog, no
+prompt, no click needed — queued and background work reads as a command does). Each request is a plain GET: no cookies, no credentials or sign-ins, no headers of the plugin's,
 `User-Agent: Mozilla/5.0 (compatible; Echo)`, `Accept-Encoding: identity`. Evidence: `jshost::web`
 
 - `await ctx.web.read(url, {max, timeout, images})` → `{url, title, markdown, links: [{text, href}], images: [{src, alt,
   caption, width, height}], lang, byline, published, description, source, needs_js, truncated, bytes}`. `url` is the
-  address asked for (no redirect followed: a page that moved rejects with its 3xx). HTML only (`text/html`,
+  address read: the one asked for (no redirect followed: a page that moved rejects with its 3xx), or with
+  `network.web` where its redirects ended (its relative links read against it). HTML only (`text/html`,
   `application/xhtml+xml`; anything else rejects "this is <type>, not a web page"), never compressed (a
   `Content-Encoding` other than identity rejects before its body is read), 5 MB (`max` less) read as it comes and
   stopped past it, 30 s (`timeout` less); the charset the server or the page names (else UTF-8; bytes that aren't in it
@@ -364,13 +395,34 @@ through the same check and the same curl as `ctx.http.fetch` (`http::admit`, `ht
   text). 5 MB.
   Nothing is fetched. Also for a page's DOM rendered elsewhere.
 
+**The public web** (`uses.network.web: true`; the sheet: "Reads web pages on the public internet (https)", its own
+line): `ctx.web.read` and `ctx.web.fetch` (not `ctx.http.fetch`, not `ctx.http.stream`) also reach any page the
+plugin's other grants don't — `https://` only, port 80 or 443, a host name or an IPv4 address (an IPv6 address
+written as one refused), whose every address is public by the same rule as a page's pictures (above: a name that
+points into this computer or the user's network even in part is refused, looked up within the request's time), and
+Echo connects to the address it checked, never through a proxy. A host its other grants reach (`network.hosts`, a
+listed address, the typed one) keeps their rules. A redirect (301, 302, 303, 307, 308) is followed, 5 at most: its
+`Location` read against the address it came from, and the address it names checked again before anything is asked of
+it: while every address so far was one of the plugin's grants, as the first was (its grants, never the typed address
+again, else as a public https page); once any of them was a public page, only as a public https page — never into a
+`network.hosts` host or an address the user listed. The size and time caps are the whole read's: no redirect is
+followed past its time. A name that points into this computer or the user's network and one that isn't found are
+refused in the same words ("Echo found no public address for <host> (never this computer or your own network)"), so
+no name inside it can be probed. Rejected, with why: plain http ("… over plain http: Echo reads a page on the
+public internet only over https"), another port ("… on port <n>: … only on ports 80 and 443"), this computer or the
+user's network ("<plugin> reads only pages on the public internet and the addresses it may reach: <host> is on this
+computer or your own network"), a redirect to any of these ("the page moved to <address>, which Echo doesn't read: …")
+or to what isn't a web address, a 6th ("the page moved more than 5 times: Echo follows 5 redirects at most"). Nothing
+else changes: GET only, no cookies, credentials or headers of the plugin's, the same User-Agent and caps, HTML only
+for `read`. Evidence: `jshost::web::web_reach`, `jshost::web::get_page`
+
 What comes back is the page's: untrusted data. A plugin shows it only through `ctx.markdown` (raw HTML as text, its
 links and pictures only as that allows: § Host half) — never as HTML of its own, never in a prompt as instructions.
 
 | Rejected | When |
 |---|---|
-| the host | as `ctx.http.fetch` (a page's picture: also on this computer or the user's network, unless the plugin may reach it) |
-| the answer | not 2xx (a 3xx: "it moved", never followed), compressed, not HTML (`read`) or not a picture (`images`), over its size or time |
+| the host | as `ctx.http.fetch` (a page's picture: also on this computer or the user's network, unless the plugin may reach it); with `network.web`, a page not https on port 80 or 443 at a public address |
+| the answer | not 2xx (a 3xx: "it moved", never followed — with `network.web`, a 6th redirect or one to an address it may not read), compressed, not HTML (`read`) or not a picture (`images`), over its size or time |
 
 ## Claude runs
 
@@ -395,6 +447,49 @@ links and pictures only as that allows: § Host half) — never as HTML of its o
   its record (`permissions.json`) has `stopped: true`; a `copy` run's snapshot is removed. A key names only the
   calling plugin's runs: another plugin's run under the same key goes on. A plugin removed has its runs under a key
   stopped first. Evidence: `claudejob::Keyed`, `claudejob::stop_keyed`, `claudejob::stop_keyed_runs`
+- Pictures: `ctx.claude.run({..., images: [handle]})` — handles of files handed to the plugin (§ Folders and files;
+  each its own, checked as `ctx.files.read` checks one), 10 at most, each a PNG, JPEG, GIF or WebP by its first bytes
+  and 3.75 MB at most (5 MB base64-encoded: Amazon Bedrock's limit, the smallest of the platforms a profile may reach;
+  the Claude API takes 10 MB), all of them 15 MB base64-encoded at most (Bedrock takes 20 MB a request); else refused
+  before Claude Code starts ("“x” isn't a PNG, JPEG, GIF or WebP picture", "“x” is over 3.75 MB…", "a run takes 10
+  pictures at most, not N", "a run's pictures come to X MB base64-encoded: 15.0 MB at most in all"). They go with the
+  prompt as one stream-json user message on stdin (`-p --input-format stream-json`; base64 image content blocks, then
+  Echo's preamble and the prompt as text), never on the command line; in every mode, `tools: "none"` too. The run's log
+  says "with N picture(s)". Evidence: `jshost::files::images`, `claudejob::image_block`, `claudejob::IMAGES_TOTAL_BYTES`
+- Its text as it comes: `ctx.claude.run({..., onText: (chunk) => …})` — Claude's own text (Claude Code's partial
+  messages, `--include-partial-messages`: `stream_event` text deltas, not a subagent's), in a run with tools its text
+  between tool calls too (what it says before and after each step, not only the final answer), handed to `onText` in
+  order, all before the run's promise settles; pieces are gathered for 50 ms at most and at the end of each block, so a
+  chunk may hold several deltas. The result is the same as without. An error `onText` throws is logged, the run goes
+  on. The stream's number is Echo's (`onText` given; a `stream` the plugin passes itself is refused). Evidence:
+  `claudejob::run_with`, `claudejob::text_delta`, `jshost::service_async::stream_for`
+- A conversation: `ctx.claude.run({..., resume})`, `resume` 1 to 64 letters, digits, `.`, `_` or `-` (any case the same;
+  else refused). Its first run begins a Claude Code session (kept: no `--no-session-persistence`); Echo keeps that
+  session's id, with the run's profile, folder, Claude Code folder and the pictures it sent, for the plugin and that
+  conversation (under Echo's state, `plugins/.runs/<plugin>/c-<resume>.json`, never another plugin's), and its next run
+  continues it (`--resume <session>`, the session Claude Code last answered in).
+  - Where: with no tools it runs in a folder of the plugin's own (`plugins/.runs/<plugin>/talk`), so its transcripts
+    stay out of the Claude · Echo folder session's conversations (Claude Code lists them by folder). With tools it runs
+    in the data folder as any routine, and in a folder it was given in that folder: there its conversations show in
+    `/resume` of a Claude Code session in the same folder. Not with `copy` (each copy run is a snapshot of its own:
+    refused), nor in a folder whose path isn't text (UTF-8).
+  - Kept to where it began: a run on another AI profile or in another folder is refused ("this conversation is on the
+    AI profile “a”, not “b”: run it on “a”, or forget it (ctx.claude.forget) to begin a new one"); one run at a time
+    ("a run in conversation “…” is going on already").
+  - Its pictures: Claude Code sends a conversation's earlier pictures again with every turn, so a run whose pictures
+    would bring the conversation past 20 pictures (where the API takes only smaller ones) or 15 MB base64-encoded is
+    refused ("this conversation has sent N picture(s) (X MB) already… forget it"); a turn without pictures goes on.
+  - Its transcript: Claude Code keeps it in the profile's Claude Code folder (`projects/<folder>/<session>.jsonl`, and
+    `<session>/`; on `system` and a wrapper profile the user's own `~/.claude` or `CLAUDE_CONFIG_DIR` — a wrapper
+    keeping another folder keeps its own copy, which Echo doesn't reach). `await ctx.claude.forget(resume)` (needs
+    `uses.claude`) forgets the conversation and removes that transcript — `true`, or `false` when there was none;
+    refused while a run of it goes on — and its next run begins a new one. Removing the plugin with its data does the
+    same for each of its conversations; one whose run goes on then is forgotten when that run ends, never kept.
+  - A session Claude Code no longer has (its transcript removed, its folder wiped: "No conversation found with session
+    ID") fails the run with "this conversation's Claude Code session is gone (its transcript was removed): Echo forgot
+    the conversation, and the next run under it begins a new one"; any other failure keeps the session it had.
+
+  Evidence: `claudejob::Talk`, `claudejob::forget_talk`, `claudejob::forget_keys`
 - In a folder it was given (needs `uses.folders`): `await ctx.claude.run({folder, path, mode, prompt, title, profile,
   model, dir, timeout})` — `folder` a root as `ctx.fs.folders()` names it, `path` a subfolder of it (`""` the root).
   Claude Code starts there as that folder's own project: its `CLAUDE.md`, `.claude/` skills, settings and hooks load
@@ -661,6 +756,16 @@ No line on the sheet: handing a file over is the user's own act. Evidence: `jsho
   `apply`, a timer's or an event handler's own call, or a widget's or work rows' provider. File names come from the user's disk: untrusted text, put into the page only
   through `ctx.ui.esc`. Evidence: `app::choose_files`, `cli::plugin::file_handles`
 - `ctx.files.read(file, {max})` → its text (1 MB by default, 4 MB at most); `file` a handle or its id.
+- `await ctx.files.text(file, {pages, max})` → `{text, pages, truncated}`: the text of a PDF, Word, PowerPoint or
+  spreadsheet file, HTML, Markdown or plain text (a file of another name when its first 8 KB hold no NUL), read by Echo's
+  own readers: no model, no network. The file is read in a child process of Echo (`echoctl files-text`), killed after
+  60 s, so a reader that hangs or crashes never reaches Echo; one extraction at a time for a plugin, two in all (another
+  is refused with why). `pages` (a whole number `3` or a range `"2-5"` / `"7-"`, 1-based) picks pages of a PDF or deck;
+  a file without pages, a malformed or negative number, or a range starting past the last page is refused; in the answer
+  `pages` is the file's page count, `null` for a file without pages. `truncated` when `max` bytes of text (1 MB by
+  default, 4 MB at most) cut the text. Refused: a file over 50 MB, an Office file that unpacks to over 200 MB or holds
+  over 5000 parts, an old `.xls`, a file without text, an HTML page with almost none (a script-drawn page), a PDF where
+  PDFium isn't installed. Needs nothing on the sheet. Evidence: `jshost::files::text`, `jshost::files::child_main`
 - `await ctx.fs.copyIn(file, root, path, {createNew})` → `{path, size}`: its bytes as they are (50 MB at most) into a folder
   it was given, with `folders.write`, as `ctx.fs.write` (never through a link, never a hidden file but those above); never over a file there — unless `createNew: false` (the default is `true`). Evidence:
   `jshost::files::copy_in`
@@ -1154,7 +1259,10 @@ Evidence: `jshost::work::check_rows`
   host first, and an address the user listed (`network.hosts_from`) is reached as it is. It fails closed: while it is
   set, one wrong entry (malformed, or not a local address) fails every request, and a named host it doesn't map is
   refused ("isn't mapped in ECHOCTL_TEST_HOSTS"). Curl sends the fake `Host: 127.0.0.1:<port>`: hosts it must tell
-  apart are served on different ports. A release build never reads it. Evidence: `jshost::test_hosts::test_host`
+  apart are served on different ports. A release build never reads it. It also stands for a public host a page's
+  picture or a `network.web` page is read from (checked first: https, port 80 or 443, an address written as one
+  public), and while it is set such a host it doesn't map is refused the same way. Evidence:
+  `jshost::test_hosts::test_host`, `jshost::web::fake_for`
 - In a development build `ECHOCTL_TEST_GRAPH=http://127.0.0.1:<port>` (or `http://localhost:<port>`) is a fake
   Microsoft 365: Echo counts as signed in (the account About me's address) with a made-up token, sends every Graph
   request of `ctx.m365` (and the rest of Echo's) to `<base>/<path after /v1.0>`, and refuses the real sign-in. It fails

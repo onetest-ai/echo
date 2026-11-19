@@ -583,6 +583,18 @@ fi
 # A plugin's run whose prompt holds "echo-test: keep running" goes on until it is stopped (plugins/TC-216); its pid in
 # <dir>/fake-running.pid.
 case "$*" in *"echo-test: keep running"*) echo $$ > "$(dirname "$0")/../fake-running.pid"; exec sleep 300;; esac
+# A plugin's run whose prompt holds "echo-test: talk" (after -p, or in its stream-json message on stdin, plugins/TC-242):
+# Claude Code's stream — its start, its answer in two pieces, its result — in the session it was asked to resume, else
+# a new one; its arguments in <dir>/fake-talk.args, its stdin message in <dir>/fake-talk.stdin, its folder in <dir>/fake-talk.cwd.
+IN=; case "$*" in *"--input-format stream-json"*) IN="$(head -n 1)";; esac
+case "$*$IN" in *"echo-test: talk"*)
+  T="$(dirname "$0")/.."; printf '%s\\n' "$@" > "$T/fake-talk.args"; printf '%s\\n' "$IN" > "$T/fake-talk.stdin"; pwd > "$T/fake-talk.cwd"
+  S=11111111-2222-4333-8444-555555555555; prev=; for a in "$@"; do [ "$prev" = --resume ] && S="$a"; prev=$a; done
+  echo '{"type":"system","subtype":"init","claude_code_version":"2.1.400","session_id":"'$S'","permissionMode":"default"}'
+  for t in "Hello " "from the fake"; do echo '{"type":"stream_event","parent_tool_use_id":null,"session_id":"'$S'","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"'"$t"'"}}}'; done
+  echo '{"type":"result","subtype":"success","is_error":false,"result":"Hello from the fake","session_id":"'$S'"}'
+  exit 0;;
+esac
 case "$1 $2" in "auth status") ;; *) echo "test data: Claude Code is a fake here" >&2; exit 1;; esac
 case "$(basename "$CLAUDE_CONFIG_DIR")" in
   out)   echo '{"loggedIn": false, "authMethod": "none"}';;

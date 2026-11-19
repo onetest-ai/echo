@@ -419,6 +419,8 @@ pub fn run(id: &str) -> Result<Value> {
         yolo: false,
         folder: None,
         key: None,
+        images: vec![],
+        resume: None,
     };
     let out = crate::claudejob::run(&spec);
     if let Err(e) = &out {
@@ -587,7 +589,7 @@ mod tests {
             (json!({}), json!({}), "p", "routine “mail-notes” runs Claude Code: the manifest needs “claude” in uses"),
             (json!({"claude": {}}), json!({"id": "Mail_Notes"}), "p", "routine “Mail_Notes” needs a plain, unique id"),
             (json!({"claude": {}}), json!({"name": ""}), "p", "its name is one line of 1–60 characters"),
-            (json!({"claude": {}}), json!({"what": "two\nlines"}), "p", "its what is one line of 1–200 characters"),
+            (json!({"claude": {}}), json!({"what": "two\nlines"}), "p", "its routine “mail-notes” holds a control, line-breaking or direction character"),
             (json!({"claude": {}}), json!({"tools": "ask"}), "p", "tools is auto, skip or none"),
             (json!({"claude": {}}), json!({"timeout": 0}), "p", "timeout is 1 to 60 minutes"),
             (json!({"claude": {}}), json!({"prompt": "routines/missing.md"}), "p", "routine “mail-notes”: routines/missing.md isn't in the plugin"),
@@ -600,7 +602,7 @@ mod tests {
             test_package(&d, "acme-routine", uses, r.clone(), prompt);
             let got = problems(&d);
             assert!(got.iter().any(|p| p.contains(want)), "{r}: {got:?}");
-            assert!(read_manifest(&d).is_err(), "an install refuses it: {r}");
+            assert!(read_package(&d).is_err(), "an install refuses it: {r}");
         }
         // Two with one id, and more than four.
         let _ = fs::remove_dir_all(&d);

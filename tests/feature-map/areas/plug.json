@@ -807,7 +807,7 @@
   },
   {
    "id": "F-PLUG-110",
-   "feature": "A plugin's host half reads a web page as Markdown (`ctx.web.read(url, {max, timeout})`, no capability of its own) only where `ctx.http.fetch` may reach — a host its manifest names over https, an address the user listed, a page the user typed once — refused before anything is asked otherwise; a plain GET with no cookies, credentials or redirect followed: {url, title, markdown, links, images, lang, byline, published, description, source, needs_js, truncated, bytes}. The main part without navigation, scripts, forms or frames; headings, lists, code, tables, http(s) links and pictures (`![alt](src)`, a figure's caption under it, tracking pixels and `data:` left out) kept; the page's words never markup and its control and direction marks dropped. A page that builds itself with JavaScript is never run: its JSON-LD, framework state or `<noscript>` text taken when fuller (`source`), `needs_js` when it stays nearly empty. HTML only, never compressed, 5 MB read as it comes, 30 s: a PDF, a redirect (\"it moved\"), an error status or a page past `max` is refused with why. `ctx.web.markdown(html, {base})` reads HTML the plugin already has the same way, fetching nothing",
+   "feature": "A plugin's host half reads a web page as Markdown (`ctx.web.read(url, {max, timeout})`, no capability of its own) only where `ctx.http.fetch` may reach — a host its manifest names over https, an address the user listed, a page the user typed once (and, with `uses.network.web`, a public https page: F-PLUG-139) — refused before anything is asked otherwise; a plain GET with no cookies, credentials or redirect followed: {url, title, markdown, links, images, lang, byline, published, description, source, needs_js, truncated, bytes}. The main part without navigation, scripts, forms or frames; headings, lists, code, tables, http(s) links and pictures (`![alt](src)`, a figure's caption under it, tracking pixels and `data:` left out) kept; the page's words never markup and its control and direction marks dropped. A page that builds itself with JavaScript is never run: its JSON-LD, framework state or `<noscript>` text taken when fuller (`source`), `needs_js` when it stays nearly empty. HTML only, never compressed, 5 MB read as it comes, 30 s: a PDF, a redirect (\"it moved\"), an error status or a page past `max` is refused with why. `ctx.web.markdown(html, {base})` reads HTML the plugin already has the same way, fetching nothing",
    "priority": "high",
    "check": "agent",
    "axes": [
@@ -956,6 +956,53 @@
    "priority": "high",
    "check": "agent",
    "axes": []
+  },
+  {
+   "id": "F-PLUG-139",
+   "feature": "A plugin reads the text of a file handed to it with `ctx.files.text(file, {pages, max})` → `{text, pages, truncated}` (#831): PDF (pdfium; `pages` one page or a range, 1-based), Word, PowerPoint, spreadsheets, HTML, Markdown and plain text through Echo's own readers, a file of another name when it has text; `pages` of the answer is a PDF's or deck's page count (`null` otherwise), `truncated` when `max` (1 MB of text, 4 MB at most) cut it; read in a child process killed after 60 s (a crash or hang never reaches Echo), one at a time for a plugin and two in all; a file over 50 MB, an Office file unpacking to over 200 MB or holding over 5000 parts, an old .xls, a file with no text (or an HTML page with almost none), `pages` on a file without pages or past its last page refused with why; no model, no network, no path in the answer, the plugin's own handles only (as `ctx.files.read`), no new line on the sheet",
+   "priority": "high",
+   "check": "agent",
+   "axes": []
+  },
+  {
+   "id": "F-PLUG-140",
+   "feature": "A plugin keeps a file handed to it in its own store with `ctx.store.copyIn(file, path, {createNew})` (#832): the bytes as they are, 50 MB at most, never out of the store, never over Echo's own files there (`settings.json`, `widgets.json`…), never over a file unless `createNew: false`; `ctx.store.usage(dir?)` gives `{bytes, files}` of the store or one of its folders (not `settings.json`)",
+   "priority": "medium",
+   "check": "agent",
+   "axes": []
+  },
+  {
+   "id": "F-PLUG-141",
+   "feature": "`ctx.settings.get(key)` gives the manifest's `default` for a setting nobody set (a bool `false` and a number too), what the user set when there is one (an empty string too), and `null` for a setting without a default, a secret (never given a default) or an address list the plugin may reach (#832)",
+   "priority": "medium",
+   "check": "agent",
+   "axes": []
+  },
+  {
+   "id": "F-PLUG-142",
+   "feature": "A plugin's window half runs its settings page's connection test with `ctx.call('__testSettings', {section})`: its host half reads the secrets itself, and the window half is given only `{ok, message}` — the message cut at 300 characters, the user's secrets taken out of it, a failure or a plugin without the command told as `{ok: false, message}` (#832)",
+   "priority": "medium",
+   "check": "agent",
+   "axes": []
+  },
+  {
+   "id": "F-PLUG-152",
+   "feature": "A plugin with `uses.network.web: true` (its own sheet line \"Reads web pages on the public internet (https)\"; an update that adds it asks again) reads any https page on the public internet with `ctx.web.read` / `ctx.web.fetch`, with no dialog: port 80 or 443, a host whose every address is public, connected at the address Echo checked and never through a proxy; up to 5 redirects followed, each new address (a relative `Location` against the page it came from) checked again before it is asked — from a public page only as a public page, never into an address the user listed or a host the manifest names. Plain http, another port, this computer, the user's network (private, link-local, unique-local, an IPv4-mapped private address, a name pointing there even in part), a 6th redirect or a redirect to any of these are refused with why. Its other grants keep their rules; without it nothing changes; `ctx.http.fetch` isn't widened; GET only, no cookies or credentials, the same caps (#830)",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "plugin.enabled",
+    "plugin.uses"
+   ]
+  },
+  {
+   "id": "F-PLUG-153",
+   "feature": "A plugin's Claude run (`ctx.claude.run`) takes pictures it holds (`images: [handle]`: PNG, JPEG, GIF or WebP by their bytes, 10 at most, 3.75 MB each — 5 MB base64-encoded — and 15 MB base64-encoded in all, each the plugin's own handle) with its prompt as one stream-json message on stdin, with `tools: 'none'` too; streams Claude's text as it comes (`onText(chunk)`, gathered 50 ms at most, its text between tool calls too, the result the same); and continues a conversation (`resume`, a run key's characters): its next run resumes the Claude Code session Echo keeps for that plugin and conversation — with no tools in a folder of the plugin's own, so it stays out of the folder session's conversations — refused on another AI profile (both named) or folder than it began on, with `copy`, or once the conversation's pictures would pass 20 or 15 MB; one run at a time; `await ctx.claude.forget(resume)` → true (false when there was none) forgets it with its Claude Code transcript, as removing the plugin with its data does; a session Claude Code no longer has fails the run saying Echo forgot the conversation, and the next run begins a new one. A file that isn't such a picture, one too big, too many, another plugin's handle, or a stream number Echo didn't give is refused before Claude Code starts",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "plugin.uses"
+   ]
   },
   {
    "id": "F-PLUG-154",

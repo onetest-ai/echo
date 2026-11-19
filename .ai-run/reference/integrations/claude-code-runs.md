@@ -16,6 +16,24 @@ How Echo starts Claude Code on AI profiles. It changes with the code, in the sam
 - A thread's sync gives its runs their text only on stdin, one stream-json message (`--input-format stream-json`), and
   their fixed instructions in a file (`--append-system-prompt-file`, removed after the run); no skill
   (`--disable-slash-commands`) (`projectsync::args`).
+- A plugin's run (`claudejob::run_with`) with pictures sends them and its prompt as one stream-json message on stdin
+  (`-p --input-format stream-json`), else its prompt after `-p`; streamed (`onText`) it adds
+  `--include-partial-messages`; in a conversation (`resume`) it drops `--no-session-persistence` and continues the
+  session it keeps with `--resume <session>`. Every event of a run reaches `projectsync::finish_run_watched`'s callback.
+  Measured on Claude Code 2.1.328: base64 image blocks in a stream-json message are read in `-p`; text arrives as
+  `stream_event` `content_block_delta` / `text_delta` events (`parent_tool_use_id` null for Claude's own); `--resume
+  <id>` in `-p` answers in the same session id; a `--resume` of a session it doesn't have prints "No conversation found
+  with session ID: <id>" on stderr and a result with `is_error` and that text in `errors`, then exits 1.
+- A plugin's conversation keeps a transcript: Claude Code writes it to the profile's Claude Code folder
+  (`<CLAUDE_CONFIG_DIR>/projects/<folder>/<session>.jsonl` and `<session>/`; a `local` or `claude` profile's own folder,
+  else the user's `~/.claude` or `CLAUDE_CONFIG_DIR`), listed by the folder the run started in. A conversation with no
+  tools starts in `<state>/plugins/.runs/<plugin>/talk`, never the data folder, so `/resume` in the Claude · Echo folder
+  session doesn't list it; one with tools starts in the data folder and one in a given folder there, and those lists
+  show it. `claudejob::forget_record` removes the record and that transcript (`ctx.claude.forget`, the plugin removed
+  with its data, a session Claude Code no longer has). Pictures are capped by the smallest limits of the platforms a
+  profile may reach (Amazon Bedrock: 5 MB base64-encoded a picture, 20 MB a request; the Claude API: 10 MB and 128 MB;
+  more than 20 pictures in a request: smaller pictures only), counted across a conversation's turns, since Claude Code
+  sends its earlier pictures again (`claudejob::IMAGES_TOTAL`, `IMAGES_TOTAL_BYTES`).
 - The folder session, a plugin's session (on the folder session's setting), a routine, Yolo and a plugin's folder run (on the
   routines' setting) get their permission flags
   from one helper, `folder_args::permission_args(setting, profile, model, may_edit)` → (flags, words for the run's

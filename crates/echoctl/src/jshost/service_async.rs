@@ -3,6 +3,29 @@
 
 use super::*;
 
+/// How long a run's streamed text is gathered before it goes to the plugin's `onText`.
+const STREAM_EVERY: Duration = Duration::from_millis(50);
+
+/// The numbers Echo gave plugins for a run's streamed text (`claude.stream`), each its plugin's and taken once: at most
+/// 1,000 waiting, the oldest dropped first.
+static STREAMS: Mutex<std::collections::BTreeSet<(u64, String)>> = Mutex::new(std::collections::BTreeSet::new());
+
+/// A number for plugin `id`'s run's streamed text (`ctx.claude.run({onText})`), delivered as a connection's events.
+pub(super) fn stream_for(id: &str) -> u64 {
+    let n = NEXT.fetch_add(1, Ordering::Relaxed);
+    let mut s = STREAMS.lock().unwrap_or_else(|e| e.into_inner());
+    while s.len() >= 1000 {
+        s.pop_first();
+    }
+    s.insert((n, id.to_string()));
+    n
+}
+
+/// Was `n` given to plugin `id` for a run's stream, and not used yet? Taken.
+fn take_stream(id: &str, n: u64) -> bool {
+    STREAMS.lock().unwrap_or_else(|e| e.into_inner()).remove(&(n, id.to_string()))
+}
+
 pub(super) fn service_async(id: &str, op: &str, arg: &Value) -> Result<Value> {
     match op {
         // A script it declared (`uses.scripts`).
@@ -26,9 +49,47 @@ pub(super) fn service_async(id: &str, op: &str, arg: &Value) -> Result<Value> {
                 _ => bail!("a run's key is a string"),
             };
             spec.key = keyed.as_ref().map(|k| k.base.clone());
+            // Pictures it holds (`images`), a conversation it continues (`resume`, held while the run goes on).
+            spec.images = files::images(id, &arg["images"])?;
+            let talk = match &arg["resume"] {
+                Value::Null => None,
+                Value::String(k) => Some(crate::claudejob::Talk::take(id, k)?),
+                _ => bail!("a run's resume is a string"),
+            };
+            spec.resume = talk.as_ref().map(|t| t.file.clone());
+            if talk.is_some() && arg["mode"] == "copy" {
+                bail!("a conversation (resume) isn't continued in a copy: each copy run is a snapshot of its own — run it in `read` or `edit`");
+            }
+            // Its answer as it comes (`onText`): only on a number Echo gave it for that (`stream_for`).
+            let stream = match &arg["stream"] {
+                Value::Null => None,
+                v => Some(v.as_u64().filter(|n| take_stream(id, *n)).ok_or_else(|| anyhow!("a run's stream is Echo's to give: pass onText"))?),
+            };
             // In a folder it was given (`folder`, `path`, `mode`): there, or in a snapshot of it (`copy`).
             let snapshot = folders::claude_folder(id, &arg, &mut spec)?;
-            let ran = crate::claudejob::run(&spec);
+            // Each piece to its handler as a connection's event — gathered for 50 ms at most, all of it at a block's end
+            // and at the run's, so a fast stream never floods the host.
+            let ran = match stream {
+                Some(n) => {
+                    let mut held = String::new();
+                    let mut last: Option<Instant> = None;
+                    let ran = crate::claudejob::run_with(
+                        &spec,
+                        Some(&mut |t: &str| {
+                            held.push_str(t);
+                            if !held.is_empty() && (t.is_empty() || last.is_none_or(|l| l.elapsed() >= STREAM_EVERY)) {
+                                net::emit(id, n, json!({"text": std::mem::take(&mut held)}));
+                                last = Some(Instant::now());
+                            }
+                        }),
+                    );
+                    if !held.is_empty() {
+                        net::emit(id, n, json!({"text": held}));
+                    }
+                    ran
+                }
+                None => crate::claudejob::run(&spec),
+            };
             // A failed run's snapshot goes: the plugin never got its name.
             if let (Err(_), Some(s)) = (&ran, &snapshot) {
                 if let Ok(d) = store_path(id, s["path"].as_str().unwrap_or("")) {
@@ -48,6 +109,11 @@ pub(super) fn service_async(id: &str, op: &str, arg: &Value) -> Result<Value> {
         "claude.stop" => {
             uses(id, "claude")?;
             Ok(json!(crate::claudejob::stop_keyed(id, arg.as_str().unwrap_or(""))?))
+        }
+        // Its conversation forgotten (`claudejob::forget_talk`): true, or false when there was none.
+        "claude.forget" => {
+            uses(id, "claude")?;
+            Ok(json!(crate::claudejob::forget_talk(id, arg.as_str().unwrap_or(""))?))
         }
         // The user's sign-in to a host its sheet named (`plugins::signin`), to the host half only.
         "signin.get" => {
@@ -80,6 +146,8 @@ pub(super) fn service_async(id: &str, op: &str, arg: &Value) -> Result<Value> {
             })
         }
         "system.pick_files" => files::pick(id, arg[0].as_str().unwrap_or(""), &arg[1]),
+        "store.copy_in" => files::copy_in_store(id, &arg[0], arg[1].as_str().unwrap_or(""), arg[2]["createNew"].as_bool().unwrap_or(true)),
+        "handles.text" => files::text(id, &arg[0], &arg[1]),
         "fs.copy_in" => files::copy_in(id, &arg[0], arg[1].as_str().unwrap_or(""), arg[2].as_str().unwrap_or(""), arg[3]["createNew"].as_bool().unwrap_or(true)),
         "fs.read_many" => {
             uses(id, "folders")?;
