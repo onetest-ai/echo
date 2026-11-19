@@ -945,7 +945,7 @@
   },
   {
    "id": "F-PLUG-150",
-   "feature": "A plugin that asks for `uses.speech: true` (its sheet line: \"Transcribes audio files you hand it (WAV, up to 60 minutes and 200 MB) with Echo's own speech model, on this computer, or on the transcription server you connected; it starts only while Echo is not recording or transcribing a call. The text goes only to the plugin\") transcribes a WAV file it was handed with `ctx.speech.transcribe(file, {words, language})` on Echo's own speech model, in `language` or Settings' first language: `{text, language, segments: [{start, end, text}], words?: [{start, end, word}]}`, the words only when asked and the engine timed them (Whisper, Parakeet and Nemotron do) (#834)",
+   "feature": "A plugin that asks for `uses.speech: true` (its sheet line: \"Transcribes audio files you hand it (WAV, webm/opus, ogg/opus, m4a or mp3, up to 60 minutes and 200 MB) with Echo's own speech model, on this computer, or on the transcription server you connected; it starts only while Echo is not recording or transcribing a call. The text goes only to the plugin\") transcribes a WAV file it was handed with `ctx.speech.transcribe(file, {words, language})` on Echo's own speech model, in `language` or Settings' first language: `{text, language, segments: [{start, end, text}], words?: [{start, end, word}]}`, the words only when asked and the engine timed them (Whisper, Parakeet and Nemotron do) (#834)",
    "priority": "high",
    "check": "agent",
    "axes": []
@@ -953,6 +953,13 @@
   {
    "id": "F-PLUG-151",
    "feature": "`ctx.speech.transcribe` refuses, with its reason and without waiting: a plugin that didn't ask for `speech`, a file that isn't a handle of its own (a path, another plugin's), a file that isn't a WAV, over 60 minutes of audio or 200 MB, a language Echo doesn't know, no speech model, while Echo records (a call or a memo) or transcribes a call, and while a file is already being transcribed (#834)",
+   "priority": "high",
+   "check": "agent",
+   "axes": []
+  },
+  {
+   "id": "F-PLUG-152",
+   "feature": "`ctx.speech.transcribe` also takes compressed audio — webm/opus (a window's MediaRecorder), ogg (Opus or Vorbis), m4a/mp4 (AAC) and mp3 — read from the file's content, decoded to 16 kHz mono in pure Rust, with the 60-minute cap counted on the decoded audio as it decodes, and a damaged file refused with a reason; one lock (`plugins/.locks/speech.lock`) keeps the app and `echoctl plugin call` to one file at a time (#841)",
    "priority": "high",
    "check": "agent",
    "axes": []

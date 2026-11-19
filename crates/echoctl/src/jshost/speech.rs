@@ -1,4 +1,5 @@
-//! `ctx.speech.transcribe(file, {words, language})`: a WAV file the user handed the plugin (a handle, checked as
+//! `ctx.speech.transcribe(file, {words, language})`: an audio file (WAV, and with the `decode` feature webm/opus, ogg/opus,
+//! m4a, mp3: `decode.rs`) the user handed the plugin (a handle, checked as
 //! `ctx.files.read` checks it), transcribed with Echo's own speech model on the user's language — on this computer, or
 //! on the transcription server the user connected (`transcribe::final_transcriber` routes it as it does a call). Run
 //! off the plugin's slice, one file at a time, never while Echo records or transcribes a call. Only the host half gets
@@ -11,8 +12,13 @@ const MAX_SECONDS: f64 = 3600.0;
 /// The largest file it opens.
 const MAX_BYTES: u64 = 200 << 20;
 
-/// One file at a time: a second asks again once the first is done.
-static ONE_AT_A_TIME: Mutex<()> = Mutex::new(());
+/// One file at a time across processes — the app's and every `echoctl plugin call`'s — as the other per-plugin locks are
+/// (`.locks/` beside the stores): a second asks again once the first is done.
+fn one_at_a_time() -> Result<crate::app::FileLock> {
+    let dir = paths::state_dir().join("plugins").join(".locks");
+    std::fs::create_dir_all(&dir)?;
+    crate::app::FileLock::try_take(&dir.join("speech.lock"))?.ok_or_else(|| anyhow!("Echo is transcribing another file for a plugin — try again when it is done"))
+}
 
 /// Whether Echo records or transcribes a call now: the recorder's state, or a call's `.transcribing` marker whose
 /// process is alive.
@@ -27,15 +33,29 @@ fn busy() -> bool {
 /// within a few GB whatever the file's bit depth and rate (the 200 MB cap bounds the file, not what it decodes to).
 const MAX_SAMPLES: u64 = 3600 * 48_000;
 
-/// The file opened once, as a regular file (never waiting on a FIFO put in its place), and read from that one handle by
-/// everything after: a WAV within the caps (its size, its length, the memory decoding it takes), else why not.
-fn open_within_caps(path: &Path) -> Result<hound::WavReader<std::io::BufReader<std::fs::File>>> {
+/// The file opened once, as a regular file (never waiting on a FIFO put in its place) within the size cap; everything
+/// after reads from this one handle.
+fn open_within_size(path: &Path) -> Result<std::fs::File> {
     let file = crate::grants::open_regular(path)?;
     let size = file.metadata()?.len();
     if size > MAX_BYTES {
         bail!("the file is {} MB — ctx.speech.transcribe takes at most {} MB", size >> 20, MAX_BYTES >> 20);
     }
-    let r = hound::WavReader::new(std::io::BufReader::new(file)).map_err(|_| anyhow!("ctx.speech.transcribe reads WAV files only"))?;
+    Ok(file)
+}
+
+/// Whether the file starts as a WAV does (its read position is put back).
+fn is_wav(file: &mut std::fs::File) -> Result<bool> {
+    use std::io::{Read, Seek};
+    let mut head = [0u8; 12];
+    let n = file.read(&mut head)?;
+    file.rewind()?;
+    Ok(n == 12 && &head[..4] == b"RIFF" && &head[8..] == b"WAVE")
+}
+
+/// A WAV within the caps (its length, the memory decoding it takes), else why not.
+fn open_wav_within_caps(file: std::fs::File) -> Result<hound::WavReader<std::io::BufReader<std::fs::File>>> {
+    let r = hound::WavReader::new(std::io::BufReader::new(file)).map_err(|_| anyhow!("this WAV can't be read"))?;
     let spec = r.spec();
     if !(100..=384_000).contains(&spec.sample_rate) || spec.channels == 0 || spec.bits_per_sample == 0 || spec.bits_per_sample > 32 {
         bail!("this WAV's format ({} Hz, {} channels, {} bits) isn't one ctx.speech.transcribe reads", spec.sample_rate, spec.channels, spec.bits_per_sample);
@@ -48,6 +68,37 @@ fn open_within_caps(path: &Path) -> Result<hound::WavReader<std::io::BufReader<s
         bail!("the audio is too much to decode ({} channels at {} Hz) — ctx.speech.transcribe takes at most an hour at 48 kHz mono", spec.channels, spec.sample_rate);
     }
     Ok(r)
+}
+
+/// A file past its cheap checks (its size, a WAV's header caps), before anything is loaded: decoded after the lock, the
+/// busy check and the model, so a refusal of the file never waits for those.
+#[cfg(feature = "transcribe")]
+enum Input {
+    Wav(hound::WavReader<std::io::BufReader<std::fs::File>>),
+    #[cfg(feature = "decode")]
+    Other(std::fs::File),
+}
+
+#[cfg(feature = "transcribe")]
+fn open_input(path: &Path) -> Result<Input> {
+    let mut file = open_within_size(path)?;
+    if is_wav(&mut file)? {
+        return Ok(Input::Wav(open_wav_within_caps(file)?));
+    }
+    #[cfg(not(feature = "decode"))]
+    bail!("ctx.speech.transcribe reads WAV files only");
+    #[cfg(feature = "decode")]
+    Ok(Input::Other(file))
+}
+
+/// The input as 16 kHz mono: a WAV by its header, other audio decoded (`decode.rs`, its caps measured on the decoded audio).
+#[cfg(feature = "transcribe")]
+fn load_audio(input: Input) -> Result<Vec<f32>> {
+    match input {
+        Input::Wav(r) => crate::transcribe::load_16k_from(r),
+        #[cfg(feature = "decode")]
+        Input::Other(f) => crate::decode::load_16k(f, MAX_SECONDS),
+    }
 }
 
 /// `{text, language, segments: [{start, end, text}], words?: [{start, end, word}]}` from decoded `segs` (seconds from
@@ -77,14 +128,14 @@ pub(super) fn transcribe(id: &str, file: &Value, opts: &Value) -> Result<Value> 
         bail!("{id} didn't ask for “speech” when it was installed");
     }
     let (path, _) = files::own(id, file)?;
-    let wav = open_within_caps(&path)?;
+    let input = open_input(&path)?;
     let cfg = crate::config::Config::load()?;
     let language = match opts["language"].as_str().filter(|l| !l.is_empty()) {
         Some(l) if !(l.len() <= 8 && l.bytes().all(|b| b.is_ascii_alphabetic())) => bail!("“{}” isn't a language code Echo transcribes in", l.chars().take(20).collect::<String>()),
         Some(l) => Some(whisper_rs::get_lang_id(&l.to_lowercase()).map(|n| (n, whisper_rs::get_lang_str(n).unwrap_or("en"))).ok_or_else(|| anyhow!("“{l}” isn't a language code Echo transcribes in"))?),
         None => None,
     };
-    let Ok(_one) = ONE_AT_A_TIME.try_lock() else { bail!("Echo is transcribing another file for a plugin — try again when it is done") };
+    let _one = one_at_a_time()?;
     if busy() {
         bail!("Echo is recording or transcribing a call — a plugin's audio is transcribed once it is done");
     }
@@ -94,7 +145,7 @@ pub(super) fn transcribe(id: &str, file: &Value, opts: &Value) -> Result<Value> 
             tr.set_language(n);
         }
     }
-    let audio = crate::transcribe::load_16k_from(wav)?;
+    let audio = load_audio(input)?;
     let segs = tr.track("speech", &audio)?;
     let code = whisper_rs::get_lang_str(tr.language()).unwrap_or("en");
     Ok(shape(&segs, code, opts["words"].as_bool() == Some(true)))
@@ -106,13 +157,18 @@ pub(super) fn transcribe(id: &str, file: &Value, _opts: &Value) -> Result<Value>
         bail!("{id} didn't ask for “speech” when it was installed");
     }
     let (path, _) = files::own(id, file)?;
-    let _ = (open_within_caps(&path)?, busy);
+    let _ = (open_within_size(&path)?, is_wav, open_wav_within_caps, one_at_a_time, busy);
     bail!("this Echo is built without a speech model")
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A WAV as `load_audio` opens it.
+    fn open_within_caps(path: &Path) -> Result<hound::WavReader<std::io::BufReader<std::fs::File>>> {
+        open_wav_within_caps(open_within_size(path)?)
+    }
 
     fn wav(path: &Path, rate: u32, seconds: u32) {
         let mut w = hound::WavWriter::create(path, hound::WavSpec { channels: 1, sample_rate: rate, bits_per_sample: 16, sample_format: hound::SampleFormat::Int }).unwrap();
@@ -188,7 +244,11 @@ mod tests {
         // Not a WAV.
         let mp3 = root.join("talk.mp3");
         std::fs::write(&mp3, b"ID3 not audio samples").unwrap();
-        assert!(open_within_caps(&mp3).err().unwrap().to_string().contains("WAV files only"));
+        #[cfg(feature = "transcribe")]
+        {
+            let e = open_input(&mp3).and_then(load_audio).unwrap_err().to_string();
+            assert!(e.contains("isn't audio") || e.contains("WAV files only"), "{e}");
+        }
         // Over 200 MB: refused by its size, before it is read.
         let big = root.join("big.wav");
         std::fs::File::create(&big).unwrap().set_len(MAX_BYTES + 1).unwrap();
@@ -248,5 +308,54 @@ mod tests {
         let untimed = vec![timed[0].clone(), seg("No times here", 1.2, vec![])];
         assert!(shape(&untimed, "en", true).get("words").is_none(), "an engine that gave no times for a sentence gives none");
         assert_eq!(shape(&[], "en", true)["text"], "");
+    }
+
+    #[cfg(feature = "decode")]
+    #[test]
+    fn compressed_audio_of_each_kind_comes_out_as_16_khz_mono_of_its_own_length_and_is_capped_on_what_it_decodes_to() {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/audio/compressed");
+        for name in ["very-short.opus.webm", "very-short.live.opus.webm", "very-short.opus.ogg", "very-short.m4a", "very-short.mp3", "very-short.stereo48.opus.webm"] {
+            let audio = crate::decode::load_16k(std::fs::File::open(dir.join(name)).unwrap(), MAX_SECONDS).unwrap_or_else(|e| panic!("{name}: {e:#}"));
+            let seconds = audio.len() as f64 / 16_000.0;
+            assert!((9.0..9.8).contains(&seconds), "{name}: {seconds} s");
+            // Not silence: the made-up voice is in it, between 1 s and 4.5 s.
+            let rms = |a: &[f32]| (a.iter().map(|x| x * x).sum::<f32>() / a.len() as f32).sqrt();
+            assert!(rms(&audio[16_000..70_000]) > 0.01, "{name}: heard nothing");
+            // The cap is on the decoded audio, whatever the file says.
+            let e = crate::decode::load_16k(std::fs::File::open(dir.join(name)).unwrap(), 5.0).unwrap_err().to_string();
+            assert!(e.contains("takes at most"), "{name}: {e}");
+        }
+        // Not audio, and a damaged one: refused with a reason, never a panic.
+        let (_env, root) = paths::testenv::folders("speech-decode");
+        let junk = root.join("junk.webm");
+        std::fs::write(&junk, vec![0x1au8; 4096]).unwrap();
+        assert!(crate::decode::load_16k(std::fs::File::open(&junk).unwrap(), MAX_SECONDS).is_err());
+        let mut cut = std::fs::read(dir.join("very-short.m4a")).unwrap();
+        cut.truncate(cut.len() / 3);
+        let cut_path = root.join("cut.m4a");
+        std::fs::write(&cut_path, cut).unwrap();
+        let _ = crate::decode::load_16k(std::fs::File::open(&cut_path).unwrap(), MAX_SECONDS);
+        // An mp3 under a 2 MB ID3v2 tag (cover art): the tag is skipped, never parsed.
+        let mut tagged = b"ID3\x03\x00\x00".to_vec();
+        let size = 2usize << 20;
+        tagged.extend([(size >> 21) as u8 & 0x7f, (size >> 14) as u8 & 0x7f, (size >> 7) as u8 & 0x7f, size as u8 & 0x7f]);
+        tagged.extend(vec![0u8; size]);
+        tagged.extend(std::fs::read(dir.join("very-short.mp3")).unwrap());
+        let tagged_path = root.join("tagged.mp3");
+        std::fs::write(&tagged_path, tagged).unwrap();
+        let audio = crate::decode::load_16k(std::fs::File::open(&tagged_path).unwrap(), MAX_SECONDS).unwrap();
+        assert!((9.0..9.8).contains(&(audio.len() as f64 / 16_000.0)));
+        // Through the service's own path: a WAV by its header, anything else decoded.
+        assert!(open_input(&dir.join("very-short.mp3")).and_then(load_audio).unwrap().len() > 140_000);
+    }
+
+    #[test]
+    fn a_second_file_waits_for_the_first_across_processes_by_the_lock_file() {
+        let (_env, _root) = paths::testenv::folders("speech-lock");
+        let first = one_at_a_time().unwrap();
+        let e = one_at_a_time().err().unwrap().to_string();
+        assert!(e.contains("transcribing another file"), "{e}");
+        drop(first);
+        one_at_a_time().unwrap();
     }
 }
