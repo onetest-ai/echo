@@ -1,5 +1,12 @@
 [
   {
+    "version": "0.10.2",
+    "items": [
+      { "icon": "sparkle", "title": "Start a new conversation", "text": "When a Claude session has ended, its panel offers New conversation beside Resume.", "open": "today" },
+      { "icon": "fix", "title": "Plugin update notice that clears", "text": "The older Echo plugin notice ignores projects that are gone and checks each AI profile's own Claude Code, naming the profile.", "open": "settings/health" }
+    ]
+  },
+  {
     "version": "0.10.1",
     "items": [
       { "icon": "filter", "title": "Search what was said", "text": "Press Enter in the Calls search to find words across calls, mail, channels and documents, with filters, and open each moment beside the list.", "open": "calls" },
