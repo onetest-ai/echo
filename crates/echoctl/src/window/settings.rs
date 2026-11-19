@@ -2,7 +2,7 @@
 
 use super::*;
 #[cfg(feature = "brain")]
-use super::brain::{BRAIN_LAST, BRAIN_SYNC};
+use super::intake::{BRAIN_LAST, BRAIN_SYNC};
 
 /// What Settings shows: each setting's value and what is installed, signed in or granted. Flows
 /// with a dialog run as the tray's own actions (`settings_action`); plain values save here
@@ -85,12 +85,12 @@ pub(super) fn settings_snapshot() -> Value {
     }
     #[cfg(feature = "brain")]
     {
-        let mut b = crate::brain::status().unwrap_or_else(|e| json!({ "error": format!("{e:#}") }));
-        b["auto"] = json!(crate::brain::settings().auto());
-        b["enabled"] = json!(crate::brain::enabled());
+        let mut b = crate::intake::status().unwrap_or_else(|e| json!({ "error": format!("{e:#}") }));
+        b["auto"] = json!(crate::intake::settings().auto());
+        b["enabled"] = json!(crate::intake::enabled());
         b["syncing"] = json!(BRAIN_SYNC.load(std::sync::atomic::Ordering::SeqCst));
         // How often Claude asks it, and the window's views of it (#34): counts only.
-        b["usage"] = crate::brain::advert::usage(7);
+        b["usage"] = crate::intake::advert::usage(7);
         b["last"] = BRAIN_LAST.lock().map(|l| l.clone()).unwrap_or(Value::Null);
         v["brain"] = b;
     }
@@ -166,7 +166,7 @@ pub(super) fn settings_set(key: &str, value: &Value) -> anyhow::Result<()> {
         // Settings → Brain: the embedding server, in <config dir>/brain.json.
         #[cfg(feature = "brain")]
         k if k.starts_with("brain_") => {
-            let mut s = crate::brain::settings();
+            let mut s = crate::intake::settings();
             let text = value.as_str().unwrap_or("").trim().to_string();
             match k {
                 "brain_endpoint" => s.endpoint = text,
@@ -177,7 +177,7 @@ pub(super) fn settings_set(key: &str, value: &Value) -> anyhow::Result<()> {
                 "brain_enabled" => s.enabled = Some(value.as_bool().unwrap_or(true)),
                 _ => anyhow::bail!("no setting {k}"),
             }
-            return crate::brain::save_settings(&s);
+            return crate::intake::save_settings(&s);
         }
         _ => {}
     }

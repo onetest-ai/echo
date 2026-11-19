@@ -35,7 +35,7 @@ mod today;
 mod plugins;
 pub(crate) mod terminals;
 #[cfg(feature = "brain")]
-mod brain;
+mod intake;
 #[cfg(feature = "brain")]
 mod search;
 
@@ -503,7 +503,7 @@ fn respond(req: &Request<Vec<u8>>) -> Response<Cow<'static, [u8]>> {
         return r;
     }
     #[cfg(feature = "brain")]
-    if let Some(r) = brain::route(&path, req) {
+    if let Some(r) = intake::route(&path, req) {
         return r;
     }
     #[cfg(feature = "brain")]
@@ -608,7 +608,7 @@ fn state() -> Value {
         "whats_new": crate::whats_new::pending(),
         "ai": crate::ai::summary(),
         // The Brain: built in and switched on (off hides it everywhere in the window).
-        "brain": cfg!(feature = "brain") && { #[cfg(feature = "brain")] { crate::brain::enabled() } #[cfg(not(feature = "brain"))] { false } },
+        "brain": cfg!(feature = "brain") && { #[cfg(feature = "brain")] { crate::intake::enabled() } #[cfg(not(feature = "brain"))] { false } },
     })
 }
 
@@ -742,7 +742,7 @@ pub fn handle(msg: &str) -> Handled {
         return r;
     }
     #[cfg(feature = "brain")]
-    if let Some(r) = brain::handle(&v) {
+    if let Some(r) = intake::handle(&v) {
         return r;
     }
     // Anything else is an action on a call.

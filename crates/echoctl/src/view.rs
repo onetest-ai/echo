@@ -160,7 +160,7 @@ fn view_lines(v: &Value, now: chrono::DateTime<chrono::Utc>, calls: &Path) -> Op
     }
     // Where the Brain helps with what is open (#34), when it is on: one line, the tool and its scope.
     #[cfg(feature = "brain")]
-    if crate::brain::enabled() {
+    if crate::intake::enabled() {
         let scope = match (&client_id, &thread_id) {
             (Some(c), _) => format!(" with client={c}"),
             (None, Some(t)) => format!(" with thread={t}"),
@@ -242,7 +242,7 @@ pub fn hook() -> i32 {
         }
         // What the Brain holds for this session and when to go there (#34): only when it is on.
         #[cfg(feature = "brain")]
-        if let Some(b) = session_access().and_then(|a| crate::brain::advert::session_block(&a)) {
+        if let Some(b) = session_access().and_then(|a| crate::intake::advert::session_block(&a)) {
             // Its "Last updated" line changes with every sync: a resumed session isn't sent the block for that alone.
             let stable: String = b.lines().filter(|l| !l.starts_with("Last updated")).collect::<Vec<_>>().join("\n");
             let (c, tell) = block_due(&mut sent, "brain", &session, input["source"].as_str().unwrap_or(""), &stable, now);
@@ -267,9 +267,9 @@ pub fn hook() -> i32 {
 /// What this session may see of the Brain: its AI profile, and for a call's session that call's client, else its
 /// threads, else the call itself — as its echo server is narrowed (`terminal::start_call`).
 #[cfg(feature = "brain")]
-fn session_access() -> Option<crate::brain::access::Access> {
+fn session_access() -> Option<crate::intake::access::Access> {
     let profile = std::env::var(PROFILE_VAR).ok().filter(|p| !p.is_empty())?;
-    let mut a = crate::brain::access::Access { profile, ..Default::default() };
+    let mut a = crate::intake::access::Access { profile, ..Default::default() };
     if let Some(dir) = std::env::var_os(crate::guard::RUN_CALL).map(std::path::PathBuf::from) {
         a.call = Some(format!("call/{}", crate::calls::stamp_of(&dir)));
         let threads = crate::projects::of_call(&dir).unwrap_or_default();
@@ -515,7 +515,7 @@ mod tests {
         let v = json!({"at": now.to_rfc3339(), "event": {"subject": "Acme weekly", "when": "Thu 10:00"}});
         // Off: no hint at all.
         assert!(!context(&v, now, &root).unwrap().contains("search_"));
-        crate::brain::save_settings(&crate::brain::embed::Settings { enabled: Some(true), ..Default::default() }).unwrap();
+        crate::intake::save_settings(&crate::intake::embed::Settings { enabled: Some(true), ..Default::default() }).unwrap();
         for v in [v.clone(), json!({"at": now.to_rfc3339(), "item": {"id": "T1", "title": "Send the forecast"}}), json!({"at": now.to_rfc3339(), "call": {"title": "Acme sync"}})] {
             let b = context(&v, now, &root).unwrap();
             assert!(b.contains("search_sources"), "{b}");

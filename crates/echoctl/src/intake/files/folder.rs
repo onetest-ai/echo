@@ -5,7 +5,7 @@
 //! changed are read again; gone → removed with its sections. Of twins (one name, several formats) the
 //! editable one is read. Every page is indexed from its text.
 
-use crate::brain::store::{self, Input};
+use crate::intake::store::{self, Input};
 use crate::projects;
 use anyhow::{anyhow, Result};
 use rusqlite::{params, Connection, OptionalExtension};
@@ -179,8 +179,8 @@ fn folders_of(ps: impl Iterator<Item = projects::Project>) -> BTreeMap<String, (
 }
 
 /// Sync every watched folder.
-pub fn sync(emb: Option<&dyn crate::brain::embed::Embedder>) -> Result<Vec<Report>> {
-    let path = crate::brain::store_path();
+pub fn sync(emb: Option<&dyn crate::intake::embed::Embedder>) -> Result<Vec<Report>> {
+    let path = crate::intake::store_path();
     let c = store::open(&path)?;
     ensure_schema(&c)?;
     let w = watched();
@@ -215,7 +215,7 @@ struct Row {
     indexed_sha: Option<String>,
 }
 
-fn sync_root(c: &Connection, path: &Path, root: &Path, excludes: &[String], threads: &[Value], emb: Option<&dyn crate::brain::embed::Embedder>) -> Result<Report> {
+fn sync_root(c: &Connection, path: &Path, root: &Path, excludes: &[String], threads: &[Value], emb: Option<&dyn crate::intake::embed::Embedder>) -> Result<Report> {
     let root_s = root.to_string_lossy().to_string();
     let mut rep = Report { root: root_s.clone(), ..Default::default() };
     if !root.is_dir() {
@@ -429,7 +429,7 @@ pub fn page_of(title: &str) -> Option<usize> {
 
 /// The registry for the window: per watched folder, its files with what happened to each.
 pub fn status() -> Result<Value> {
-    let c = store::open(&crate::brain::store_path())?;
+    let c = store::open(&crate::intake::store_path())?;
     ensure_schema(&c)?;
     // Counts only: a folder may hold thousands of files.
     let mut out = serde_json::Map::new();
@@ -449,7 +449,7 @@ pub fn status() -> Result<Value> {
 
 /// Every folder's files with what happened to each (`echoctl brain files`).
 pub fn list_all() -> Result<Value> {
-    let c = store::open(&crate::brain::store_path())?;
+    let c = store::open(&crate::intake::store_path())?;
     ensure_schema(&c)?;
     let mut out = serde_json::Map::new();
     for root in watched().keys() {
@@ -468,7 +468,7 @@ pub fn list_all() -> Result<Value> {
 
 /// A registered file's path (the window opens it; nothing else may be opened this way).
 pub fn path_of(id: &str) -> Option<PathBuf> {
-    let c = store::open(&crate::brain::store_path()).ok()?;
+    let c = store::open(&crate::intake::store_path()).ok()?;
     // Only a document Echo reads (never a file it skipped or doesn't read — a script, an app).
     let (root, rel): (String, String) = c
         .query_row("SELECT root, rel FROM files WHERE id = ?1 AND state = 'active' AND coalesce(status, '') NOT IN ('skipped', 'unsupported')", [id], |r| Ok((r.get(0)?, r.get(1)?)))

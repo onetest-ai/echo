@@ -63,7 +63,7 @@ pub(super) fn scope_layers(t: &Taxonomy, scope: store::Scope) -> Option<BTreeSet
 pub fn view_in(scope: store::Scope) -> Result<Value> {
     let Some(t) = current() else { return Ok(json!({"exists": false})) };
     // The index's counts only with Intake on and an index there: off, the dictionary never opens (or makes) it.
-    let st = if crate::brain::enabled() && crate::brain::store_path().exists() { stats(scope)? } else { std::sync::Arc::new(Stats::default()) };
+    let st = if crate::intake::enabled() && crate::intake::store_path().exists() { stats(scope)? } else { std::sync::Arc::new(Stats::default()) };
     let empty = BTreeSet::new();
     let count = |id: &str| -> (i64, BTreeSet<String>, BTreeSet<String>) {
         (st.sections.get(id).copied().unwrap_or(0), st.threads.get(id).unwrap_or(&empty).clone(), st.clients.get(id).map(|m| m.keys().cloned().collect()).unwrap_or_default())

@@ -52,7 +52,7 @@ pub(super) fn answering(mut item: Value, node: &str, title: &str) -> Value {
 pub fn mail_me() -> impl Fn(&str) -> bool {
     let mine = crate::config::Config::load().ok().and_then(|c| c.me).and_then(|m| m.email).map(|e| e.to_lowercase());
     #[cfg(feature = "brain")]
-    let local = crate::brain::sources::me_local();
+    let local = crate::intake::sources::me_local();
     #[cfg(not(feature = "brain"))]
     let local: Option<String> = None;
     move |e: &str| Some(e) == mine.as_deref() || local.as_deref().is_some_and(|l| e.split('@').next() == Some(l))
@@ -162,8 +162,8 @@ pub fn mail_due(p: &crate::projects::Project) -> bool {
 /// written; a source that can't be read keeps its error in `mails.json`.
 #[cfg(feature = "brain")]
 pub fn mail_sync(project: &str) -> Result<Vec<String>> {
-    use crate::brain::senders::{self, Verdict};
-    use crate::brain::sources::{me_local, not_me, MailRule, MAX_PEOPLE};
+    use crate::intake::senders::{self, Verdict};
+    use crate::intake::sources::{me_local, not_me, MailRule, MAX_PEOPLE};
     let p = crate::projects::load(project)?;
     let rules: Vec<crate::projects::Source> = p.sources.iter().filter(|s| s.kind == "mail").cloned().collect();
     let follow = followed(project);
@@ -340,7 +340,7 @@ pub fn reread_sources(client: &str) -> Result<()> {
 }
 
 /// A mail source whose subjects changed: the thread reads its first window again at the next sync, by the new words
-/// (Recall too: `brain::sources::read_again`). Items already in the thread stay.
+/// (Recall too: `intake::sources::read_again`). Items already in the thread stay.
 pub fn read_mail_again(project: &str, rule: &str) -> Result<()> {
     let f = mails_file(project);
     let mut st = calls::read_json(&f);
@@ -350,7 +350,7 @@ pub fn read_mail_again(project: &str, rule: &str) -> Result<()> {
         crate::paths::write_atomic(&f, serde_json::to_string_pretty(&st)?.as_bytes())?;
     }
     #[cfg(feature = "brain")]
-    crate::brain::sources::read_again("mail", rule)?;
+    crate::intake::sources::read_again("mail", rule)?;
     Ok(())
 }
 

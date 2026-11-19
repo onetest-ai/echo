@@ -371,7 +371,7 @@ fn person_text(v: &Value) -> String {
 
 #[cfg(feature = "brain")]
 fn mail_text(src: &str) -> Result<String> {
-    let f = crate::brain::facts::read(src).ok_or_else(|| anyhow!("no mail {src:?}"))?;
+    let f = crate::intake::facts::read(src).ok_or_else(|| anyhow!("no mail {src:?}"))?;
     let url = f.refs["url"].as_str().unwrap_or_default();
     let mut out = format!("# {} — {}\nOpen: {url}\n\n", f.title, f.event_date.as_deref().unwrap_or_default());
     for p in f.pieces() {
@@ -432,7 +432,7 @@ pub fn target(link: &str) -> Result<Value> {
 /// Where a mail link opens outside Echo: its message in Outlook or Teams, when Echo knows it.
 #[cfg(feature = "brain")]
 pub fn mail_url(src: &str) -> Option<String> {
-    crate::brain::facts::read(src)?.refs["url"].as_str().filter(|u| u.starts_with("https://")).map(str::to_owned)
+    crate::intake::facts::read(src)?.refs["url"].as_str().filter(|u| u.starts_with("https://")).map(str::to_owned)
 }
 
 #[cfg_attr(not(feature = "tray"), allow(dead_code))]

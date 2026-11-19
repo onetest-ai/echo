@@ -3,7 +3,7 @@
 //! with Intake off it answers `enabled: false`, and the box keeps to titles and people.
 
 use super::*;
-use crate::brain::store;
+use crate::intake::store;
 
 /// The most sections a search reads (grouped by their sources), and the most calls matched by title or people.
 const HITS: usize = 30;
@@ -38,7 +38,7 @@ fn list(q: &str, key: &str) -> Vec<String> {
 /// (`store::Filters`); a client or a thread is the search's scope. The calls' cards are left out of what was said
 /// unless a section filter asks for them: their titles and people are the titles' own matches.
 pub(super) fn search(q: &str) -> Value {
-    if !crate::brain::enabled() {
+    if !crate::intake::enabled() {
         return json!({ "enabled": false });
     }
     let query: String = param(q, "q").unwrap_or_default().chars().take(QUERY_MAX).collect();
@@ -52,13 +52,13 @@ pub(super) fn search(q: &str) -> Value {
         person: param(q, "person"),
     };
     let scope = thread.as_deref().map(|t| ("thread", t)).or(client.as_deref().map(|c| ("client", c)));
-    let r = match crate::brain::search(&query, HITS, None, scope, &filters) {
+    let r = match crate::intake::search(&query, HITS, None, scope, &filters) {
         Ok(r) => r,
         Err(e) => return json!({ "enabled": true, "error": format!("{e:#}") }),
     };
     // The words looked for: the query's, without a date it said (the page marks them in each snippet).
     let rest = match r["filters"]["dates_from_query"].as_str() {
-        Some(_) => crate::brain::when::in_query(&query, chrono::Local::now().date_naive()).map_or(query.clone(), |x| x.1),
+        Some(_) => crate::intake::when::in_query(&query, chrono::Local::now().date_naive()).map_or(query.clone(), |x| x.1),
         None => query.clone(),
     };
     let words = store::query_words(&rest);
@@ -78,7 +78,7 @@ pub(super) fn search(q: &str) -> Value {
             "kinds": filters.kinds, "sections": sections, "client": client, "thread": thread, "person": filters.person,
             "since": since, "until": until, "dates_from_query": r["filters"]["dates_from_query"],
         },
-        "older": note.contains(crate::brain::retain::OLDER),
+        "older": note.contains(crate::intake::retain::OLDER),
         "listed": note.contains("the sources of those days"),
         "titles": titles,
         "sources": sources(r["hits"].as_array().map(Vec::as_slice).unwrap_or(&[]), &words, &titles),
@@ -118,7 +118,7 @@ fn kind_of(source: &str) -> &'static str {
 /// a moment only when its source has no other: then its first such hit, unless the source is a call listed under its
 /// titles (`titles`, the calls' rows), found there.
 fn sources(hits: &[Value], words: &[String], titles: &[Value]) -> Vec<Value> {
-    let docs = store::open(&crate::brain::store_path()).ok();
+    let docs = store::open(&crate::intake::store_path()).ok();
     let doc = |source: &str| -> (Option<String>, Option<String>) {
         docs.as_ref()
             .and_then(|c| c.query_row("SELECT title, event_date FROM documents WHERE source = ?1", [source], |r| Ok((r.get(0)?, r.get(1)?))).ok())
@@ -170,7 +170,7 @@ fn sources(hits: &[Value], words: &[String], titles: &[Value]) -> Vec<Value> {
 fn clock_at_start(s: &str) -> Option<(f64, &str)> {
     let rest = s.strip_prefix('[')?;
     let (clock, after) = rest.split_once(']')?;
-    let t = crate::brain::calls::title_time(&format!("[{clock}]"))?;
+    let t = crate::intake::calls::title_time(&format!("[{clock}]"))?;
     Some((t, after.trim_start()))
 }
 
@@ -267,7 +267,7 @@ fn moment_of(h: &Value, words: &[String]) -> Value {
 /// source's lines of that section.
 pub(super) fn moment(q: &str) -> Value {
     let Some(id) = param(q, "chunk").and_then(|c| c.parse::<i64>().ok()) else { return json!({ "error": "no such moment" }) };
-    let row = store::open(&crate::brain::store_path()).ok().and_then(|c| {
+    let row = store::open(&crate::intake::store_path()).ok().and_then(|c| {
         c.query_row(
             "SELECT c.source, c.title, c.breadcrumb_path, c.text, c.event_date, c.speaker, c.link, c.refs, c.section, d.title FROM chunks c LEFT JOIN documents d ON d.source = c.source WHERE c.id = ?1",
             [id],
@@ -365,7 +365,7 @@ mod tests {
     fn made_up(root: &Path) -> String {
         let today = chrono::Local::now().date_naive();
         let day = |n: i64| (today - chrono::Duration::days(n)).to_string();
-        crate::brain::save_settings(&crate::brain::embed::Settings { enabled: Some(true), ..Default::default() }).unwrap();
+        crate::intake::save_settings(&crate::intake::embed::Settings { enabled: Some(true), ..Default::default() }).unwrap();
         let name = format!("{}_123000-acme-go-live-check", day(1));
         let d = crate::paths::calls_dir().join(&name);
         std::fs::create_dir_all(&d).unwrap();
@@ -389,7 +389,7 @@ mod tests {
             input("mail/aa11", "mail", "Re: SSO cutover window", &day(2), "# Re: SSO cutover window\n\n### 2026-11-16 09:12 Dana Lee\n\n- The helpdesk staffs Saturday — “confirm the cutover starts at 6”\n", json!({"threads": threads, "client": "acme"}), Some("Dana Lee")),
             input("channel/bb22/1", "channel", "Globex pilot › General", &day(3), "# Globex pilot › General\n\n### 2026-11-15 10:00 Kim Park\n\n- The cutover rehearsal passed\n", json!({"threads": [{"id": "globex-pilot", "name": "Globex pilot", "client": "globex"}], "client": "globex"}), Some("Kim Park")),
         ];
-        store::sync(&crate::brain::store_path(), inputs, None).unwrap();
+        store::sync(&crate::intake::store_path(), inputs, None).unwrap();
         let _ = root;
         name
     }
@@ -479,7 +479,7 @@ mod tests {
     #[test]
     fn a_hit_that_matched_only_the_title_is_no_moment_when_the_source_has_a_real_one() {
         let (_env, _root) = crate::paths::testenv::folders("window-search-title-only");
-        crate::brain::save_settings(&crate::brain::embed::Settings { enabled: Some(true), ..Default::default() }).unwrap();
+        crate::intake::save_settings(&crate::intake::embed::Settings { enabled: Some(true), ..Default::default() }).unwrap();
         let day = chrono::Local::now().date_naive().to_string();
         let (globex, sync) = (format!("{day}_090000-globex-budget-review"), format!("{day}_100000-budget-sync"));
         call_folder(&globex, "Globex budget review");
@@ -492,7 +492,7 @@ mod tests {
             input("call/2026-01-03_0000", "call", "Budget sync", &day, &call_md.replace("The budget review is Friday.", "Nothing."), json!({"kind": "call", "call": sync}), None),
             input("doc/n2", "document", "Quarterly budget review", &day, doc, json!({}), None),
         ];
-        store::sync(&crate::brain::store_path(), inputs, None).unwrap();
+        store::sync(&crate::intake::store_path(), inputs, None).unwrap();
         let v = get("/api/search?q=budget%20review");
         let by = |t: &str| v["sources"].as_array().unwrap().iter().find(|s| s["title"] == t).cloned();
         let acme = by("Acme budget review").expect("the call with a real hit");
@@ -513,10 +513,10 @@ mod tests {
         assert!(!has_word("Это мой план", &w("мои")), "another script's letters stay whole, as the index keeps them");
         // A hit found by the index through an accent is a moment, not a title-only hit.
         let (_env, _root) = crate::paths::testenv::folders("window-search-accents");
-        crate::brain::save_settings(&crate::brain::embed::Settings { enabled: Some(true), ..Default::default() }).unwrap();
+        crate::intake::save_settings(&crate::intake::embed::Settings { enabled: Some(true), ..Default::default() }).unwrap();
         let day = chrono::Local::now().date_naive().to_string();
         let md = "# Re: Offsite\n\n### 2026-11-16 09:12 Dana Lee\n\n- Lunch at the café on the corner\n";
-        store::sync(&crate::brain::store_path(), vec![input("mail/cc33", "mail", "Re: Offsite", &day, md, json!({}), Some("Dana Lee"))], None).unwrap();
+        store::sync(&crate::intake::store_path(), vec![input("mail/cc33", "mail", "Re: Offsite", &day, md, json!({}), Some("Dana Lee"))], None).unwrap();
         let v = get("/api/search?q=cafe");
         assert_eq!(v["sources"][0]["moments"][0]["text"], "Lunch at the café on the corner", "{v}");
     }

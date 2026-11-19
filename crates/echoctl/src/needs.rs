@@ -78,7 +78,7 @@ fn trusted(addr: &str) -> bool {
     }
     #[cfg(feature = "brain")]
     {
-        let s = crate::brain::senders::load();
+        let s = crate::intake::senders::load();
         s.clients.values().any(|l| l.trusted.iter().any(|e| e.key == a))
     }
     #[cfg(not(feature = "brain"))]

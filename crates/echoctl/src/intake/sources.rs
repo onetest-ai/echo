@@ -43,7 +43,7 @@ pub(crate) fn not_me<'a>(people: impl Iterator<Item = &'a Value>, me: Option<&st
 }
 
 fn state_path() -> std::path::PathBuf {
-    crate::brain::dir().join("sources.json")
+    crate::intake::dir().join("sources.json")
 }
 
 /// Per source key: `{since, read_at, docs, error}`.
@@ -290,7 +290,7 @@ pub struct Read {
 }
 
 fn reread_path() -> std::path::PathBuf {
-    crate::brain::dir().join("reread.json")
+    crate::intake::dir().join("reread.json")
 }
 
 /// Read a client's sources again from the start at the next sync (a sender trusted there, or read anyway): what they
@@ -493,7 +493,7 @@ pub fn sync(emb: Option<&dyn super::embed::Embedder>) -> Result<(Read, store::Re
     if !facts::migrated() {
         let e = "the facts the index holds aren't moved into Intake's files yet: mail and channels wait".to_string();
         eprintln!("intake: {e}");
-        // The move's own reason, when it said one (`brain::sync`), stays the one shown.
+        // The move's own reason, when it said one (`intake::sync`), stays the one shown.
         if facts::status()["paused"].is_null() {
             facts::set_status(Some(&e), &[]);
         }
@@ -931,7 +931,7 @@ mod tests {
         let before = json!({"kind": "mail", "people": ["jane@acme.example"]});
         assert_eq!(threads_for(&before, &watched()).len(), 1, "read before subjects were kept: it stays until read again");
         // New words: the source reads its window again by them (its state forgotten).
-        std::fs::create_dir_all(crate::brain::dir()).unwrap();
+        std::fs::create_dir_all(crate::intake::dir()).unwrap();
         let mut st = state();
         st["mail:person:jane@acme.example"] = json!({"since": "2026-11-01T00:00:00Z"});
         save_state(&st).unwrap();

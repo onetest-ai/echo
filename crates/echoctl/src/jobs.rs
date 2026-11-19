@@ -495,7 +495,7 @@ fn enabled(id: &str) -> bool {
         "minutes" => cfg.auto_minutes,
         "live_notes" => crate::ai::Settings::load().is_ok_and(|s| s.live_notes),
         #[cfg(feature = "brain")]
-        "brain_reader" => crate::brain::enabled() && crate::brain::settings().auto(),
+        "brain_reader" => crate::intake::enabled() && crate::intake::settings().auto(),
         #[cfg(not(feature = "brain"))]
         "brain_reader" => false,
         _ => true,

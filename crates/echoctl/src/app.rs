@@ -120,7 +120,7 @@ pub fn run(app: TargetApp, tray: bool, background: bool) -> Result<()> {
         crate::plugins::routines::start_scheduler();
     }
     #[cfg(feature = "brain")]
-    crate::brain::start_scheduler();
+    crate::intake::start_scheduler();
     // Who each Claude profile is signed in to, for the window (`signin.rs`; in the background).
     crate::signin::refresh_all();
     // Windows: try the GPU now (in a child process), not when the first recording loads a model.

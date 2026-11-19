@@ -1,7 +1,7 @@
 #[cfg(feature = "transcribe")]
 mod aec;
 #[cfg(feature = "brain")]
-mod brain;
+mod intake;
 mod ai;
 mod app;
 mod apps;
@@ -263,7 +263,7 @@ enum Cmd {
     #[cfg(feature = "brain")]
     Brain {
         #[command(subcommand)]
-        cmd: cli::brain::BrainCmd,
+        cmd: cli::intake::BrainCmd,
     },
     /// Projects: which calls belong (rules, pins), stage, glossary, people (JSON)
     Project {
@@ -785,7 +785,7 @@ fn main() -> Result<()> {
         Cmd::Speakers { call, names, relabel } => speakers::command(&call, &names, relabel),
         Cmd::Vocab { cmd } => cli::capture::vocab(cmd),
         #[cfg(feature = "brain")]
-        Cmd::Brain { cmd } => cli::brain::brain_command(cmd),
+        Cmd::Brain { cmd } => cli::intake::brain_command(cmd),
         Cmd::Project { cmd } => cli::project::project_command(cmd),
         Cmd::Client { cmd } => cli::project::client_command(cmd),
         Cmd::Org { cmd } => cli::project::org_command(cmd),
@@ -800,7 +800,7 @@ fn main() -> Result<()> {
         Cmd::Deliver { cmd } => cli::m365::deliver_command(cmd),
         Cmd::M365 { cmd } => cli::m365::run(cmd),
         #[cfg(feature = "brain")]
-        Cmd::Mcp { profile, client, thread, call, who } => cli::brain::mcp(profile, client, thread, call, who),
+        Cmd::Mcp { profile, client, thread, call, who } => cli::intake::mcp(profile, client, thread, call, who),
         Cmd::Read { link } => {
             print!("{}", links::read(&link)?);
             Ok(())

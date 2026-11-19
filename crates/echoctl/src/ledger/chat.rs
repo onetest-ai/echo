@@ -39,7 +39,7 @@ pub fn chat_due(p: &crate::projects::Project) -> bool {
 /// holds the day back. Without the Brain built in, everyone in the chat (as for a call's own chat).
 pub(super) struct ChatTrust {
     #[cfg(feature = "brain")]
-    snd: crate::brain::senders::Senders,
+    snd: crate::intake::senders::Senders,
     #[cfg(feature = "brain")]
     lookups: usize,
     #[cfg(feature = "brain")]
@@ -61,7 +61,7 @@ impl ChatTrust {
     fn new(p: &crate::projects::Project, name: &str) -> ChatTrust {
         #[cfg(feature = "brain")]
         {
-            let mut snd = crate::brain::senders::load();
+            let mut snd = crate::intake::senders::load();
             snd.refresh_org();
             ChatTrust { snd, lookups: 0, client: p.client.clone().unwrap_or_else(|| "-".into()), name: name.to_string() }
         }
@@ -73,7 +73,7 @@ impl ChatTrust {
     fn judge(&mut self, m: &Value) -> Said {
         #[cfg(feature = "brain")]
         {
-            use crate::brain::senders::Verdict;
+            use crate::intake::senders::Verdict;
             let Some(id) = m["from"]["user"]["id"].as_str() else { return Said::Skip }; // bots, apps
             let key = format!("teams:{id}");
             let who = m["from"]["user"]["displayName"].as_str().unwrap_or("?");
@@ -102,7 +102,7 @@ impl ChatTrust {
         #[cfg(feature = "brain")]
         {
             let mut s = self.snd;
-            let _ = crate::brain::senders::save_merged(&mut s);
+            let _ = crate::intake::senders::save_merged(&mut s);
         }
     }
 }

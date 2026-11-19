@@ -3,7 +3,7 @@
 use super::*;
 use super::calendar::{import_transcript, RAW_EVENTS};
 #[cfg(feature = "brain")]
-use super::brain::{brain_sync_now, open_in_app};
+use super::intake::{brain_sync_now, open_in_app};
 
 pub(super) fn minutes(meta: &Value) -> Option<i64> {
     let t = |k: &str| meta[k].as_str().and_then(|v| chrono::DateTime::parse_from_rfc3339(v).ok());
@@ -526,7 +526,7 @@ pub(super) fn act(v: &Value) -> bool {
         // holds, never a path the page names.
         #[cfg(feature = "brain")]
         "open_brain_file" => {
-            if let Some(p) = v["id"].as_str().and_then(crate::brain::files::folder::path_of) {
+            if let Some(p) = v["id"].as_str().and_then(crate::intake::files::folder::path_of) {
                 open_in_app(&p);
             }
             false

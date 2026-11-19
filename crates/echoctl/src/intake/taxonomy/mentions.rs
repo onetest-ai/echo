@@ -112,7 +112,7 @@ pub fn mentions(c: &Connection, t: &Taxonomy) -> Result<()> {
     Ok(())
 }
 
-/// After a sync (`brain::sync`): the sections written since they were last read for terms (every write of a
+/// After a sync (`intake::sync`): the sections written since they were last read for terms (every write of a
 /// section clears its `term_scan` row). Under the taxonomy's lock, with its current version; when the store's
 /// mentions aren't that version's (an edit that stopped half way, a store from before `mentions_for`), all of them
 /// again (`build_graph`).

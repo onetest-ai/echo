@@ -3,7 +3,7 @@
 
 pub mod app;
 #[cfg(feature = "brain")]
-pub mod brain;
+pub mod intake;
 pub mod calendar;
 pub mod calls;
 pub mod capture;

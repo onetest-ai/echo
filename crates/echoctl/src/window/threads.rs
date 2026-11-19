@@ -3,7 +3,7 @@
 use super::*;
 use super::calendar::{CALENDAR_CACHE, RAW_EVENTS};
 #[cfg(feature = "brain")]
-use super::brain::brain_sync_now;
+use super::intake::brain_sync_now;
 
 /// The Tasks activity: the piles and asks, with the next 7 days of the calendar for "next time you
 /// meet" (the calendar's own 2-minute cache; without a sign-in, today's agenda).
@@ -120,7 +120,7 @@ pub(super) fn project_op(v: &Value) -> anyhow::Result<Option<String>> {
                 Ok(())
             })?;
         }
-        // A Teams channel or a mail rule the thread reads into the Brain (`brain::sources`).
+        // A Teams channel or a mail rule the thread reads into the Brain (`intake::sources`).
         // A meeting series' rule, one field at a time (`field`, `value`; null = Echo's default).
         // Not this thread's: its meetings of that series stop joining it.
         // Prepare (a meeting with no prep) / Write it again: in the background.
@@ -153,7 +153,7 @@ pub(super) fn project_op(v: &Value) -> anyhow::Result<Option<String>> {
                 // A meeting chat its work reads between calls (`ledger::chat_sync`).
                 "teams_chat" if sid.starts_with("19:") && !sid.contains(char::is_whitespace) => sid,
                 #[cfg(feature = "brain")]
-                "mail" => crate::brain::sources::mail_source(&sid)?,
+                "mail" => crate::intake::sources::mail_source(&sid)?,
                 _ => anyhow::bail!("not a source: {kind}"),
             };
             let name = opt("name");
