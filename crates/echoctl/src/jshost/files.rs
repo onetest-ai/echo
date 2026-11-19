@@ -342,13 +342,27 @@ pub(super) fn text(plugin: &str, file: &Value, opts: &Value) -> Result<Value> {
 /// over it.
 pub(super) fn copy_in(plugin: &str, file: &Value, root: &str, rel: &str, create_new: bool) -> Result<Value> {
     uses_flag(plugin, "folders", "write")?;
+    copy_to(plugin, file, rel, create_new, &|| {
+        let to = crate::grants::writable(plugin, root, rel)?;
+        if !to.is_dir() && crate::grants::in_skills(root, rel, &to) {
+            bail!("“{rel}”: nothing is copied into a skill; a skill is written whole (ctx.fs.write)");
+        }
+        Ok(to)
+    })
+}
+
+/// `ctx.store.copyIn(file, rel, {createNew})`: the same into the plugin's own store, where `jshost::writable_store_path`
+/// allows a write (never its `settings.json` or Echo's files there, never out of the store).
+pub(super) fn copy_in_store(plugin: &str, file: &Value, rel: &str, create_new: bool) -> Result<Value> {
+    copy_to(plugin, file, rel, create_new, &|| writable_store_path(plugin, rel))
+}
+
+/// The copy: `resolve` names the file to write each time it is asked (again after the folders above it are made).
+fn copy_to(plugin: &str, file: &Value, rel: &str, create_new: bool, resolve: &dyn Fn() -> Result<PathBuf>) -> Result<Value> {
     let (src, _) = own(plugin, file)?;
-    let to = crate::grants::writable(plugin, root, rel)?;
+    let to = resolve()?;
     if to.is_dir() {
         bail!("“{rel}” is a folder");
-    }
-    if crate::grants::in_skills(root, rel, &to) {
-        bail!("“{rel}”: nothing is copied into a skill; a skill is written whole (ctx.fs.write)");
     }
     if create_new && std::fs::symlink_metadata(&to).is_ok() {
         bail!("“{rel}” is there already");
@@ -361,7 +375,7 @@ pub(super) fn copy_in(plugin: &str, file: &Value, root: &str, rel: &str, create_
     let dir = to.parent().ok_or_else(|| anyhow!("“{rel}” has no folder"))?;
     std::fs::create_dir_all(dir)?;
     // The folder made may be reached through a link made meanwhile: checked again as it is now.
-    let to = crate::grants::writable(plugin, root, rel)?;
+    let to = resolve()?;
     static N: AtomicU64 = AtomicU64::new(0);
     let name = to.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     let tmp = to.with_file_name(format!(".{name}.{}.{}.part", std::process::id(), N.fetch_add(1, Ordering::Relaxed)));
