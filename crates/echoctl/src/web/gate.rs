@@ -114,6 +114,7 @@ pub struct Gate {
     pub token: String,
     /// The 407's challenge, `Basic realm="echo-<random>"`: a client that answers challenges (WebView2) answers this
     /// one only, never a site's own 401.
+    #[cfg_attr(not(windows), allow(dead_code))]
     pub challenge: String,
     shared: Arc<Shared>,
 }
