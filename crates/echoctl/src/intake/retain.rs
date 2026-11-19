@@ -279,6 +279,40 @@ mod tests {
     }
 
     #[test]
+    fn a_second_sync_with_nothing_changed_counts_every_document_unchanged() {
+        let (_env, root) = crate::paths::testenv::folders("recall-sync-unchanged");
+        on();
+        let acme = projects::create("Acme rollout", None, None).unwrap().id;
+        let one = call("one", 2, Some(&acme));
+        let two = call("two", 3, None);
+        mail("mail/acme-gateway", &acme, &[1]);
+        let folder = root.join("acme-docs");
+        std::fs::create_dir_all(&folder).unwrap();
+        std::fs::write(folder.join("plan.md"), "# Plan\n\n## Gateway rollout\nThe gateway goes in first.\n").unwrap();
+        projects::update(&acme, |p| {
+            p.sources.push(projects::Source { kind: "folder".into(), id: folder.to_string_lossy().into(), ..Default::default() });
+            Ok(())
+        })
+        .unwrap();
+        let docs = || -> Vec<(String, String, String)> {
+            let c = store::open(&intake::store_path()).unwrap();
+            let mut st = c.prepare("SELECT source, content_hash, indexed_at FROM documents ORDER BY source").unwrap();
+            st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).unwrap().map(|x| x.unwrap()).collect()
+        };
+        let first = intake::sync().unwrap();
+        assert_eq!(first.added, 4, "two calls, the mail, the folder's file: {first:?}");
+        let before = docs();
+        let r = intake::sync().unwrap();
+        assert_eq!((r.added, r.changed, r.removed, r.unchanged, r.chunks, r.embedded), (0, 0, 0, 4, 0, 0), "{r:?}");
+        assert_eq!(docs(), before, "nothing written again");
+        // One call changed, the other deleted: neither is counted unchanged.
+        std::fs::write(one.join("notes.md"), "# one weekly\n\n## Summary\nThe one gateway slips a week.\n").unwrap();
+        std::fs::remove_dir_all(&two).unwrap();
+        let r = intake::sync().unwrap();
+        assert_eq!((r.added, r.changed, r.removed, r.unchanged), (0, 1, 1, 2), "{r:?}");
+    }
+
+    #[test]
     fn a_closed_threads_records_leave_but_its_cards_and_come_back_with_the_same_ids() {
         let (_env, root) = crate::paths::testenv::folders("recall-retain-closed");
         on();
