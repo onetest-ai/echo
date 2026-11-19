@@ -816,21 +816,20 @@ pub fn sync(emb: Option<&dyn super::embed::Embedder>) -> Result<(Read, store::Re
 
 /// Feed the index every fact file it has no document of (it was deleted or rebuilt, or its thread opened again): from
 /// the files alone, at every sync — no Microsoft 365 sign-in, finished move or readable thread list needed.
-/// The fact files the index has a document of count as unchanged.
 pub fn feed_missing(emb: Option<&dyn super::embed::Embedder>, keep: &store::Keep) -> Result<store::Report> {
     let path = super::store_path();
-    let (missing, indexed) = missing_from_index(&path)?;
-    let mut rep = if missing.is_empty() { store::Report::default() } else { store::sync_kept(&path, missing.iter().map(Facts::input).collect(), emb, &[], Some(keep))? };
-    rep.unchanged += indexed;
-    Ok(rep)
+    let missing = missing_from_index(&path)?;
+    if missing.is_empty() {
+        return Ok(store::Report::default());
+    }
+    store::sync_kept(&path, missing.iter().map(Facts::input).collect(), emb, &[], Some(keep))
 }
 
-/// The fact files whose source the index has no document of, and how many others there are.
-fn missing_from_index(path: &std::path::Path) -> Result<(Vec<Facts>, usize)> {
+/// The fact files whose source the index has no document of.
+fn missing_from_index(path: &std::path::Path) -> Result<Vec<Facts>> {
     let c = store::open(path)?;
     let have: BTreeSet<String> = c.prepare("SELECT source FROM documents WHERE kind IN ('mail', 'channel')")?.query_map([], |r| r.get(0))?.collect::<Result<_, _>>()?;
-    let (indexed, missing): (Vec<Facts>, Vec<Facts>) = facts::all().into_iter().partition(|f| have.contains(&f.source));
-    Ok((missing, indexed.len()))
+    Ok(facts::all().into_iter().filter(|f| !have.contains(&f.source)).collect())
 }
 
 /// Removals beyond this share of the facts in one sync are refused (and said), past `REMOVE_FREE` of them.
@@ -1167,12 +1166,10 @@ mod tests {
         fw.write(&jane("mail/two", json!([]))).unwrap();
         let path = super::super::store_path();
         // The index deleted (or rebuilt): both are missing, fed from their files, then none is.
-        let (missing, indexed) = missing_from_index(&path).unwrap();
+        let missing = missing_from_index(&path).unwrap();
         assert_eq!(missing.iter().map(|f| f.source.as_str()).collect::<Vec<_>>(), ["mail/one", "mail/two"]);
-        assert_eq!(indexed, 0);
         store::sync_kinds(&path, missing.iter().map(Facts::input).collect(), None, &[]).unwrap();
-        let (missing, indexed) = missing_from_index(&path).unwrap();
-        assert!(missing.is_empty() && indexed == 2);
+        assert!(missing_from_index(&path).unwrap().is_empty());
     }
 
     #[test]

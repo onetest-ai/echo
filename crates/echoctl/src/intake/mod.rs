@@ -24,6 +24,7 @@ pub mod when;
 
 use anyhow::Result;
 use serde_json::Value;
+use std::collections::BTreeSet;
 use std::path::PathBuf;
 
 use crate::paths;
@@ -160,6 +161,9 @@ pub fn sync() -> Result<store::Report> {
         Err(e) => eprintln!("recall: retention: {e:#}"),
     }
     let keep = store::Keep::now();
+    let before = indexed_sources()?;
+    // Folders' documents read again: not among `r.touched` (plugins aren't told of them), but not unchanged.
+    let mut folder_touched: Vec<String> = vec![];
     let mut r = store::sync_kept(&store_path(), call_inputs(), emb.as_ref().map(|e| e as &dyn embed::Embedder), &["call"], Some(&keep))?;
     // Mail and posts whose facts the index lacks (a thread opened again, an index rebuilt): from their files, with or
     // without a Microsoft 365 sign-in.
@@ -167,7 +171,6 @@ pub fn sync() -> Result<store::Report> {
         Ok(s) => {
             r.touched.extend(s.touched);
             r.added += s.added;
-            r.unchanged += s.unchanged;
             r.chunks += s.chunks;
             r.embedded += s.embedded;
         }
@@ -182,8 +185,6 @@ pub fn sync() -> Result<store::Report> {
                 r.gone.extend(s.gone);
                 r.added += s.added;
                 r.changed += s.changed;
-                // Counted unchanged from their fact files above (`feed_missing`).
-                r.unchanged = r.unchanged.saturating_sub(s.changed);
                 r.removed += s.removed + read.removed;
                 r.chunks += s.chunks;
                 r.embedded += s.embedded;
@@ -201,8 +202,8 @@ pub fn sync() -> Result<store::Report> {
             for f in reps {
                 r.removed += f.removed;
                 r.files_read += f.read;
-                r.unchanged += f.unchanged;
                 if let Some(s) = &f.store {
+                    folder_touched.extend(s.touched.iter().cloned());
                     r.added += s.added;
                     r.changed += s.changed;
                     r.chunks += s.chunks;
@@ -247,9 +248,27 @@ pub fn sync() -> Result<store::Report> {
     // were last read (`term_scan`, cleared by every write of a section). A store from before Brain's meta keys
     // and entity-kind nodes gets its graph rebuilt once.
     taxonomy::mentions_after_sync(&store::open(&store_path())?)?;
+    r.unchanged = unchanged(&before, &indexed_sources()?, r.touched.iter().chain(&folder_touched)).len();
     #[cfg(feature = "js")]
     crate::share::sources_changed(&r.touched, &r.gone);
     Ok(r)
+}
+
+/// Every source the index has a document of.
+fn indexed_sources() -> Result<BTreeSet<String>> {
+    let c = store::open(&store_path())?;
+    let mut st = c.prepare("SELECT source FROM documents")?;
+    let rows = st.query_map([], |r| r.get(0))?.collect::<Result<_, _>>()?;
+    Ok(rows)
+}
+
+/// The sources a sync left as they were: indexed before and after it (not removed), and neither added nor changed.
+fn unchanged<'a>(before: &BTreeSet<String>, after: &BTreeSet<String>, touched: impl Iterator<Item = &'a String>) -> BTreeSet<String> {
+    let mut same: BTreeSet<String> = before.intersection(after).cloned().collect();
+    for t in touched {
+        same.remove(t);
+    }
+    same
 }
 
 /// What the calls look like on disk (their files' times and sizes): a sync runs only when it changed.
@@ -413,6 +432,19 @@ pub fn status() -> Result<Value> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn unchanged_is_what_was_indexed_and_stays_neither_added_changed_nor_removed() {
+        let set = |xs: &[&str]| xs.iter().map(|x| x.to_string()).collect::<std::collections::BTreeSet<String>>();
+        // Before: a call, two mail facts, a channel post, a folder's file.
+        let before = set(&["call/a", "mail/kept", "mail/edited", "channel/gone", "file/f"]);
+        // The sources sync changes one fact and removes the post; a fact fed from its file is then changed again too.
+        let after = set(&["call/a", "mail/kept", "mail/edited", "file/f", "mail/fed"]);
+        let touched = ["mail/fed".to_string(), "mail/edited".to_string(), "mail/fed".to_string()];
+        assert_eq!(super::unchanged(&before, &after, touched.iter()), set(&["call/a", "mail/kept", "file/f"]));
+        // Nothing touched, nothing gone: everything indexed is unchanged.
+        assert_eq!(super::unchanged(&before, &before, [].iter()), before);
+    }
+
     #[test]
     fn the_brains_folder_becomes_recalls() {
         let (_env, root) = crate::paths::testenv::folders("recall-dir");

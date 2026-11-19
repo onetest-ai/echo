@@ -283,8 +283,8 @@ mod tests {
         let (_env, root) = crate::paths::testenv::folders("recall-sync-unchanged");
         on();
         let acme = projects::create("Acme rollout", None, None).unwrap().id;
-        call("one", 2, Some(&acme));
-        call("two", 3, None);
+        let one = call("one", 2, Some(&acme));
+        let two = call("two", 3, None);
         mail("mail/acme-gateway", &acme, &[1]);
         let folder = root.join("acme-docs");
         std::fs::create_dir_all(&folder).unwrap();
@@ -305,6 +305,11 @@ mod tests {
         let r = intake::sync().unwrap();
         assert_eq!((r.added, r.changed, r.removed, r.unchanged, r.chunks, r.embedded), (0, 0, 0, 4, 0, 0), "{r:?}");
         assert_eq!(docs(), before, "nothing written again");
+        // One call changed, the other deleted: neither is counted unchanged.
+        std::fs::write(one.join("notes.md"), "# one weekly\n\n## Summary\nThe one gateway slips a week.\n").unwrap();
+        std::fs::remove_dir_all(&two).unwrap();
+        let r = intake::sync().unwrap();
+        assert_eq!((r.added, r.changed, r.removed, r.unchanged), (0, 1, 1, 2), "{r:?}");
     }
 
     #[test]
