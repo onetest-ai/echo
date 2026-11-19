@@ -589,48 +589,6 @@ pub(super) fn check_skill_md(name: &str, text: &str) -> Result<()> {
     Ok(())
 }
 
-/// The permission sheet: what the plugin touches (`uses`), and that it runs code of its own.
-pub fn sheet(m: &Manifest) -> Result<Vec<String>> {
-    let mut lines = describe(&m.uses)?;
-    match (&m.main, &m.client) {
-        (Some(_), Some(_)) => lines.insert(0, "Runs its own code in Echo and in the Echo window, with your rights".into()),
-        (Some(_), None) => lines.insert(0, "Runs its own code in Echo, with your rights".into()),
-        (None, Some(_)) => lines.insert(0, "Runs its own code in the Echo window, with your rights".into()),
-        (None, None) => {}
-    }
-    // Its scripts' line carries their skill folders' hash: a version changing any of those files asks again.
-    if let Some(d) = &m.scripts_digest {
-        for l in lines.iter_mut().filter(|l| l.starts_with("Runs programs from its package")) {
-            l.push_str(&format!(" (their files: {d})"));
-        }
-    }
-    // Its part for Claude in Echo — its guide (`agent/`) and its package skills by name —, with the hash of their files:
-    // a version changing any of it asks again.
-    if agent::has_guide(m) || !m.skill_names.is_empty() {
-        let mut what = vec![];
-        if agent::has_guide(m) {
-            what.push("a guide".to_string());
-        }
-        let names: Vec<String> = m.skill_names.iter().map(|n| format!("“{n}”")).collect();
-        match names.len() {
-            0 => {}
-            1 => what.push(format!("the skill {}", names[0])),
-            _ => what.push(format!("the skills {}", join_words(&names.iter().map(String::as_str).collect::<Vec<_>>()))),
-        }
-        let digest = m.agent_digest.as_deref().map(|d| format!(" (its files: {d})")).unwrap_or_default();
-        lines.push(format!("Tells Claude in Echo how to work with it ({}), loaded only when you work with it{digest}", what.join(" and ")));
-    }
-    // Its routines: each named, with what its run may do and the hash of its definition and prompt.
-    lines.extend(routines::sheet_lines(m));
-    // Its widgets: no grant of their own (their data comes from its code); said in Echo's words, counted.
-    match m.widgets.len() {
-        0 => {}
-        1 => lines.push("Adds a widget you can put on Today".into()),
-        n => lines.push(format!("Adds {n} widgets you can put on Today")),
-    }
-    Ok(lines)
-}
-
 /// Why this Echo can't install it (`None` = it can).
 pub(crate) fn why_not(m: &Manifest) -> Option<String> {
     let here = env!("CARGO_PKG_VERSION");
