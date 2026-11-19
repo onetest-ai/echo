@@ -1044,11 +1044,29 @@ mod tests {
             let out = c.args(["-c", "locale charmap"]).env_remove("LANG").output().unwrap();
             assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "UTF-8");
         }
-        let bytes = super::terminals::clipboard_bytes("Тест");
-        if cfg!(windows) {
-            assert_eq!(bytes, [0xFF, 0xFE, 0x22, 0x04, 0x35, 0x04, 0x41, 0x04, 0x42, 0x04], "UTF-16 with its mark for clip");
-        } else {
-            assert_eq!(bytes, "Тест".as_bytes());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "needs a desktop and replaces its clipboard: cargo test windows_copy -- --ignored"]
+    fn windows_copy_puts_the_text_itself_on_the_clipboard() {
+        use windows::Win32::Foundation::HGLOBAL;
+        use windows::Win32::System::DataExchange::{CloseClipboard, GetClipboardData, OpenClipboard};
+        use windows::Win32::System::Memory::{GlobalLock, GlobalUnlock};
+        use windows::Win32::System::Ole::CF_UNICODETEXT;
+        for text in ["Исследование", "Hello", "🙂"] {
+            super::terminals::put_on_clipboard(text);
+            let got = unsafe {
+                OpenClipboard(None).unwrap();
+                let mem = HGLOBAL(GetClipboardData(CF_UNICODETEXT.0.into()).unwrap().0);
+                let at = GlobalLock(mem).cast::<u16>();
+                let n = (0..).take_while(|&i| *at.add(i) != 0).count();
+                let got = String::from_utf16(std::slice::from_raw_parts(at, n)).unwrap();
+                let _ = GlobalUnlock(mem);
+                let _ = CloseClipboard();
+                got
+            };
+            assert_eq!(got, text, "exactly the text: no U+FEFF in front");
         }
     }
 

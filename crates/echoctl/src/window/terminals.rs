@@ -36,19 +36,55 @@ pub(crate) fn copy_to_clipboard_with(text: &str, put: impl FnOnce(&str)) {
     put(text)
 }
 
+#[cfg(not(windows))]
 fn put_on_clipboard(text: &str) {
     use std::io::Write;
     #[cfg(target_os = "macos")]
     let cmd = pasteboard("pbcopy").stdin(std::process::Stdio::piped()).spawn();
-    #[cfg(windows)]
-    let cmd = std::process::Command::new("clip").no_window().stdin(std::process::Stdio::piped()).spawn();
-    #[cfg(not(any(target_os = "macos", windows)))]
+    #[cfg(not(target_os = "macos"))]
     let cmd: std::io::Result<std::process::Child> = Err(std::io::Error::other("no clipboard"));
     if let Ok(mut child) = cmd {
         if let Some(mut stdin) = child.stdin.take() {
-            let _ = stdin.write_all(&clipboard_bytes(text));
+            let _ = stdin.write_all(text.as_bytes());
         }
         let _ = child.wait();
+    }
+}
+
+/// Windows: the text itself as `CF_UNICODETEXT` (UTF-16 ending in NUL, no byte-order mark). Another program may hold
+/// the clipboard a moment, so opening it is tried a few times.
+#[cfg(windows)]
+pub(super) fn put_on_clipboard(text: &str) {
+    use windows::Win32::Foundation::{GlobalFree, HANDLE};
+    use windows::Win32::System::DataExchange::{CloseClipboard, EmptyClipboard, OpenClipboard, SetClipboardData};
+    use windows::Win32::System::Memory::{GlobalAlloc, GlobalLock, GlobalUnlock, GMEM_MOVEABLE};
+    use windows::Win32::System::Ole::CF_UNICODETEXT;
+    let wide: Vec<u16> = text.encode_utf16().chain([0]).collect();
+    let opened = (0..10).any(|i| {
+        if i > 0 {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        unsafe { OpenClipboard(None) }.is_ok()
+    });
+    if !opened {
+        return;
+    }
+    unsafe {
+        if EmptyClipboard().is_ok() {
+            if let Ok(mem) = GlobalAlloc(GMEM_MOVEABLE, wide.len() * 2) {
+                let at = GlobalLock(mem).cast::<u16>();
+                let set = !at.is_null() && {
+                    std::ptr::copy_nonoverlapping(wide.as_ptr(), at, wide.len());
+                    let _ = GlobalUnlock(mem);
+                    SetClipboardData(CF_UNICODETEXT.0.into(), Some(HANDLE(mem.0))).is_ok()
+                };
+                // Once set, the clipboard owns it; otherwise it is ours to free.
+                if !set {
+                    let _ = GlobalFree(Some(mem));
+                }
+            }
+        }
+        let _ = CloseClipboard();
     }
 }
 
@@ -59,16 +95,6 @@ pub(crate) fn pasteboard(tool: &str) -> std::process::Command {
     let mut c = std::process::Command::new(tool);
     c.env("LC_CTYPE", "UTF-8").env_remove("LC_ALL");
     c
-}
-
-/// What `put_on_clipboard` writes to the clipboard tool: UTF-8 for `pbcopy`; for Windows' `clip`, UTF-16
-/// with its byte-order mark (UTF-8 it reads in the console's code page).
-pub(crate) fn clipboard_bytes(text: &str) -> Vec<u8> {
-    if cfg!(windows) {
-        [0xFF, 0xFE].into_iter().chain(text.encode_utf16().flat_map(u16::to_le_bytes)).collect()
-    } else {
-        text.as_bytes().to_vec()
-    }
 }
 
 /// The clipboard's text (empty when it holds none: an image, say). macOS only: there ⌘V never
