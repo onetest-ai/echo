@@ -942,6 +942,13 @@
    "priority": "high",
    "check": "agent",
    "axes": []
+  },
+  {
+   "id": "F-PLUG-139",
+   "feature": "A plugin reads the text of a file handed to it with `ctx.files.text(file, {pages, max})` → `{text, pages, truncated}` (#831): PDF (pdfium; `pages` one page or a range, 1-based), Word, PowerPoint, spreadsheets, HTML, Markdown and plain text through Echo's own readers, a file of another name when it has text; `pages` of the answer is a PDF's or deck's page count (`null` otherwise), `truncated` when `max` (1 MB of text, 4 MB at most) cut it; off the plugin's time slice, a file over 50 MB or taking over 60 s refused, a file with no text (or an HTML page with almost none) refused with why; no model, no network, no path in the answer, the plugin's own handles only (as `ctx.files.read`), no new line on the sheet",
+   "priority": "high",
+   "check": "agent",
+   "axes": []
   }
  ]
 }

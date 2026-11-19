@@ -78,6 +78,7 @@ pub(super) fn service_async(id: &str, op: &str, arg: &Value) -> Result<Value> {
             })
         }
         "system.pick_files" => files::pick(id, arg[0].as_str().unwrap_or(""), &arg[1]),
+        "handles.text" => files::text(id, &arg[0], &arg[1]),
         "fs.copy_in" => files::copy_in(id, &arg[0], arg[1].as_str().unwrap_or(""), arg[2].as_str().unwrap_or(""), arg[3]["createNew"].as_bool().unwrap_or(true)),
         "fs.read_many" => {
             uses(id, "folders")?;

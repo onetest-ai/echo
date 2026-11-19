@@ -75,6 +75,106 @@ pub(super) fn read(plugin: &str, file: &Value, max: Option<u64>) -> Result<Value
     Ok(json!(String::from_utf8_lossy(&buf)))
 }
 
+/// The largest file `ctx.files.text` reads, and how long it works on one.
+const TEXT_MAX_FILE: u64 = 50 << 20;
+const TEXT_TIME: Duration = Duration::from_secs(60);
+
+/// `pages` of `ctx.files.text`: a number (`3`, `"3"`) or a range (`"2-5"`, 1-based; an end left out: `"-4"`, `"7-"`).
+fn page_range(v: &Value) -> Result<Option<(usize, usize)>> {
+    let t = match v {
+        Value::Null => return Ok(None),
+        Value::Number(n) => n.to_string(),
+        Value::String(s) => s.trim().to_string(),
+        _ => bail!("pages is a number or a range like \"2-5\""),
+    };
+    let bad = || anyhow!("pages is a number or a range like \"2-5\" (1 is the first page), not “{}”", t.chars().take(40).collect::<String>());
+    let num = |x: &str| -> Result<Option<usize>> {
+        if x.trim().is_empty() {
+            Ok(None)
+        } else {
+            x.trim().parse::<usize>().ok().filter(|n| *n >= 1).map(Some).ok_or_else(bad)
+        }
+    };
+    let (a, b) = match t.split_once('-') {
+        Some((a, b)) => (num(a)?, num(b)?),
+        None => (num(&t)?, num(&t)?),
+    };
+    let (a, b) = (a.unwrap_or(1), b.unwrap_or(usize::MAX));
+    if a > b {
+        return Err(bad());
+    }
+    Ok(Some((a, b)))
+}
+
+/// The text of the file at `path` as Echo's own readers see it (`brain::files`: PDF through pdfium, Word, PowerPoint,
+/// spreadsheets, HTML, plain text); a file of another name is text when it has no NUL in its first 8 KB. No model, no
+/// network. → the text and the page count of a paged file.
+#[cfg(feature = "brain")]
+fn text_of(path: &Path, range: Option<(usize, usize)>) -> Result<(String, Option<usize>)> {
+    use crate::brain::files as bf;
+    if !bf::FORMATS.contains(&bf::ext(path).as_str()) {
+        let mut head = vec![];
+        crate::grants::open_regular(path)?.take(8192).read_to_end(&mut head)?;
+        if head.contains(&0) {
+            bail!("not a file with text in it (.{})", bf::ext(path));
+        }
+        return Ok((String::from_utf8_lossy(&std::fs::read(path)?).replace("\r\n", "\n"), None));
+    }
+    let parsed = bf::read(path)?;
+    if let (Some(why), true) = (&parsed.skip, parsed.md.is_none() && parsed.pages.is_empty()) {
+        bail!("nothing to read in it: {why}");
+    }
+    if parsed.pages.is_empty() {
+        return Ok((parsed.md.unwrap_or_default(), None));
+    }
+    let (a, b) = range.unwrap_or((1, usize::MAX));
+    let mut out = vec![];
+    for p in parsed.pages.iter().filter(|p| p.n >= a && p.n <= b) {
+        let mut m = p.text.clone();
+        for t in &p.tables {
+            m.push_str(&format!("\n\n{t}"));
+        }
+        out.push(m.trim().to_string());
+    }
+    Ok((out.join("\n\n"), Some(parsed.pages.len())))
+}
+
+#[cfg(not(feature = "brain"))]
+fn text_of(_: &Path, _: Option<(usize, usize)>) -> Result<(String, Option<usize>)> {
+    bail!("this build of Echo has no document readers")
+}
+
+/// `ctx.files.text(file, {pages, max})` → `{text, pages, truncated}`: the text of a handed file (PDF, Word, PowerPoint,
+/// spreadsheet, HTML, Markdown, plain text). `pages` in the options picks one page or a range of a PDF or deck; in the
+/// answer it is the file's page count (`null` for a file without pages). `truncated` when `max` (1 MB of text by
+/// default, 4 MB at most) cut it. A file over 50 MB, or taking over 60 s, is refused.
+pub(super) fn text(plugin: &str, file: &Value, opts: &Value) -> Result<Value> {
+    let (path, _) = own(plugin, file)?;
+    let range = page_range(&opts["pages"])?;
+    let max = opts["max"].as_u64().filter(|m| *m > 0).unwrap_or(1 << 20).min(4 << 20) as usize;
+    let size = crate::grants::open_regular(&path)?.metadata()?.len();
+    if size > TEXT_MAX_FILE {
+        bail!("the file is {} MB: a plugin reads the text of files up to 50 MB", size.div_ceil(1 << 20));
+    }
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(text_of(&path, range));
+    });
+    let (mut text, pages) = match rx.recv_timeout(TEXT_TIME) {
+        Ok(r) => r?,
+        Err(_) => bail!("reading the file took over 60 seconds"),
+    };
+    let truncated = text.len() > max;
+    if truncated {
+        let mut cut = max;
+        while !text.is_char_boundary(cut) {
+            cut -= 1;
+        }
+        text.truncate(cut);
+    }
+    Ok(json!({"text": text, "pages": pages, "truncated": truncated}))
+}
+
 /// `ctx.fs.copyIn(file, root, rel, {createNew})`: the file's bytes, as they are, into `rel` of a folder the plugin was
 /// given (`uses.folders.write`, `grants::writable`: never through a link). Never over a file there unless
 /// `createNew: false` asked for it. Written whole into a hidden file of its own beside it first (made new: a link
@@ -161,6 +261,7 @@ mod tests {
             export function apply(ctx) {
               ctx.command('read', (a, { files }) => files.map((f) => ctx.files.read(f, { max: a.max })))
               ctx.command('readOne', (a) => ctx.files.read(a.file))
+              ctx.command('text', async (a) => await ctx.files.text(a.file, a.opts))
               ctx.command('copy', async (a, { files }) => await ctx.fs.copyIn(files[0], ctx.fs.folders()[0], a.to, a.opts))
               ctx.command('copyId', async (a) => await ctx.fs.copyIn(a.file, ctx.fs.folders()[0], a.to))
               ctx.command('pick', async (a) => await ctx.system.pickFiles('add sources', a))
@@ -357,6 +458,71 @@ mod tests {
         let unasked = (0..100).find_map(|_| run("picker", "unasked", json!({}), &[]).ok().filter(|v| v["atStart"] != "waiting" && v["inWidget"] != "waiting").or_else(|| { std::thread::sleep(Duration::from_millis(50)); None }));
         assert_eq!(unasked, Some(json!({"atStart": refused, "inWidget": refused})));
         plugins::remove("picker", true).unwrap();
+        sync();
+    }
+
+    #[cfg(feature = "brain")]
+    #[test]
+    fn text_of_a_handed_file_comes_from_echos_readers_capped_and_only_for_its_plugin() {
+        use std::io::Write as _;
+        let (_env, root) = paths::testenv::folders("jshost-files-text");
+        install(&root, "reader", json!({}));
+        install(&root, "other", json!({}));
+        sync();
+        let handle = |plugin: &str, name: &str, bytes: &[u8]| {
+            let f = root.join(name);
+            std::fs::write(&f, bytes).unwrap();
+            make(plugin, &f).unwrap()
+        };
+        let text = |h: &Value, opts: Value| run("reader", "text", json!({"file": h["file"], "opts": opts}), &[]);
+        // Plain text, Markdown and HTML pass through (HTML as the Brain reads it); an unknown name with text is text.
+        let md = handle("reader", "Brief.md", "# Acme kickoff\r\nScope: Aurora".as_bytes());
+        assert_eq!(text(&md, json!({})).unwrap(), json!({"text": "# Acme kickoff\nScope: Aurora", "pages": null, "truncated": false}));
+        let html = handle("reader", "Page.html", format!("<html><body><h1>Globex plan</h1><p>Phase two {}</p><script>evil()</script></body></html>", "of the rollout. ".repeat(20)).as_bytes());
+        assert!(text(&handle("reader", "Short.html", b"<p>Too short</p>"), json!({})).unwrap_err().contains("nothing to read in it"));
+        let t = text(&html, json!({})).unwrap();
+        assert!(t["text"].as_str().unwrap().contains("Globex plan") && t["text"].as_str().unwrap().contains("Phase two") && !t["text"].as_str().unwrap().contains("evil"), "{t}");
+        let bare = handle("reader", "fetched-0001", b"Fetched words");
+        assert_eq!(text(&bare, json!({})).unwrap()["text"], "Fetched words");
+        assert!(text(&handle("reader", "blob.bin", &[1, 0, 2, 0]), json!({})).unwrap_err().contains("not a file with text"));
+        // Word: its paragraphs; a made-up file built here.
+        let mut docx = std::io::Cursor::new(vec![]);
+        {
+            let mut z = zip::ZipWriter::new(&mut docx);
+            z.start_file("word/document.xml", zip::write::SimpleFileOptions::default()).unwrap();
+            z.write_all(br#"<?xml version="1.0"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>Umbrella budget</w:t></w:r></w:p><w:p><w:r><w:t>Q3 is approved</w:t></w:r></w:p></w:body></w:document>"#).unwrap();
+            z.finish().unwrap();
+        }
+        let d = text(&handle("reader", "Budget.docx", docx.get_ref()), json!({})).unwrap();
+        assert!(d["text"].as_str().unwrap().contains("Umbrella budget") && d["text"].as_str().unwrap().contains("Q3 is approved") && d["pages"].is_null(), "{d}");
+        // A file that is not what its name says: an error, never a panic or a hang.
+        assert!(text(&handle("reader", "Broken.docx", b"not a zip"), json!({})).is_err());
+        assert!(text(&handle("reader", "Broken.pdf", b"not a pdf"), json!({})).is_err());
+        // The cap on the text: cut at a character, and said.
+        let long = handle("reader", "Long.txt", "é".repeat(100).as_bytes());
+        let c = text(&long, json!({"max": 51})).unwrap();
+        assert_eq!((c["text"].as_str().unwrap().chars().count(), c["truncated"].clone()), (25, json!(true)));
+        // pages: a number or a range; anything else refused before the file is read.
+        for bad in [json!("0"), json!("5-2"), json!("x"), json!({"a": 1}), json!("1-2-3")] {
+            assert!(text(&md, json!({"pages": bad})).unwrap_err().contains("pages is a number or a range"), "{bad}");
+        }
+        assert_eq!(page_range(&json!("2-5")).unwrap(), Some((2, 5)));
+        assert_eq!(page_range(&json!(3)).unwrap(), Some((3, 3)));
+        assert_eq!(page_range(&json!("-4")).unwrap(), Some((1, 4)));
+        assert_eq!(page_range(&json!("7-")).unwrap(), Some((7, usize::MAX)));
+        assert_eq!(page_range(&Value::Null).unwrap(), None);
+        // Over 50 MB: refused without reading.
+        let big = root.join("Big.txt");
+        std::fs::File::create(&big).unwrap().set_len(TEXT_MAX_FILE + 1).unwrap();
+        let bh = make("reader", &big).unwrap();
+        assert!(text(&bh, json!({})).unwrap_err().contains("up to 50 MB"));
+        // Another plugin's handle, and one past its hour: not handles.
+        assert!(run("other", "text", json!({"file": md["file"]}), &[]).unwrap_err().contains("isn't a file handed to other"));
+        handles().get_mut(md["file"].as_str().unwrap()).unwrap().made -= KEEP;
+        assert!(text(&md, json!({})).unwrap_err().contains("over an hour ago"));
+        for id in ["reader", "other"] {
+            plugins::remove(id, true).unwrap();
+        }
         sync();
     }
 }

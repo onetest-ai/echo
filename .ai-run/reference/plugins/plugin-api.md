@@ -630,6 +630,13 @@ No line on the sheet: handing a file over is the user's own act. Evidence: `jsho
   `apply`, a timer's or an event handler's own call, or a widget's or work rows' provider. File names come from the user's disk: untrusted text, put into the page only
   through `ctx.ui.esc`. Evidence: `app::choose_files`, `cli::plugin::file_handles`
 - `ctx.files.read(file, {max})` → its text (1 MB by default, 4 MB at most); `file` a handle or its id.
+- `await ctx.files.text(file, {pages, max})` → `{text, pages, truncated}`: the text of a PDF, Word, PowerPoint or
+  spreadsheet file, HTML, Markdown or plain text (a file of another name when its first 8 KB hold no NUL), read by Echo's
+  own readers off the plugin's time slice: no model, no network. `pages` (one page `3` or a range `"2-5"`, 1-based, either
+  end may be left out) picks pages of a PDF or deck; in the answer `pages` is the file's page count, `null` for a file
+  without pages. `truncated` when `max` characters' worth of bytes (1 MB by default, 4 MB at most) cut the text. Refused:
+  a file over 50 MB or taking over 60 s, a file without text, an HTML page with almost none (a script-drawn page), a PDF
+  where PDFium isn't installed. Needs nothing on the sheet. Evidence: `jshost::files::text`
 - `await ctx.fs.copyIn(file, root, path, {createNew})` → `{path, size}`: its bytes as they are (50 MB at most) into a folder
   it was given, with `folders.write`, as `ctx.fs.write` (never through a link, never a hidden file but those above); never over a file there — unless `createNew: false` (the default is `true`). Evidence:
   `jshost::files::copy_in`

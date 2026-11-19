@@ -363,7 +363,12 @@ const PRELUDE: &str = r#"
     git: Object.fromEntries(['info', 'status', 'log', 'show', 'init', 'commit'].map((v) => [v, (root, ...a) => later(`git.${v}`, [String(root), ...a])])), /** Git in a folder it was given, off its time slice: info, status, log, show; init and commit with folders.write. */
     /** Files the user handed it — picked, dropped on its view, passed to a command — as handles {file, name, size}
      *  (an hour): `read(file, {max})` → text (1 MB by default, 4 MB at most). */
-    files: { read: (file, opts) => call('handles.read', [file, (opts && opts.max) || 0]) },
+    files: {
+      read: (file, opts) => call('handles.read', [file, (opts && opts.max) || 0]),
+      /** The text of a file (PDF, Word, PowerPoint, spreadsheet, HTML, plain text), off its time slice: {text, pages,
+       *  truncated}; `opts.pages` "3" or "2-5" of a PDF or deck, `pages` of the answer its page count (null if none). */
+      text: (file, opts) => later('handles.text', [file, opts || {}]),
+    },
     system: {
       which: (name) => call('system.which', name),
       /** Another app's file its manifest names in `uses.files.read` (that very entry, e.g. "~/…/obsidian.json"):
