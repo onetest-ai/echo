@@ -270,9 +270,10 @@ fn rendered(id: &str, url: &str, secs: u64) -> Result<(String, Reach, super::ren
     }
     let until = Instant::now() + Duration::from_secs(secs);
     let (reach, _) = web_reach(url, until).map_err(|e| anyhow!("Echo renders only a page on the public internet: {e:#}"))?;
-    // A development build's test: its fake service speaks plain http, so the child asks for the page that way.
+    // A development build's test: its fake service speaks plain http, so on macOS the child asks for the page that way
+    // (on Windows the child puts the fake behind TLS itself, `web::render::windows::test_tls`).
     let test = reach.fake.is_some();
-    let ask = if test { format!("http://{}", &url[8..]) } else { url.to_string() };
+    let ask = if test && cfg!(target_os = "macos") { format!("http://{}", &url[8..]) } else { url.to_string() };
     let r = super::render::page(id, &ask, test, secs)?;
     let at = if test { r.url.replacen("http://", "https://", 1) } else { r.url.clone() };
     Ok((at, reach, r))

@@ -428,7 +428,7 @@ pictures, escaping and limits; `rendered: true`; `bytes` the DOM's HTML; `images
   anything is asked ("Echo renders only a page on the public internet: …"). Without `network.web`: "<plugin> renders
   a page only with uses.network.web (reading any page on the public internet), which its sheet doesn't ask for".
   `render` other than true or false: "render is true or false".
-- **Where it runs:** a hidden WKWebView in a child process of Echo (`echoctl render-page`, no window or Dock icon),
+- **Where it runs:** a hidden WKWebView (on Windows WebView2, below) in a child process of Echo (`echoctl render-page`, no window or Dock icon),
   apart from Echo's window, its IPC and the plugin's `ctx`. The child has no stdin and an environment of only `HOME`,
   `TMPDIR`, `USER`, `LOGNAME`, `LANG` and a plain `PATH`. It runs in its own process group, stopped whole past its time.
   It registers no IPC, custom scheme or devtools; only the DOM's HTML and the address the page ended at come back.
@@ -466,7 +466,27 @@ pictures, escaping and limits; `rendered: true`; `bytes` the DOM's HTML; `images
     `truncated`);
   - 64 connections (16 at once), 32 hosts, 25 MB through the gate;
   - one render per plugin and two in all, per process ("<plugin> is already rendering a page: one at a time").
-- **Windows:** refused, "rendering a page isn't on Windows yet: read it without render".
+- **Windows:** the same render in a hidden WebView2 (no window or taskbar button), the same gate, caps and script at
+  document start. Where it differs:
+  - the child's environment is the system's folders (`SystemRoot`, `windir`, `SystemDrive`, `ProgramFiles*`,
+    `ProgramData`), `TEMP`/`TMP`, `USERPROFILE`, `LOCALAPPDATA`, `APPDATA` and a `PATH` of the system folders only;
+    it is started in a job (suspended until it is in) and joins a job of its own, so every process WebView2 starts
+    is ended with the render, at its time or when it is killed;
+  - the browser's switches: the gate as its only proxy, loopback included (`--proxy-bypass-list=<-loopback>`); WebRTC
+    sends no UDP it doesn't proxy (`--force-webrtc-ip-handling-policy=disable_non_proxied_udp`); no QUIC; no
+    background traffic, component updates, pings or SmartScreen;
+  - the token answers the gate's 407 (`BasicAuthenticationRequested`) only when the challenge names that render's
+    own realm (`Basic realm="echo-<random>"`, `Gate::challenge`); any other challenge, a site's own 401, is cancelled;
+  - instead of a rule list, a request filter sees every request of every frame and worker
+    (`WebResourceRequested`, every source kind): only https to a name, or to a public address none of this
+    computer's, goes on; media, `localhost`, `.local` and single-label names are refused (403). WebSockets don't go
+    through the filter; they reach only the gate. The main frame goes only where the filter lets a request go, or to
+    `about:`;
+  - nothing kept: a new profile folder per render (`%TEMP%\echo-render-<pid>`), InPrivate, removed when the render
+    ends (by the host too, should the child be killed; one left by a killed host is removed by the next render);
+  - denied as well: script dialogs, web messages, devtools, the context menu, password and form autofill; a download
+    is cancelled before it starts and a popup handled with no window;
+  - its stats add `filter`: `{requests, refused, examples}` (the first 32 distinct refusals).
 - **The page's words are untrusted data**, as any page's. Its own requests to public hosts are allowed, and it sees
   the user's public IP.
 

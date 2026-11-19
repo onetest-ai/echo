@@ -1,20 +1,20 @@
 //! A page rendered for a plugin (`ctx.web.read(url, {render: true})`, #835): the host's side. The page renders in the child
 //! process `echoctl render-page` (`web::render`), apart from Echo's window, its IPC and the plugin's `ctx`:
 //! - no stdin, and an environment of only what a webview needs (no secrets, no `CLAUDE*` / `ANTHROPIC*`);
-//! - its own process group, stopped whole when its time is up;
+//! - its own process group (on Windows a job), stopped whole when its time is up;
 //! - its answer read back as data: the DOM's HTML and the address it ended at, which `web::read` reads as any page.
 //!
 //! One render at a time per plugin, two in all.
 
-// Only macOS renders yet (Windows: the next step of #835).
-#![cfg_attr(not(all(feature = "tray", target_os = "macos")), allow(dead_code))]
+// Rendered on macOS and Windows.
+#![cfg_attr(not(all(feature = "tray", any(target_os = "macos", windows))), allow(dead_code))]
 
 use std::io::Read;
 use std::process::{Command, Stdio};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{anyhow, bail, Result};
 use serde_json::Value;
 
 /// A rendered page: its HTML, the address it ended at, whether its HTML was cut.
@@ -62,18 +62,28 @@ impl Drop for Place {
 
 /// Plugin `id`'s page at `url` (already checked: a public https page), rendered within `secs` (30 at most). `test`: a
 /// development build's test maps its host to a fake service (`ECHOCTL_TEST_HOSTS`, passed on to the child).
-#[cfg(all(feature = "tray", target_os = "macos"))]
+#[cfg(all(feature = "tray", any(target_os = "macos", windows)))]
 pub(super) fn page(id: &str, url: &str, test: bool, secs: u64) -> Result<Rendered> {
     let _place = Place::take(id)?;
     let mut cmd = Command::new(super::files::reader_exe()?);
     cmd.args(["render-page", "--url", url, "--secs", &secs.to_string()]);
     cmd.env_clear().stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
-    for k in ["HOME", "TMPDIR", "USER", "LOGNAME", "LANG"] {
+    #[cfg(target_os = "macos")]
+    let keep = ["HOME", "TMPDIR", "USER", "LOGNAME", "LANG"];
+    // WebView2: the system's folders, the temp folder, the user's profile (where its runtime may be installed).
+    #[cfg(windows)]
+    let keep = ["SystemRoot", "SystemDrive", "windir", "TEMP", "TMP", "USERPROFILE", "LOCALAPPDATA", "APPDATA", "ProgramFiles", "ProgramFiles(x86)", "ProgramW6432", "ProgramData"];
+    for k in keep {
         if let Some(v) = std::env::var_os(k) {
             cmd.env(k, v);
         }
     }
+    #[cfg(target_os = "macos")]
     cmd.env("PATH", "/usr/bin:/bin");
+    #[cfg(windows)]
+    if let Some(root) = std::env::var_os("SystemRoot") {
+        cmd.env("PATH", format!(r"{0}\System32;{0}", root.to_string_lossy()));
+    }
     #[cfg(debug_assertions)]
     if test {
         if let Some(v) = std::env::var_os("ECHOCTL_TEST_HOSTS") {
@@ -82,11 +92,16 @@ pub(super) fn page(id: &str, url: &str, test: bool, secs: u64) -> Result<Rendere
     }
     #[cfg(not(debug_assertions))]
     let _ = test;
-    {
+    #[cfg(target_os = "macos")]
+    let mut child = {
+        use anyhow::Context;
         use std::os::unix::process::CommandExt;
         cmd.process_group(0);
-    }
-    let mut child = cmd.spawn().context("the page's renderer couldn't start")?;
+        cmd.spawn().context("the page's renderer couldn't start")?
+    };
+    // In a job from its start (suspended until it is in), which ends it and every process WebView2 started.
+    #[cfg(windows)]
+    let (mut child, tree) = crate::plugins::signin::Tree::spawn(cmd).ok_or_else(|| anyhow!("the page's renderer couldn't start"))?;
     let drain = |s: Option<Box<dyn Read + Send>>, most: u64| {
         std::thread::spawn(move || {
             let mut b = vec![];
@@ -104,15 +119,29 @@ pub(super) fn page(id: &str, url: &str, test: bool, secs: u64) -> Result<Rendere
         match child.try_wait()? {
             Some(s) => break s,
             None if started.elapsed() > limit => {
-                crate::ai::stop_group(child.id());
-                let _ = child.kill();
-                let _ = child.wait();
+                #[cfg(target_os = "macos")]
+                {
+                    crate::ai::stop_group(child.id());
+                    let _ = child.kill();
+                    let _ = child.wait();
+                }
+                #[cfg(windows)]
+                {
+                    tree.stop(&mut child);
+                    let _ = std::fs::remove_dir_all(crate::web::render::profile_dir(child.id()));
+                }
                 bail!("the page took over {secs} s to render");
             }
             None => std::thread::sleep(Duration::from_millis(50)),
         }
     };
-    // The child is reaped: its group id may already be another's, so nothing is sent to it.
+    // The child is reaped: its group id may already be another's, so nothing is sent to it. On Windows its job (a handle,
+    // not an id) ends whatever it started, and its profile folder goes, should the child not have removed it.
+    #[cfg(windows)]
+    {
+        tree.stop_rest();
+        let _ = std::fs::remove_dir_all(crate::web::render::profile_dir(child.id()));
+    }
     let (out, err) = (out.join().unwrap_or_default(), err.join().unwrap_or_default());
     if !status.success() {
         let why = String::from_utf8_lossy(&err);
@@ -121,13 +150,9 @@ pub(super) fn page(id: &str, url: &str, test: bool, secs: u64) -> Result<Rendere
     answer(&out)
 }
 
-#[cfg(not(all(feature = "tray", target_os = "macos")))]
+#[cfg(not(all(feature = "tray", any(target_os = "macos", windows))))]
 pub(super) fn page(id: &str, url: &str, test: bool, secs: u64) -> Result<Rendered> {
     let _ = (id, url, test, secs);
-    if cfg!(windows) {
-        // WebView2 is the next step of #835 (design § Request interception per OS).
-        bail!("rendering a page isn't on Windows yet: read it without render");
-    }
     bail!("this build of Echo can't render pages: read it without render")
 }
 

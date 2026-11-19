@@ -82,6 +82,8 @@ struct Shared {
     net: Net,
     /// `Proxy-Authorization`'s value, as the client must send it.
     auth: String,
+    /// The 407's `Proxy-Authenticate` value.
+    challenge: String,
     until: Instant,
     stop: AtomicBool,
     conns: AtomicUsize,
@@ -110,6 +112,9 @@ impl Shared {
 pub struct Gate {
     pub port: u16,
     pub token: String,
+    /// The 407's challenge, `Basic realm="echo-<random>"`: a client that answers challenges (WebView2) answers this
+    /// one only, never a site's own 401.
+    pub challenge: String,
     shared: Arc<Shared>,
 }
 
@@ -123,10 +128,14 @@ impl Gate {
         getrandom::fill(&mut rnd).map_err(|e| anyhow!("{e}"))?;
         let token: String = rnd.iter().map(|b| format!("{b:02x}")).collect();
         let auth = format!("Basic {}", base64::engine::general_purpose::STANDARD.encode(format!("{USER}:{token}")));
+        let mut realm = [0u8; 8];
+        getrandom::fill(&mut realm).map_err(|e| anyhow!("{e}"))?;
+        let challenge = format!("Basic realm=\"echo-{}\"", realm.iter().map(|b| format!("{b:02x}")).collect::<String>());
         let shared = Arc::new(Shared {
             caps,
             net,
             auth,
+            challenge: challenge.clone(),
             until,
             stop: AtomicBool::new(false),
             conns: AtomicUsize::new(0),
@@ -139,7 +148,7 @@ impl Gate {
         });
         let s = shared.clone();
         std::thread::spawn(move || accept(listener, s));
-        Ok(Gate { port, token, shared })
+        Ok(Gate { port, token, challenge, shared })
     }
 
     /// When the last connection was let through (the gate's start before any).
@@ -235,7 +244,7 @@ fn serve(mut c: TcpStream, s: &Shared) {
     }
     let authorized = lines.any(|l| l.split_once(':').is_some_and(|(k, v)| k.trim().eq_ignore_ascii_case("proxy-authorization") && v.trim() == s.auth));
     if !authorized {
-        return reply(&mut c, "407 Proxy Authentication Required", "Proxy-Authenticate: Basic realm=\"echo\"\r\n");
+        return reply(&mut c, "407 Proxy Authentication Required", &format!("Proxy-Authenticate: {}\r\n", s.challenge));
     }
     drop(shaking);
     let opened = open(target, s);
