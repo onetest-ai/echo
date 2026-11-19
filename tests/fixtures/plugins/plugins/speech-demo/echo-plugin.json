@@ -1,0 +1,8 @@
+{
+  "id": "speech-demo",
+  "name": "Speech demo",
+  "version": "0.1.0",
+  "summary": "A test plugin: transcribes a WAV file it was handed on Echo's own speech model (tests/cases/plugins/TC-240).",
+  "main": "main.js",
+  "uses": { "speech": true }
+}

@@ -57,6 +57,8 @@ pub(super) fn service_async(id: &str, op: &str, arg: &Value) -> Result<Value> {
             Ok(plugins::signin::get(host, arg[1].as_bool().unwrap_or(false), own).unwrap_or(Value::Null))
         }
 "http.fetch" => fetch(id, arg[0].as_str().unwrap_or(""), &arg[1]),
+        // A WAV file it was handed, on Echo's speech model (`speech.rs`).
+        "speech.transcribe" => speech::transcribe(id, &arg[0], &arg[1]),
         // A web page as Markdown, a file as a handle, HTML it has read the same way (`web.rs`).
         "web.read" => web::read(id, arg[0].as_str().unwrap_or(""), &arg[1]),
         "web.fetch" => web::fetch(id, arg[0].as_str().unwrap_or(""), &arg[1]),

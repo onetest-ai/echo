@@ -73,7 +73,11 @@ pub use crate::calls::resolve_call;
 
 /// Read any WAV (old recordings are 24/48 kHz float) as 16 kHz mono f32.
 pub(crate) fn load_16k(path: &Path) -> Result<Vec<f32>> {
-    let mut r = hound::WavReader::open(path).with_context(|| format!("opening {}", path.display()))?;
+    load_16k_from(hound::WavReader::open(path).with_context(|| format!("opening {}", path.display()))?)
+}
+
+/// `load_16k` of a WAV already opened (the caller's own handle on the file).
+pub(crate) fn load_16k_from<R: std::io::Read>(mut r: hound::WavReader<R>) -> Result<Vec<f32>> {
     let spec = r.spec();
     let raw: Vec<f32> = match spec.sample_format {
         hound::SampleFormat::Float => r.samples::<f32>().collect::<Result<_, _>>()?,
