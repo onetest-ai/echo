@@ -2,8 +2,9 @@
 //! images})` — a web page as Markdown (`crate::web::read`), its pictures listed and, asked, saved as file handles —
 //! `fetch(url, {max})` — one file as a handle — and `markdown(html, {base})` — HTML the plugin already has, read the same
 //! way. Every request goes through `http::admit` and `http::get_capped`: the network path, grants and pins of
-//! `ctx.http.fetch`, plain GETs, no redirect followed. One widening, as a browser shows a page: the pictures a public
-//! page shows may come from their own public hosts (`picture_reach`).
+//! `ctx.http.fetch`, plain GETs, no redirect followed. Two widenings: as a browser shows a page, the pictures a public
+//! page shows may come from their own public hosts (`picture_reach`); and a plugin with `uses.network.web` reads any
+//! https page on the public internet, its redirects followed and each checked again (`web_reach`, `get_page`).
 
 use std::net::{IpAddr, ToSocketAddrs};
 
@@ -24,6 +25,9 @@ const IMAGE_SECS: u64 = 30;
 const LOOKUP_SECS: u64 = 10;
 /// The ports a picture is fetched from on a host the plugin wasn't granted (besides the page's own, on its own host).
 const WEB_PORTS: [u16; 2] = [80, 443];
+/// The redirects followed for a plugin with `uses.network.web` (each address checked again), and the answers that are one.
+const HOPS: usize = 5;
+const REDIRECTS: [u16; 5] = [301, 302, 303, 307, 308];
 /// A file (`ctx.web.fetch`): 10 MB unless `max` says more, up to what `ctx.fs.copyIn` copies; 2 minutes.
 const FILE_MAX: u64 = 10 << 20;
 const FILE_SECS: u64 = 120;
@@ -83,7 +87,7 @@ fn bytes_opt(v: &Value, default: u64, most: u64) -> Result<u64> {
 
 /// `ctx.web.read(url, {max, timeout, images})`: the page at `url` (an address the plugin may reach, as `ctx.http.fetch`) read as
 /// Markdown: {url, title, markdown, links, images, lang, byline, published, description, source, needs_js, truncated,
-/// bytes}. `url` is the address asked for: no redirect is followed. `images: 'save'` also saves its pictures
+/// bytes}. `url` is the address read: the one asked for, or — with `uses.network.web` — where its redirects ended. `images: 'save'` also saves its pictures
 /// (`save_pictures`).
 pub(super) fn read(id: &str, url: &str, opts: &Value) -> Result<Value> {
     let max = bytes_opt(&opts["max"], PAGE_MAX, PAGE_MAX)?;
@@ -92,10 +96,10 @@ pub(super) fn read(id: &str, url: &str, opts: &Value) -> Result<Value> {
         Value::String(s) if s == "save" => true,
         _ => bail!("images is 'save' or nothing"),
     };
-    let reach = admit(id, url, true)?;
     let mut html = vec![];
     let secs = opts["timeout"].as_u64().filter(|s| *s > 0).map_or(PAGE_SECS, |s| s.min(PAGE_SECS));
-    let (head, bytes) = get_capped(id, url, &reach, max, secs, "text/html,application/xhtml+xml", None, &html_only, &mut html)?;
+    let (url, reach, head, bytes) = get_page(id, url, max, secs, "text/html,application/xhtml+xml", &html_only, &mut html)?;
+    let url = url.as_str();
     let p = page::read(&decode_html(&html, head.charset.as_deref()), url);
     let mut v = p.to_json();
     if p.title.is_empty() {
@@ -126,11 +130,10 @@ pub(super) fn markdown(html: &str, opts: &Value) -> Result<Value> {
 /// handle {file, name, size, type} to read (`ctx.files.read`) or copy into a folder it was given (`ctx.fs.copyIn`).
 pub(super) fn fetch(id: &str, url: &str, opts: &Value) -> Result<Value> {
     let max = bytes_opt(&opts["max"], FILE_MAX, files::MAX_COPY)?;
-    let reach = admit(id, url, true)?;
     let mut rnd = [0u8; 8];
     getrandom::fill(&mut rnd).map_err(|e| anyhow!("{e}"))?;
     let dir = format!("cache/web/files/{}", rnd.iter().map(|b| format!("{b:02x}")).collect::<String>());
-    let (path, kind, _) = save(id, &dir, &file_name(url), |sink| get_capped(id, url, &reach, max, FILE_SECS, "*/*", None, &|h| plain_ok(h, "file"), sink))?;
+    let (path, kind, _) = save(id, &dir, &file_name(url), |sink| get_page(id, url, max, FILE_SECS, "*/*", &|h| plain_ok(h, "file"), sink).map(|(_, _, h, n)| (h, n)))?;
     let mut handle = files::make(id, &path)?;
     handle["type"] = json!(kind);
     Ok(handle)
@@ -238,6 +241,12 @@ fn host_port(url: &str) -> Option<(String, u16, &'static str)> {
     Some((host.to_ascii_lowercase(), port, scheme))
 }
 
+/// A request sent to the fake service a development build's tests map `host` to (`url`'s path kept), else `None`; a
+/// release build never.
+fn fake_for(host: &str, url: &str) -> Result<Option<String>> {
+    test_host(&format!("https://{host}{}", url.split_once("://").and_then(|(_, r)| r.find('/').map(|i| &r[i..])).unwrap_or("")), &[host.to_string()])
+}
+
 /// `f()` on a thread of its own, given up on after `wait` (the thread ends whenever `f` does).
 fn within<T: Send + 'static>(wait: Duration, f: impl FnOnce() -> T + Send + 'static) -> Option<T> {
     let (tx, rx) = std::sync::mpsc::channel();
@@ -256,12 +265,17 @@ fn public_address(host: &str, port: u16, until: Instant) -> Result<IpAddr> {
     }
     let last = host.trim_end_matches('.').rsplit('.').next().unwrap_or("");
     if last.is_empty() || last.bytes().all(|b| b.is_ascii_digit()) || last.get(..2).is_some_and(|p| p.eq_ignore_ascii_case("0x")) || !host.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-') {
-        bail!("“{host}” isn't a host name Echo reaches for a picture");
+        bail!("“{host}” isn't a host name Echo reaches");
     }
     let wait = until.saturating_duration_since(Instant::now()).min(Duration::from_secs(LOOKUP_SECS));
     let name = host.to_string();
     let found = if wait.is_zero() { None } else { within(wait, move || (name.as_str(), port).to_socket_addrs().map(|a| a.map(|a| a.ip()).collect::<Vec<_>>())) };
     let ips = found.ok_or_else(|| anyhow!("looking up {host} took too long"))?.map_err(|_| anyhow!("Echo couldn't find {host}"))?;
+    all_public(host, &ips)
+}
+
+/// The address to reach `host` at, of those its name has: the first, when every one is public.
+fn all_public(host: &str, ips: &[IpAddr]) -> Result<IpAddr> {
     match ips.first() {
         Some(ip) if ips.iter().all(|i| public(*i)) => Ok(*ip),
         Some(_) => bail!("{host} points to this computer or your own network"),
@@ -296,12 +310,98 @@ fn picture_reach(id: &str, src: &str, page: Option<&(String, u16)>, page_scheme:
         bail!("a plain http picture on an https page");
     }
     // A development build's tests map the host to a fake service, or fail rather than reach the real one.
-    if let Some(fake) = test_host(&format!("https://{host}{}", src.split_once("://").and_then(|(_, r)| r.find('/').map(|i| &r[i..])).unwrap_or("")), std::slice::from_ref(&host))? {
+    if let Some(fake) = fake_for(&host, src)? {
         return Ok((Reach { listed: false, fake: Some(fake) }, None));
     }
     let ip = public_address(&host, port, until)?;
     let ip = if ip.is_ipv6() { format!("[{ip}]") } else { ip.to_string() };
     Ok((Reach { listed: false, fake: None }, Some(format!("{host}:{port}:{ip}"))))
+}
+
+/// Whether plugin `id`'s sheet has `uses.network.web`: it reads any https page on the public internet.
+fn reads_web(id: &str) -> bool {
+    package_dir(id).and_then(|d| plugins::read_manifest(&d)).is_ok_and(|m| m.uses.get("network").is_some_and(|n| n["web"] == true))
+}
+
+/// How a page of the public internet is reached for a plugin with `uses.network.web`: https, port 80 or 443, a host name
+/// or an IPv4 address (an IPv6 one written as one refused, as for a picture) whose every address is public, at the
+/// address Echo checked and never through a proxy (`resolve`), looked up by `until`.
+fn web_reach(url: &str, until: Instant) -> Result<(Reach, Option<String>)> {
+    let (host, port, scheme) = host_port(url).ok_or_else(|| anyhow!("“{}” isn't an https address", url.chars().take(200).collect::<String>()))?;
+    if scheme != "https" {
+        bail!("{host} over plain http: Echo reads a page on the public internet only over https");
+    }
+    if !WEB_PORTS.contains(&port) {
+        bail!("{host} on port {port}: Echo reads a page on the public internet only on ports 80 and 443");
+    }
+    if let Ok(ip) = host.parse::<IpAddr>() {
+        public_address(&host, port, until)?;
+        if ip.is_ipv6() {
+            bail!("a page at an IPv6 address written as one: Echo reaches a page's host by its name");
+        }
+    }
+    // A development build's tests map the host to a fake service, or fail rather than reach the real one.
+    if let Some(fake) = fake_for(&host, url)? {
+        return Ok((Reach { listed: false, fake: Some(fake) }, None));
+    }
+    let ip = public_address(&host, port, until)?;
+    Ok((Reach { listed: false, fake: None }, Some(format!("{host}:{port}:{ip}"))))
+}
+
+/// How plugin `id` reaches `url`: as `ctx.http.fetch` may (`first`: the address the user typed too, once), else — with
+/// `web` — as a page on the public internet (`web_reach`).
+fn page_reach(id: &str, url: &str, web: bool, first: bool, until: Instant) -> Result<(Reach, Option<String>)> {
+    let granted = if first { admit(id, url, true) } else { reach(id, url) };
+    match granted {
+        Ok(r) => Ok((r, None)),
+        Err(_) if web => web_reach(url, until).map_err(|e| anyhow!("{id} reads only pages on the public internet and the addresses it may reach: {e:#}")),
+        Err(e) => Err(e),
+    }
+}
+
+/// A redirect `get_page` follows: where to.
+#[derive(Debug)]
+struct Moved(String);
+
+impl std::fmt::Display for Moved {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "moved to {}", self.0)
+    }
+}
+
+impl std::error::Error for Moved {}
+
+/// A plain GET of `url` through `get_capped`, `secs` in all. Without `uses.network.web` exactly that: only what the
+/// plugin may reach, no redirect followed. With it, a public page is reached too (`web_reach`), and a redirect (301,
+/// 302, 303, 307, 308) is followed up to `HOPS` times — its `Location` read against the address it came from, and
+/// that address checked again as the first was (never the typed one) before anything is asked of it. The address read
+/// last, how it was reached, its head and size.
+#[allow(clippy::too_many_arguments)]
+fn get_page(id: &str, url: &str, max: u64, secs: u64, accept_types: &str, accept: &dyn Fn(&Head) -> Result<()>, sink: &mut dyn std::io::Write) -> Result<(String, Reach, Head, u64)> {
+    let web = reads_web(id);
+    let until = Instant::now() + Duration::from_secs(secs);
+    let (mut reach, mut resolve) = page_reach(id, url, web, true, until)?;
+    let mut at = url.to_string();
+    let mut hops = 0;
+    loop {
+        let follow = |h: &Head| match &h.location {
+            Some(to) if web && REDIRECTS.contains(&h.status) => Err(Moved(to.clone()).into()),
+            _ => accept(h),
+        };
+        let left = (until.saturating_duration_since(Instant::now()).as_millis().div_ceil(1000) as u64).clamp(1, secs);
+        let err = match get_capped(id, &at, &reach, max, left, accept_types, resolve.as_deref(), &follow, sink) {
+            Ok((head, n)) => return Ok((at, reach, head, n)),
+            Err(e) => e,
+        };
+        let Some(Moved(to)) = err.downcast_ref::<Moved>() else { return Err(err) };
+        if hops == HOPS {
+            bail!("the page moved more than {HOPS} times: Echo follows {HOPS} redirects at most");
+        }
+        hops += 1;
+        let next = page::web_link(&at, to).ok_or_else(|| anyhow!("the page moved to “{}”, which isn't a web address Echo reads", to.chars().take(200).collect::<String>()))?;
+        (reach, resolve) = page_reach(id, &next, web, false, until).map_err(|e| anyhow!("the page moved to {next}, which Echo doesn't read: {e:#}"))?;
+        at = next;
+    }
 }
 
 /// `images: 'save'`: each picture of the page (`page::Image`) with what became of it — `saved` a handle {file, name,
@@ -421,6 +521,27 @@ mod tests {
             "/pdf" | "/files/Plan%20v2.pdf" => reply("200 OK", "Content-Type: application/pdf\r\n", b"%PDF-1.4 made up"),
             "/gz" => reply("200 OK", "Content-Type: text/html\r\nContent-Encoding: gzip\r\n", &[0x1f, 0x8b, 8, 0, 0, 0, 0, 0, 0, 3]),
             "/moved" => reply("302 Found", "Location: /target\r\n", b""),
+            // A chain of redirects: /hop/N moves N more times, the last one to the page (relative, with dots).
+            p if p.starts_with("/hop/") => match p[5..].parse::<u32>() {
+                Ok(0) => reply("301 Moved Permanently", "Location: ../page\r\n", b""),
+                Ok(n) => reply("307 Temporary Redirect", &format!("Location: /hop/{}\r\n", n - 1), b""),
+                Err(_) => reply("404 Not Found", "", b""),
+            },
+            // A public page that moves somewhere it may not go (or to another public host).
+            p if p.starts_with("/away/") => {
+                let to = match &p[6..] {
+                    "loopback" => "https://127.0.0.1/page".to_string(),
+                    "ten" => "https://10.0.0.1/page".into(),
+                    "metadata" => "https://169.254.169.254/latest/meta-data/".into(),
+                    "localhost" => "https://localhost/page".into(),
+                    "v6" => "https://[::1]/page".into(),
+                    "http" => "http://news.acme.example/page".into(),
+                    "port" => format!("https://news.acme.example:{other}/page"),
+                    "file" => "file:///etc/hosts".into(),
+                    _ => "https://cdn.acme.example/page".into(),
+                };
+                reply("302 Found", &format!("Location: {to}\r\n"), b"")
+            }
             "/cp1251" => {
                 let mut body = format!("<main><p>{filler}</p><p>").into_bytes();
                 body.extend_from_slice(&[0xcf, 0xf0, 0xe8, 0xe2, 0xe5, 0xf2]);
@@ -568,6 +689,129 @@ mod tests {
         assert_eq!(m["markdown"], json!("Hi [there](https://acme.example/x)\n\n![pic](https://acme.example/d/a.png)"));
         assert!(refused(call("reader", "md", &json!({"html": "<p>x</p>", "opts": {"base": "javascript:alert(1)"}}))).contains("base is an http(s) address"));
         plugins::remove("reader", false).unwrap();
+    }
+
+    // The public hosts below are a development build's fakes: a release build would reach for the real ones.
+    #[cfg(debug_assertions)]
+    #[test]
+    fn a_plugin_with_network_web_reads_any_public_https_page_following_redirects_each_checked_again() {
+        let (_env, root) = paths::testenv::folders("jshost-web-public");
+        let (other, other_seen) = site(1);
+        let (port, seen) = site(other);
+        let mk = root.join("market");
+        let d = mk.join("plugins/crawler");
+        std::fs::create_dir_all(&d).unwrap();
+        std::fs::write(d.join("echo-plugin.json"), json!({"id": "crawler", "name": "Crawler", "version": "0.1.0", "main": "main.js", "uses": {"network": {"web": true}}}).to_string()).unwrap();
+        std::fs::write(
+            d.join("main.js"),
+            r#"
+            export function apply(ctx) {
+              ctx.command('ping', () => 'pong')
+              ctx.command('read', async (a) => await ctx.web.read(a.url, a.opts || {}))
+              ctx.command('fetch', async (a) => await ctx.web.fetch(a.url, a.opts || {}))
+              ctx.command('http', async (a) => await ctx.http.fetch(a.url, {}))
+            }
+            "#,
+        )
+        .unwrap();
+        std::fs::write(mk.join("echo-marketplace.json"), json!({"name": "t", "plugins": [{"id": "crawler", "source": "./plugins/crawler"}]}).to_string()).unwrap();
+        let name = plugins::market_add(mk.to_str().unwrap(), Some("t")).unwrap();
+        plugins::refresh(&name).unwrap();
+        let sheet = plugins::review("crawler", Some(&name)).unwrap().uses;
+        assert_eq!(sheet, ["Runs its own code in Echo, with your rights", "Reads web pages on the public internet (https)"]);
+        plugins::install("crawler", Some(&name), &sheet).unwrap();
+        sync();
+        let up = (0..50).find_map(|_| call("crawler", "ping", &json!({})).ok().or_else(|| {
+            std::thread::sleep(Duration::from_millis(50));
+            None
+        }));
+        assert_eq!(up, Some(json!("pong")));
+        let _map = EnvHosts::set(&_env, &format!("news.acme.example=http://127.0.0.1:{port},cdn.acme.example=http://127.0.0.1:{port}"));
+        let read = |url: &str| call("crawler", "read", &json!({"url": url}));
+        let refused = |r: Result<Value>| r.unwrap_err().to_string();
+
+        // A public page, and one five redirects away: read where it ended, its links against that address.
+        let p = read("https://news.acme.example/page").unwrap();
+        assert_eq!((p["url"].as_str(), p["title"].as_str()), (Some("https://news.acme.example/page"), Some("Pilot notes")));
+        let p = read("https://news.acme.example/hop/4").unwrap();
+        assert_eq!(p["url"], json!("https://news.acme.example/page"), "five redirects followed, the last one relative");
+        assert_eq!(p["links"], json!([{"text": "the plan", "href": "https://news.acme.example/plan"}]));
+        let p = read("https://news.acme.example/away/cdn").unwrap();
+        assert_eq!(p["url"], json!("https://cdn.acme.example/page"), "to another public host");
+        let f = call("crawler", "fetch", &json!({"url": "https://news.acme.example/hop/1"})).unwrap();
+        assert_eq!(f["size"].as_u64(), Some(p["bytes"].as_u64().unwrap()), "ctx.web.fetch follows them too");
+        // A sixth is refused, and never asked.
+        let asked = |p: &str| seen.paths.lock().unwrap().iter().filter(|x| *x == p).count();
+        let before = asked("/page");
+        assert!(refused(read("https://news.acme.example/hop/5")).contains("moved more than 5 times"));
+        assert_eq!(asked("/page"), before, "the page past the fifth redirect never asked");
+
+        // A redirect anywhere but a public https page on port 80 or 443 is refused before it is asked.
+        let conns = other_seen.conns.load(Ordering::SeqCst);
+        let other_port = format!("on port {other}");
+        for (to, why) in [
+            ("loopback", "on this computer or your own network"),
+            ("ten", "on this computer or your own network"),
+            ("metadata", "on this computer or your own network"),
+            ("v6", "on this computer or your own network"),
+            ("http", "only over https"),
+            ("port", other_port.as_str()),
+            ("file", "isn't a web address Echo reads"),
+        ] {
+            let e = refused(read(&format!("https://news.acme.example/away/{to}")));
+            assert!(e.contains("the page moved to") && e.contains(why), "{to}: {e}");
+        }
+        assert_eq!(other_seen.conns.load(Ordering::SeqCst), conns, "the other port never asked");
+
+        // The first address the same way: this computer, the user's network, plain http, another port.
+        for url in [
+            "https://127.0.0.1/page",
+            "https://10.1.2.3/page",
+            "https://172.16.0.1/page",
+            "https://192.168.68.1/page",
+            "https://169.254.169.254/latest/meta-data/",
+            "https://[::1]/page",
+            "https://[fd00::1]/page",
+            "https://[::ffff:192.168.1.1]/page",
+        ] {
+            let e = refused(read(url));
+            assert!(e.contains("reads only pages on the public internet") && e.contains("your own network"), "{url}: {e}");
+        }
+        assert!(refused(read("http://news.acme.example/page")).contains("only over https"));
+        assert!(refused(read(&format!("https://news.acme.example:{port}/page"))).contains(&format!("on port {port}")));
+        assert!(refused(read(&format!("http://127.0.0.1:{other}/page"))).contains("only over https"));
+        assert_eq!(other_seen.conns.load(Ordering::SeqCst), conns, "nothing asked of this computer");
+        // ctx.http.fetch isn't widened.
+        assert!(refused(call("crawler", "http", &json!({"url": "https://news.acme.example/page"}))).contains("may reach only"));
+        drop(_map);
+        plugins::remove("crawler", false).unwrap();
+    }
+
+    #[test]
+    fn a_public_page_is_reached_at_the_public_address_echo_checked() {
+        let (_env, _root) = paths::testenv::folders("jshost-web-reach");
+        let until = Instant::now() + Duration::from_secs(10);
+        let (r, resolve) = web_reach("https://8.8.8.8/news", until).unwrap();
+        assert!(r.fake.is_none() && !r.listed);
+        assert_eq!(resolve.as_deref(), Some("8.8.8.8:443:8.8.8.8"), "pinned: curl connects there and to no proxy");
+        assert_eq!(web_reach("https://1.1.1.1:80/", until).unwrap().1.as_deref(), Some("1.1.1.1:80:1.1.1.1"));
+        let refused = |u: &str| web_reach(u, until).err().expect("refused").to_string();
+        for u in ["https://127.0.0.1/", "https://10.0.0.1/", "https://172.16.5.4/", "https://192.168.1.1/", "https://169.254.169.254/", "https://[::1]/", "https://[fd00::1]/", "https://[::ffff:10.0.0.1]/", "https://localhost/"] {
+            assert!(refused(u).contains("your own network"), "{u}");
+        }
+        assert!(refused("https://[2606:4700:4700::1111]/").contains("IPv6"));
+        assert!(refused("http://8.8.8.8/").contains("only over https"));
+        assert!(refused("https://8.8.8.8:8443/").contains("port 8443"));
+        assert!(refused("https://user@8.8.8.8/").contains("isn't an https address"));
+        assert!(refused("ftp://8.8.8.8/").contains("isn't an https address"));
+        assert!(refused("https://2130706433/").contains("isn't a host name"), "an address written as one number");
+        // A name: every address it has must be public; one into the user's network refuses it all.
+        let ip = |s: &str| s.parse::<IpAddr>().unwrap();
+        assert_eq!(all_public("news.acme.example", &[ip("93.184.215.14"), ip("2606:2800:21f:cb07:6820:80da:af6b:8b2c")]).unwrap(), ip("93.184.215.14"));
+        assert!(all_public("intranet.acme.example", &[ip("10.0.0.7")]).unwrap_err().to_string().contains("your own network"));
+        assert!(all_public("mixed.acme.example", &[ip("93.184.215.14"), ip("192.168.1.10")]).unwrap_err().to_string().contains("your own network"));
+        assert!(all_public("v6.acme.example", &[ip("fd00::1")]).is_err());
+        assert!(all_public("none.acme.example", &[]).unwrap_err().to_string().contains("couldn't find"));
     }
 
     /// `ECHOCTL_TEST_HOSTS` until dropped, set only while the test holds the test environment (its lock: the variable is

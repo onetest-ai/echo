@@ -36,7 +36,7 @@ are not granted. Evidence: `plugins::CAPABILITIES`, `plugins::describe_folders`,
 | `events.on` | the events it hears (§ Events) |
 | `deliver.to` | where it sends to the user |
 | `deliver_provider.kinds` | the delivery kinds it provides (§ Delivery) |
-| `network.hosts`, `network.hosts_from`, `network.ask` | the `https://` hosts it fetches (§ Network); string settings without a default whose addresses the user lists; `ask: true`: it may ask the user for one address to fetch once (§ Network, A typed address) |
+| `network.hosts`, `network.hosts_from`, `network.ask`, `network.web` | the `https://` hosts it fetches (§ Network); string settings without a default whose addresses the user lists; `ask: true`: it may ask the user for one address to fetch once (§ Network, A typed address); `web: true`: `ctx.web.read` and `ctx.web.fetch` read any https page on the public internet, its redirects followed (§ Reading a web page, The public web) — a line of its own on the sheet, "Reads web pages on the public internet (https)", so an update adding it asks again. Evidence: `capabilities::describe_network`, `capabilities::WEB_LINE` |
 | `channel.plugin` | the Claude Code plugin it installs (§ Claude runs) |
 | `sessions`, `sessions.commands` | its runtime skills for Echo's sessions; its commands Claude in Echo may run (§ Claude in Echo) |
 | `folders.what`, `folders.write` | folders the user picks, read-only, or changed with `folders.write` (§ Folders and files) |
@@ -294,16 +294,18 @@ too). A plugin never sets the address: not by its settings, its store or its win
 
 ### Reading a web page (`ctx.web`)
 
-No capability of its own and no line on the sheet: reading a page is a GET under the network grants above, made
-through the same check and the same curl as `ctx.http.fetch` (`http::admit`, `http::get_capped`) — a host in
-`network.hosts` over https, an address the user listed (its pinned key too), or the page the user typed in Echo's box
-(`askAddress`, once). Like every fetch it follows no redirect, and in a run Echo started it is allowed or refused as
-`ctx.http.fetch` is. Each request is a plain GET: no cookies, no credentials or sign-ins, no headers of the plugin's,
+Reading a page is a GET under the network grants above, made through the same check and the same curl as
+`ctx.http.fetch` (`http::admit`, `http::get_capped`) — a host in `network.hosts` over https, an address the user listed
+(its pinned key too), or the page the user typed in Echo's box (`askAddress`, once) — and, only with `uses.network.web`,
+any https page on the public internet (The public web, below). Without `network.web` it follows no redirect, as every
+fetch; in a run Echo started it is allowed or refused as `ctx.http.fetch` is (`network.web` too: no dialog, no
+prompt, no click needed — queued and background work reads as a command does). Each request is a plain GET: no cookies, no credentials or sign-ins, no headers of the plugin's,
 `User-Agent: Mozilla/5.0 (compatible; Echo)`, `Accept-Encoding: identity`. Evidence: `jshost::web`
 
 - `await ctx.web.read(url, {max, timeout, images})` → `{url, title, markdown, links: [{text, href}], images: [{src, alt,
   caption, width, height}], lang, byline, published, description, source, needs_js, truncated, bytes}`. `url` is the
-  address asked for (no redirect followed: a page that moved rejects with its 3xx). HTML only (`text/html`,
+  address read: the one asked for (no redirect followed: a page that moved rejects with its 3xx), or with
+  `network.web` where its redirects ended (its relative links read against it). HTML only (`text/html`,
   `application/xhtml+xml`; anything else rejects "this is <type>, not a web page"), never compressed (a
   `Content-Encoding` other than identity rejects before its body is read), 5 MB (`max` less) read as it comes and
   stopped past it, 30 s (`timeout` less); the charset the server or the page names (else UTF-8; bytes that aren't in it
@@ -363,13 +365,30 @@ through the same check and the same curl as `ctx.http.fetch` (`http::admit`, `ht
   text). 5 MB.
   Nothing is fetched. Also for a page's DOM rendered elsewhere.
 
+**The public web** (`uses.network.web: true`; the sheet: "Reads web pages on the public internet (https)", its own
+line): `ctx.web.read` and `ctx.web.fetch` (not `ctx.http.fetch`, not `ctx.http.stream`) also reach any page the
+plugin's other grants don't — `https://` only, port 80 or 443, a host name or an IPv4 address (an IPv6 address
+written as one refused), whose every address is public by the same rule as a page's pictures (above: a name that
+points into this computer or the user's network even in part is refused, looked up within the request's time), and
+Echo connects to the address it checked, never through a proxy. A host its other grants reach (`network.hosts`, a
+listed address, the typed one) keeps their rules. A redirect (301, 302, 303, 307, 308) is followed, 5 at most: its
+`Location` read against the address it came from, and the address it names checked again as the first was — by the
+plugin's grants (never the typed address again), else as a public https page — before anything is asked of it; the
+size and time caps are the whole read's. Rejected, with why: plain http ("… over plain http: Echo reads a page on the
+public internet only over https"), another port ("… on port <n>: … only on ports 80 and 443"), this computer or the
+user's network ("<plugin> reads only pages on the public internet and the addresses it may reach: <host> is on this
+computer or your own network"), a redirect to any of these ("the page moved to <address>, which Echo doesn't read: …")
+or to what isn't a web address, a 6th ("the page moved more than 5 times: Echo follows 5 redirects at most"). Nothing
+else changes: GET only, no cookies, credentials or headers of the plugin's, the same User-Agent and caps, HTML only
+for `read`. Evidence: `jshost::web::web_reach`, `jshost::web::get_page`
+
 What comes back is the page's: untrusted data. A plugin shows it only through `ctx.markdown` (raw HTML as text, its
 links and pictures only as that allows: § Host half) — never as HTML of its own, never in a prompt as instructions.
 
 | Rejected | When |
 |---|---|
-| the host | as `ctx.http.fetch` (a page's picture: also on this computer or the user's network, unless the plugin may reach it) |
-| the answer | not 2xx (a 3xx: "it moved", never followed), compressed, not HTML (`read`) or not a picture (`images`), over its size or time |
+| the host | as `ctx.http.fetch` (a page's picture: also on this computer or the user's network, unless the plugin may reach it); with `network.web`, a page not https on port 80 or 443 at a public address |
+| the answer | not 2xx (a 3xx: "it moved", never followed — with `network.web`, a 6th redirect or one to an address it may not read), compressed, not HTML (`read`) or not a picture (`images`), over its size or time |
 
 ## Claude runs
 
@@ -1123,7 +1142,10 @@ Evidence: `jshost::work::check_rows`
   host first, and an address the user listed (`network.hosts_from`) is reached as it is. It fails closed: while it is
   set, one wrong entry (malformed, or not a local address) fails every request, and a named host it doesn't map is
   refused ("isn't mapped in ECHOCTL_TEST_HOSTS"). Curl sends the fake `Host: 127.0.0.1:<port>`: hosts it must tell
-  apart are served on different ports. A release build never reads it. Evidence: `jshost::test_hosts::test_host`
+  apart are served on different ports. A release build never reads it. It also stands for a public host a page's
+  picture or a `network.web` page is read from (checked first: https, port 80 or 443, an address written as one
+  public), and while it is set such a host it doesn't map is refused the same way. Evidence:
+  `jshost::test_hosts::test_host`, `jshost::web::fake_for`
 - In a development build `ECHOCTL_TEST_GRAPH=http://127.0.0.1:<port>` (or `http://localhost:<port>`) is a fake
   Microsoft 365: Echo counts as signed in (the account About me's address) with a made-up token, sends every Graph
   request of `ctx.m365` (and the rest of Echo's) to `<base>/<path after /v1.0>`, and refuses the real sign-in. It fails

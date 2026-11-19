@@ -250,17 +250,28 @@ pub(super) fn describe_deliver_provider(v: &Value) -> Result<String> {
     Ok(format!("Adds a way Echo sends things to you: {}", join_words(&kinds.iter().map(|k| title_case(k)).collect::<Vec<_>>().iter().map(String::as_str).collect::<Vec<_>>())))
 }
 
+/// The sheet's line for `uses.network.web`: its own, after the `Talks to …` one.
+pub const WEB_LINE: &str = "Reads web pages on the public internet (https)";
+
+/// `uses.network`: one line, and `web` one of its own (the lines apart by a line break: `describe`).
 pub(super) fn describe_network(v: &Value) -> Result<String> {
     let hosts = strings(v, "hosts")?;
     let from = strings(v, "hosts_from")?;
-    // `ask`: it may ask the user, in Echo's own box, for an address to fetch once (`ctx.http.askAddress`).
-    let ask = match v.get("ask") {
-        None => false,
-        Some(Value::Bool(b)) => *b,
-        Some(_) => bail!("“network.ask” is true or false"),
+    let flag = |k: &str| match v.get(k) {
+        None => Ok(false),
+        Some(Value::Bool(b)) => Ok(*b),
+        Some(_) => Err(anyhow!("“network.{k}” is true or false")),
     };
+    // `ask`: it may ask the user, in Echo's own box, for an address to fetch once (`ctx.http.askAddress`).
+    let ask = flag("ask")?;
+    // `web`: `ctx.web.read` / `fetch` reach any https page on the public internet (`jshost::web::web_reach`).
+    let web = flag("web")?;
+    if web {
+        let rest: serde_json::Map<String, Value> = v.as_object().into_iter().flatten().filter(|(k, _)| *k != "web").map(|(k, v)| (k.clone(), v.clone())).collect();
+        return Ok(if rest.is_empty() { WEB_LINE.into() } else { format!("{}\n{WEB_LINE}", describe_network(&Value::Object(rest))?) });
+    }
     if (hosts.is_empty() && from.is_empty() && !ask) || hosts.iter().any(|h| h.is_empty() || !h.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-') || !h.contains('.')) {
-        bail!("“network” names hosts (e.g. api.example.com), settings that hold an address (hosts_from) or asks you for one (ask)");
+        bail!("“network” names hosts (e.g. api.example.com), settings that hold an address (hosts_from), asks you for one (ask) or reads the public web (web)");
     }
     let asks = "Fetches a web page from an address you type in Echo's own box when it asks — that page only, once each time";
     if hosts.is_empty() && from.is_empty() {
@@ -518,12 +529,13 @@ pub(super) fn describe_echo(v: &Value) -> Result<String> {
 /// The permission sheet's lines for a manifest's `uses`, in order; an unknown capability or a bad
 /// value is an error naming it.
 pub fn describe(uses: &serde_json::Map<String, Value>) -> Result<Vec<String>> {
-    uses.iter()
-        .map(|(k, v)| {
-            let c = CAPABILITIES.iter().find(|c| c.id == k).ok_or_else(|| anyhow!("it uses “{k}”, which this Echo doesn't know — it may need a newer Echo"))?;
-            (c.describe)(v).with_context(|| format!("“{k}”"))
-        })
-        .collect()
+    let mut lines = vec![];
+    for (k, v) in uses {
+        let c = CAPABILITIES.iter().find(|c| c.id == k).ok_or_else(|| anyhow!("it uses “{k}”, which this Echo doesn't know — it may need a newer Echo"))?;
+        // A capability's lines apart by a line break (`network.web`).
+        lines.extend((c.describe)(v).with_context(|| format!("“{k}”"))?.split('\n').map(str::to_owned));
+    }
+    Ok(lines)
 }
 
 /// The capabilities a manifest uses that this Echo doesn't implement yet.
@@ -592,6 +604,18 @@ mod tests {
         assert!(!describe_network(&serde_json::json!({"hosts": ["api.acme.example"]})).unwrap().contains("type"));
         assert!(describe_network(&serde_json::json!({"ask": false})).is_err(), "asks for nothing");
         assert!(describe_network(&serde_json::json!({"ask": "yes"})).is_err());
+    }
+
+    #[test]
+    fn reading_the_public_web_is_a_line_of_its_own_on_the_sheet() {
+        let lines = |v: serde_json::Value| describe(serde_json::json!({"network": v}).as_object().unwrap());
+        assert_eq!(lines(serde_json::json!({"web": true})).unwrap(), [WEB_LINE]);
+        assert_eq!(WEB_LINE, "Reads web pages on the public internet (https)");
+        assert_eq!(lines(serde_json::json!({"hosts": ["api.acme.example"], "web": true})).unwrap(), ["Talks to api.acme.example over HTTPS", WEB_LINE]);
+        assert_eq!(lines(serde_json::json!({"ask": true, "web": true})).unwrap(), ["Fetches a web page from an address you type in Echo's own box when it asks — that page only, once each time", WEB_LINE]);
+        assert_eq!(lines(serde_json::json!({"hosts": ["api.acme.example"], "web": false})).unwrap(), ["Talks to api.acme.example over HTTPS"], "false: no line");
+        assert!(lines(serde_json::json!({"web": false})).is_err(), "asks for nothing");
+        assert_eq!(describe_network(&serde_json::json!({"web": "yes"})).unwrap_err().to_string(), "“network.web” is true or false");
     }
 
     #[test]

@@ -1892,6 +1892,25 @@ mod tests {
     }
 
     #[test]
+    fn an_update_that_adds_reading_the_public_web_asks_again() {
+        let (_env, root) = paths::testenv::folders("plugins-web-update");
+        let mk = root.join("market");
+        plugin(&mk, "reader", "0.1.0", json!({"network": {"hosts": ["api.acme.example"]}}));
+        market(&mk, &["reader"]);
+        let name = market_add(mk.to_str().unwrap(), Some("acme")).unwrap();
+        refresh(&name).unwrap();
+        let sheet = review("reader", Some(&name)).unwrap().uses;
+        install("reader", Some(&name), &sheet).unwrap();
+        plugin(&mk, "reader", "0.2.0", json!({"network": {"hosts": ["api.acme.example"], "web": true}}));
+        refresh(&name).unwrap();
+        let rv = update_for(&Registry::load().unwrap().installed["reader"]).unwrap();
+        assert_eq!(rv.new_uses, ["Reads web pages on the public internet (https)"], "only its own line is new: {:?}", rv.uses);
+        assert!(update("reader", &[]).unwrap_err().to_string().contains("asks for more"));
+        assert_eq!(update("reader", &rv.new_uses).unwrap().unwrap().version, "0.2.0");
+        remove("reader", false).unwrap();
+    }
+
+    #[test]
     fn install_update_and_remove_from_a_local_marketplace() {
         let (_env, root) = paths::testenv::folders("plugins-flow");
         let mk = root.join("market");
