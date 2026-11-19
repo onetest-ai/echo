@@ -85,7 +85,7 @@ webpki = { package = "rustls-webpki", version = "0.103", default-features = fals
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
-objc2-foundation = { version = "0.3", features = ["NSString", "NSArray", "NSDictionary", "NSUUID", "NSValue", "NSObject", "NSData", "NSError", "NSRunLoop", "NSObjCRuntime"] }
+objc2-foundation = { version = "0.3", features = ["NSString", "NSArray", "NSDictionary", "NSUUID", "NSValue", "NSObject", "NSData", "NSError", "NSRunLoop", "NSObjCRuntime", "NSURL", "NSKeyValueCoding"] }
 # Notifications posted as Echo (its icon; a click opens the window). osascript's show as Script Editor.
 objc2-user-notifications = { version = "0.3", default-features = false, features = ["std", "bitflags", "block2", "UNUserNotificationCenter", "UNNotification", "UNNotificationContent", "UNNotificationRequest", "UNNotificationResponse", "UNNotificationTrigger"] }
 # The Dock icon while the Echo window is open (dev builds have no bundle icon).
@@ -95,8 +95,9 @@ objc2-core-audio-types = "0.3"
 objc2-core-foundation = { version = "0.3", features = ["CFDictionary", "CFString"] }
 objc2-av-foundation = { version = "0.3", features = ["AVCaptureDevice", "AVMediaFormat", "block2"] }
 block2 = "0.6"
-# The window's webview: stopping a microphone capture no plugin holds (`window::EchoWindow::follow_mic`).
-objc2-web-kit = { version = "0.3.2", default-features = false, features = ["std", "block2", "objc2-app-kit", "WKWebView"], optional = true }
+# The window's webview: stopping a microphone capture no plugin holds (`window::EchoWindow::follow_mic`); a page rendered
+# for a plugin (`web::render`): its own configuration, a store in memory, the gate as its proxy, a content rule list.
+objc2-web-kit = { version = "0.3.2", default-features = false, features = ["std", "block2", "objc2-app-kit", "WKWebView", "WKWebViewConfiguration", "WKWebsiteDataStore", "WKPreferences", "WKUserContentController", "WKContentRuleList", "WKContentRuleListStore"], optional = true }
 libc = "0.2"
 whisper-rs = { version = "0.16", features = ["metal"], optional = true }
 # Shared-screen key frames: decode the window capture, compare thumbnails, save JPEGs.
