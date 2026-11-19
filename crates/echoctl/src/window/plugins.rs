@@ -424,7 +424,12 @@ pub(super) fn route(path: &str, req: &Request<Vec<u8>>) -> Option<Response<Cow<'
                         return Some(json_reply(json!({"error": format!("{id} isn't installed and on")})));
                     }
                     let files: Vec<Value> = body["files"].as_array().cloned().unwrap_or_default();
-                    json_reply(match crate::jshost::call_with(id, cmd, &body["args"], &files, crate::jshost::CALL_TIMEOUT) {
+                    let ran = crate::jshost::call_with(id, cmd, &body["args"], &files, crate::jshost::CALL_TIMEOUT);
+                    // A settings page's connection test: only ok and a message, never what its host half read.
+                    if cmd == crate::plugins::TEST_SETTINGS {
+                        return Some(json_reply(json!({"value": crate::plugins::test_answer(id, ran)})));
+                    }
+                    json_reply(match ran {
                         Ok(v) => json!({"value": v}),
                         Err(e) => json!({"error": format!("{e:#}")}),
                     })

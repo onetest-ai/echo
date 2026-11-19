@@ -942,6 +942,27 @@
    "priority": "high",
    "check": "agent",
    "axes": []
+  },
+  {
+   "id": "F-PLUG-140",
+   "feature": "A plugin keeps a file handed to it in its own store with `ctx.store.copyIn(file, path, {createNew})` (#832): the bytes as they are, 50 MB at most, never out of the store, never over Echo's own files there (`settings.json`, `widgets.json`…), never over a file unless `createNew: false`; `ctx.store.usage(dir?)` gives `{bytes, files}` of the store or one of its folders (not `settings.json`)",
+   "priority": "medium",
+   "check": "agent",
+   "axes": []
+  },
+  {
+   "id": "F-PLUG-141",
+   "feature": "`ctx.settings.get(key)` gives the manifest's `default` for a setting nobody set (a bool `false` and a number too), what the user set when there is one (an empty string too), and `null` for a setting without a default, a secret (never given a default) or an address list the plugin may reach (#832)",
+   "priority": "medium",
+   "check": "agent",
+   "axes": []
+  },
+  {
+   "id": "F-PLUG-142",
+   "feature": "A plugin's window half runs its settings page's connection test with `ctx.call('__testSettings', {section})`: its host half reads the secrets itself, and the window half is given only `{ok, message}` — the message cut at 300 characters, the user's secrets taken out of it, a failure or a plugin without the command told as `{ok: false, message}` (#832)",
+   "priority": "medium",
+   "check": "agent",
+   "axes": []
   }
  ]
 }

@@ -15,7 +15,15 @@ both, this after the rules. Where this and Echo's code differ, the code wins: fi
 - `main` and `client` point at a `.js`/`.mjs` inside the plugin folder; any other file it ships is read with
   `ctx.package.read(path)` / `ctx.package.list(dir)`. Evidence: `jshost::package_file`
 - A setting is `{key, label, type, default?, help?}`: `key` unique (a–z 0–9 `-` `_`), `type` `string` (default), `bool`,
-  `folder` or `secret`; read with `ctx.settings.get(key)`. Evidence: `plugins::set_setting`
+  `folder` or `secret`; read with `ctx.settings.get(key)`, which gives what the user set, else the setting's `default`,
+  else `null` — never a default for a `secret` or an address list the plugin may reach (only the user enters those).
+  Evidence: `plugins::set_setting`, `plugins::setting`
+- A settings page's "Test connection": the plugin's host half registers `ctx.command('__testSettings', async ({section}) => …)`
+  and reads what it needs itself (`ctx.settings.get('token')`, secrets included); its answer is `true`, a message
+  (ok), or `{ok, message}`. Its window half runs it with `ctx.call('__testSettings', {section})` and is given only
+  `{ok, message}` — whatever else the host half answered is dropped, `message` is cut at 300 characters, each value the
+  user keeps as a secret (3 characters or more) is replaced by `••••` in it, and a host half that throws, or has no such
+  command ("this plugin has no connection test"), gives `{ok: false, message}`. Evidence: `plugins::test_answer`
 - A plugin and a marketplace tree hold plain files only (no links or special files): 400 files / 20 MB a plugin,
   5000 / 64 MB a marketplace. Evidence: `plugins::check_tree`
 - `echoctl plugin check <folder>` runs an install's checks of the package (manifest, `uses`, widgets, dashboards, skills,
@@ -173,6 +181,12 @@ Evidence: `plugins::EVENTS`, `plugins::as_heard`, `share::minutes_payload`, `sha
   `ctx.widgets.set` / `clear` and `ctx.threads.set`; `work.json` is what `ctx.work.provide` answered. The same for
   `client-values.json` (write and remove), changed through `ctx.clients.set`.
   Evidence: `jshost::not_echos`, `jshost::inbox_file`, `jshost::widgets_file`
+- `ctx.store.usage(dir?)` (the same as `ctx.store.size`) → `{bytes, files}`: what the plugin keeps in its store, or in
+  its folder `dir`; its own files only (not `settings.json`). `ctx.cache.size()` is that of `cache/`. Evidence: `jshost::service`
+- `await ctx.store.copyIn(file, path, {createNew})` → `{path, size}`: a file handed to it (a handle: `ctx.system.pickFiles`,
+  `ctx.web.fetch`, a saved picture, `--file`) kept as it is in its store, 50 MB at most, as `ctx.store.write` writes
+  (store paths only, never Echo's own files there, never over a file unless `createNew: false`, the default is `true`),
+  off the time slice. Evidence: `jshost::files::copy_in_store`
 - `await ctx.store.walk(path, {ext, hidden, max, sha})` → `[{path, size, mtime, sha?}]`: as `ctx.fs.walk`, under the
   store's folder `path` (`""` the store) — its paths relative to the store (what `ctx.store.read` takes), off the
   time slice, 20,000 rows by default and 100,000 at most, dot names only with `hidden`, no link followed and nothing

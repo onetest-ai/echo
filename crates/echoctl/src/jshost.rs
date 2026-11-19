@@ -163,6 +163,11 @@ const PRELUDE: &str = r#"
       path: (path) => call('store.path', path || ''),
       /** What it keeps in its store (`dir`: one folder of it): {bytes, files} — its own files only, not its settings. */
       size: (dir) => call('store.size', dir || ''),
+      /** The same, as `usage`. */
+      usage: (dir) => call('store.size', dir || ''),
+      /** A file handed to it (a handle) copied as it is into its store (50 MB at most), never over a file unless
+       *  `createNew: false`: {path, size}. */
+      copyIn: (file, path, opts) => later('store.copy_in', [file, String(path), opts || {}]),
       /** As ctx.fs.walk, under its store's folder `path` ('' the store): [{path, size, mtime, sha?}]. */
       walk: (path, opts) => later('store.walk', [String(path || ''), opts || {}]),
     },
