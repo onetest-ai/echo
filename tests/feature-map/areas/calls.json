@@ -184,6 +184,41 @@
    "axes": [
     "call.people"
    ]
+  },
+  {
+   "id": "F-CALLS-20",
+   "feature": "With Intake on, Enter in the Calls list's search box turns the list into results: \"Titles and people\" (the calls whose title or people hold every word, by day) first, then \"Said in calls, mail, channels\" (what was said, by source, best first: kind icon, title, when, client, number of moments; a chevron opens its moments: section, speaker, time and two lines with the words marked; the first source open, or every one of two); new words go back to the calls until Enter; × or esc leaves the search; with Intake off the box keeps to titles and people with no error",
+   "priority": "high",
+   "check": "agent",
+   "axes": []
+  },
+  {
+   "id": "F-CALLS-21",
+   "feature": "A search's filters: the source kinds as an icon switch (calls, mail, Teams channels, documents) and one filter icon for section, client, thread, person and days; active filters are removable violet chips; a date read from the query's words is a dashed chip naming those words, and removing it takes them out of the query; each change searches again",
+   "priority": "high",
+   "check": "agent",
+   "axes": []
+  },
+  {
+   "id": "F-CALLS-22",
+   "feature": "A moment of a search opens in the right panel's \"What was said\" tab: its source (a call's day, time, length and people), client and threads, the turns around it with the one said marked (a minutes item: its line, then what was said at its time; a mail or post: its facts), Open at mm:ss (the call on its transcript at that moment), copy link (echo://), Ask Claude (a call's moment: Claude on the call's own profile), more (copy the words, search only that client) and \"Also in this call\"",
+   "priority": "high",
+   "check": "agent",
+   "axes": []
+  },
+  {
+   "id": "F-CALLS-23",
+   "feature": "A search with nothing found says so in one quiet line in its group, naming what was searched (\"Nothing in Acme's mail says …\") with \"Search every source\" when a filter narrowed it; days past what the index keeps say \"Older than the index keeps\" with each kind's horizon",
+   "priority": "medium",
+   "check": "agent",
+   "axes": []
+  },
+  {
+   "id": "F-CALLS-24",
+   "feature": "⌘K with words typed offers \"Search what was said… “words”\" first (with Intake on): it opens Calls with the words in the box in search mode, its filter chips shown and the results listed",
+   "priority": "medium",
+   "check": "agent",
+   "axes": []
   }
  ]
 }

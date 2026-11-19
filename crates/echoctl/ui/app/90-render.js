@@ -90,8 +90,11 @@ function viewState() {
   }
   v.panel = ['right', 'bottom'].filter((a) => eff[a].shown && eff[a].active).map((a) => (PANEL_VIEWS.find((x) => x.id === eff[a].active) || {}).label).filter(Boolean).join(', ')
   const s = window.getSelection && window.getSelection()
-  const inTerm = s && s.anchorNode && s.anchorNode.parentElement && s.anchorNode.parentElement.closest('.xterm')
-  const page = s && !inTerm ? String(s).replace(/\s+/g, ' ').trim() : ''
+  // Not a terminal's selection, nor a search's words (`sxSelectionShared`: another call's or source's text may belong
+  // to another AI profile).
+  const shared = s && s.anchorNode && sxSelectionShared(s.anchorNode.parentElement) && sxSelectionShared(s.focusNode && s.focusNode.parentElement)
+    && ![...document.querySelectorAll(SX_PRIVATE)].some((n) => s.containsNode(n, true))
+  const page = shared ? String(s).replace(/\s+/g, ' ').trim() : ''
   if (page) v.selection = { text: page.slice(0, 400), where: S.view === 'calls' && S.tab === 'transcript' ? 'transcript' : 'page' }
   else if (frameSel && c && S.tab === 'minutes') v.selection = { text: frameSel.slice(0, 400), where: 'minutes' }
   return v

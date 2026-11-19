@@ -197,6 +197,7 @@ series", "During the call", the palette's groups, "Seen in calls") are drawn in 
 | Acme rollout | client Acme, stage Delivery · Active; work tree: epic/workstream "Acme rollout", story **S001 SSO for the Berlin pilot** (criteria 0 / 1), tasks **T001** (Sam, due today) and **T002** (Omar) — all "to do" |
 | Globex pilot | client Globex, Delivery · Active; story **Pilot plan** with task **T001 Draft the Globex pilot plan** (Sam, no date) |
 | Initech | the user's company ("Initech · your company"), no threads |
+| Intake's facts (`standard` set only) | the mail "Re: SSO cutover window" (Dana Lee) and the post "Acme › Okta and SSO" (Omar Haddad), Acme rollout's, in `recall/intake/facts/`; read only once Recall is on (`echoctl brain set --enabled true`, then `echoctl brain sync`) |
 | Not on the data | Brief text, people in a thread, meeting series, installed plugins, Microsoft 365, "Asks", live notes — empty states |
 | Today numbers | "4 meetings · 1 task on you" (Draft the Globex pilot plan has no date, so only the SSO task is in "My work · this week") |
 

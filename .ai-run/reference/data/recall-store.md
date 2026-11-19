@@ -186,6 +186,15 @@ The index is working memory, not an archive (`brain::retain`). Each section has 
 - A range that reaches before the shortest horizon of the section kinds it may find adds `retain::OLDER` to `note`:
   "older than the index keeps: see the call folders or Knowledge".
 - Each hit has its `section_kind`.
+- The window's search (`window::search`, only with the `brain` feature): `/api/search` (`q`, `kind` and `section` comma
+  lists, `client` or `thread` as the scope, `since`, `until`, `person`) runs `brain::search` for the user, as `echoctl
+  brain search` does (no profile scope: the window is the user's own), at most 30 hits, the calls' cards left out unless
+  `section` asks for them. It answers `{enabled: false}` while Intake is off. Its answer: `words` (`store::query_words`
+  of the query without a date it said), `filters`, `older`, `listed`, `titles` (the calls whose title, people or
+  subject hold every word, on those days, in the scope, with the person: `window::call::matching`) and `sources` (hits
+  grouped by source, in the order of each one's best hit, each hit a moment: section, heading, who, `t` in the call,
+  day, the line with the words, a link at that turn). `/api/search/moment?chunk=` gives a moment's context: a call's
+  row and the turns around its time, or a mail's or post's lines of that section.
 - With an embedding server that answers, the candidates are re-ranked by `brain::store::rerank`: weighted reciprocal
   rank (k = 60) of the keyword rank (0.4) and the vector rank among the candidates (0.6). No section outside the
   candidates is added; without embeddings the keyword order stays.

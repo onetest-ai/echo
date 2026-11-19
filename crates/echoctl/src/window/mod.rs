@@ -36,6 +36,8 @@ mod plugins;
 pub(crate) mod terminals;
 #[cfg(feature = "brain")]
 mod brain;
+#[cfg(feature = "brain")]
+mod search;
 
 use self::call::act;
 pub use self::settings::settings_action;
@@ -502,6 +504,10 @@ fn respond(req: &Request<Vec<u8>>) -> Response<Cow<'static, [u8]>> {
     }
     #[cfg(feature = "brain")]
     if let Some(r) = brain::route(&path, req) {
+        return r;
+    }
+    #[cfg(feature = "brain")]
+    if let Some(r) = search::route(&path, req) {
         return r;
     }
     match path.as_str() {
