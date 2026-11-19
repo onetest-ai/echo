@@ -807,7 +807,7 @@
   },
   {
    "id": "F-PLUG-110",
-   "feature": "A plugin's host half reads a web page as Markdown (`ctx.web.read(url, {max, timeout})`, no capability of its own) only where `ctx.http.fetch` may reach — a host its manifest names over https, an address the user listed, a page the user typed once — refused before anything is asked otherwise; a plain GET with no cookies, credentials or redirect followed: {url, title, markdown, links, images, lang, byline, published, description, source, needs_js, truncated, bytes}. The main part without navigation, scripts, forms or frames; headings, lists, code, tables, http(s) links and pictures (`![alt](src)`, a figure's caption under it, tracking pixels and `data:` left out) kept; the page's words never markup and its control and direction marks dropped. A page that builds itself with JavaScript is never run: its JSON-LD, framework state or `<noscript>` text taken when fuller (`source`), `needs_js` when it stays nearly empty. HTML only, never compressed, 5 MB read as it comes, 30 s: a PDF, a redirect (\"it moved\"), an error status or a page past `max` is refused with why. `ctx.web.markdown(html, {base})` reads HTML the plugin already has the same way, fetching nothing",
+   "feature": "A plugin's host half reads a web page as Markdown (`ctx.web.read(url, {max, timeout})`, no capability of its own) only where `ctx.http.fetch` may reach — a host its manifest names over https, an address the user listed, a page the user typed once (and, with `uses.network.web`, a public https page: F-PLUG-139) — refused before anything is asked otherwise; a plain GET with no cookies, credentials or redirect followed: {url, title, markdown, links, images, lang, byline, published, description, source, needs_js, truncated, bytes}. The main part without navigation, scripts, forms or frames; headings, lists, code, tables, http(s) links and pictures (`![alt](src)`, a figure's caption under it, tracking pixels and `data:` left out) kept; the page's words never markup and its control and direction marks dropped. A page that builds itself with JavaScript is never run: its JSON-LD, framework state or `<noscript>` text taken when fuller (`source`), `needs_js` when it stays nearly empty. HTML only, never compressed, 5 MB read as it comes, 30 s: a PDF, a redirect (\"it moved\"), an error status or a page past `max` is refused with why. `ctx.web.markdown(html, {base})` reads HTML the plugin already has the same way, fetching nothing",
    "priority": "high",
    "check": "agent",
    "axes": [
@@ -984,6 +984,16 @@
    "priority": "medium",
    "check": "agent",
    "axes": []
+  },
+  {
+   "id": "F-PLUG-152",
+   "feature": "A plugin with `uses.network.web: true` (its own sheet line \"Reads web pages on the public internet (https)\"; an update that adds it asks again) reads any https page on the public internet with `ctx.web.read` / `ctx.web.fetch`, with no dialog: port 80 or 443, a host whose every address is public, connected at the address Echo checked and never through a proxy; up to 5 redirects followed, each new address (a relative `Location` against the page it came from) checked again before it is asked — from a public page only as a public page, never into an address the user listed or a host the manifest names. Plain http, another port, this computer, the user's network (private, link-local, unique-local, an IPv4-mapped private address, a name pointing there even in part), a 6th redirect or a redirect to any of these are refused with why. Its other grants keep their rules; without it nothing changes; `ctx.http.fetch` isn't widened; GET only, no cookies or credentials, the same caps (#830)",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "plugin.enabled",
+    "plugin.uses"
+   ]
   }
  ]
 }
