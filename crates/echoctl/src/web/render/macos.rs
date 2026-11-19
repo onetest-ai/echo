@@ -6,7 +6,8 @@
 //! - **Rule list:** Network.framework sends this computer's own addresses (loopback, its interfaces' addresses)
 //!   around any proxy. So a content rule list blocks every address written as one that is on this computer or the
 //!   user's network, `localhost`, `.local` and single-label names, and `file:`.
-//! - **WebRTC:** off in every frame, by WebKit's own setting and by the script run at document start.
+//! - **WebRTC, workers:** off in every frame, by WebKit's own setting and by the script run at document start.
+//! - **Media:** none loaded at all (the rule list).
 //! - **Denied:** downloads (cancelled before they start), popups and permissions.
 //! - **Navigation:** the main frame goes only to http(s) (and about:) addresses, `MAX_MOVES` times at most.
 
@@ -15,6 +16,7 @@ use std::ffi::{c_char, CString};
 use std::net::Ipv4Addr;
 use std::path::Path;
 use std::rc::Rc;
+use std::sync::atomic::{AtomicI32, Ordering};
 use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, bail, Result};
@@ -50,9 +52,13 @@ enum Msg {
 
 type Compiled = Rc<RefCell<Option<std::result::Result<Retained<WKContentRuleList>, String>>>>;
 
+/// The page's WebContent process, once known: stopped with the render (`stop`), never left running a page's loop.
+static WEB_PID: AtomicI32 = AtomicI32::new(0);
+
 pub(super) fn run(r: Render) -> Result<()> {
     let mtm = MainThreadMarker::new().ok_or_else(|| anyhow!("a page is rendered on the main thread"))?;
-    let rules_dir = std::env::temp_dir().join(format!("echo-render-{}", std::process::id()));
+    sweep(&std::env::temp_dir());
+    let rules_dir = std::env::temp_dir().join(format!("{RULES_DIR}{}", std::process::id()));
     let mut event_loop = EventLoopBuilder::<Msg>::with_user_event().build();
     event_loop.set_activation_policy(ActivationPolicy::Prohibited);
     let proxy = event_loop.create_proxy();
@@ -78,6 +84,9 @@ pub(super) fn run(r: Render) -> Result<()> {
                 }
             }
             Event::UserEvent(Msg::Started) => {
+                if let Some((v, _)) = &view {
+                    WEB_PID.store(web_process(v), Ordering::SeqCst);
+                }
                 committed = true;
                 moves += 1;
                 if moves > MAX_MOVES + 1 {
@@ -130,10 +139,47 @@ pub(super) fn run(r: Render) -> Result<()> {
     })
 }
 
-/// The render's end: its rule list's folder removed, the process gone.
+/// The render's end: its rule list's folder removed, the page's WebContent process stopped (WebKit would end it with
+/// this process, but a page in a loop is not left to that), this process gone. On a failure the WebContent process is
+/// named on stderr's second line (the tests check it is gone).
 fn stop(rules_dir: &Path, code: i32) -> ! {
     let _ = std::fs::remove_dir_all(rules_dir);
+    let pid = WEB_PID.load(Ordering::SeqCst);
+    if pid > 0 {
+        unsafe { libc::kill(pid, libc::SIGKILL) };
+        if code != 0 {
+            eprintln!("web process {pid} stopped");
+        }
+    }
     std::process::exit(code)
+}
+
+/// The view's WebContent process (WKWebView's private `_webProcessIdentifier`), 0 when it can't be told.
+fn web_process(view: &WebView) -> i32 {
+    use wry::WebViewExtMacOS;
+    let wk = view.webview();
+    let sel = objc2::sel!(_webProcessIdentifier);
+    let ok: bool = unsafe { objc2::msg_send![&*wk, respondsToSelector: sel] };
+    if ok {
+        unsafe { objc2::msg_send![&*wk, _webProcessIdentifier] }
+    } else {
+        0
+    }
+}
+
+/// What a render's rule list folder is called (its process id after it).
+const RULES_DIR: &str = "echo-render-";
+
+/// Rule list folders in `tmp` left by renders that were killed (their process is gone): removed.
+fn sweep(tmp: &Path) {
+    for e in std::fs::read_dir(tmp).into_iter().flatten().flatten() {
+        let name = e.file_name().to_string_lossy().into_owned();
+        let Some(pid) = name.strip_prefix(RULES_DIR).and_then(|p| p.parse::<i32>().ok()) else { continue };
+        let gone = unsafe { libc::kill(pid, 0) } != 0 && std::io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH);
+        if gone {
+            let _ = std::fs::remove_dir_all(e.path());
+        }
+    }
 }
 
 /// The view, loading the page, with every way out denied.
@@ -202,7 +248,8 @@ fn compile_rules(mtm: MainThreadMarker, dir: &Path, compiled: Compiled) -> Resul
         let got = unsafe { Retained::retain(list) }.ok_or_else(|| unsafe { err.as_ref() }.map_or_else(|| "no reason given".to_string(), |e| e.localizedDescription().to_string()));
         *compiled.borrow_mut() = Some(got);
     });
-    unsafe { store.compileContentRuleListForIdentifier_encodedContentRuleList_completionHandler(Some(ns_string!("echo-render")), Some(&NSString::from_str(&rules(&own_ipv4()))), Some(&done)) };
+    let rules = rules(&own_ipv4()?);
+    unsafe { store.compileContentRuleListForIdentifier_encodedContentRuleList_completionHandler(Some(ns_string!("echo-render")), Some(&NSString::from_str(&rules)), Some(&done)) };
     Ok(store)
 }
 
@@ -216,7 +263,7 @@ const PRIVATE_V4: [&str; 17] = [
 
 /// The content rule list (WebKit's JSON): blocked are `file:`, every IPv6 address written as one, the private IPv4
 /// ranges above and this computer's own addresses (`own`), `localhost` and its subdomains, `.local` and single-label
-/// names; for any load (the page itself, a frame, a fetch, a WebSocket, a picture, a form).
+/// names; for any load (the page itself, a frame, a fetch, a WebSocket, a picture, a form). And every media load.
 fn rules(own: &[Ipv4Addr]) -> String {
     let host = "^[a-z][a-z0-9+.-]*://([^/]*@)?";
     let mut filters = vec!["^file:".to_string(), format!("{host}\\[")];
@@ -225,18 +272,21 @@ fn rules(own: &[Ipv4Addr]) -> String {
     filters.push(format!("{host}([^/@]*\\.)?localhost\\.?[:/]"));
     filters.push(format!("{host}[^/@]*\\.local\\.?[:/]"));
     filters.push(format!("{host}[^./:@]+\\.?[:/]"));
-    serde_json::Value::Array(filters.into_iter().map(|f| serde_json::json!({"trigger": {"url-filter": f}, "action": {"type": "block"}})).collect()).to_string()
+    let mut list: Vec<serde_json::Value> = filters.into_iter().map(|f| serde_json::json!({"trigger": {"url-filter": f}, "action": {"type": "block"}})).collect();
+    // No media at all: a page's text needs none, and AVFoundation may fetch some of it with its own network stack.
+    list.push(serde_json::json!({"trigger": {"url-filter": ".*", "resource-type": ["media"]}, "action": {"type": "block"}}));
+    serde_json::Value::Array(list).to_string()
 }
 
-/// This computer's IPv4 addresses (every interface's).
-fn own_ipv4() -> Vec<Ipv4Addr> {
-    crate::netif::addresses()
+/// This computer's IPv4 addresses (every interface's); an error when they can't be listed.
+fn own_ipv4() -> Result<Vec<Ipv4Addr>> {
+    Ok(crate::netif::addresses()?
         .into_iter()
         .filter_map(|a| match a {
             std::net::IpAddr::V4(v4) => Some(v4),
             std::net::IpAddr::V6(_) => None,
         })
-        .collect()
+        .collect())
 }
 
 #[cfg(test)]
@@ -254,6 +304,21 @@ mod tests {
         for want in ["^file:", "@)?\\[", "@)?127\\.", "@)?10\\.", "@)?192\\.168\\.", "@)?169\\.254\\.", "@)?203\\.0\\.113\\.9[:/]", "localhost", "\\.local\\.?"] {
             assert!(filters.iter().any(|f| f.contains(want)), "{want}: {filters:?}");
         }
-        assert!(own_ipv4().contains(&Ipv4Addr::LOCALHOST));
+        assert!(own_ipv4().unwrap().contains(&Ipv4Addr::LOCALHOST));
+        assert!(v.as_array().unwrap().iter().any(|r| r["trigger"]["resource-type"] == serde_json::json!(["media"])), "every media load blocked");
+    }
+
+    #[test]
+    fn a_killed_renders_rule_folder_is_swept_next_time() {
+        let tmp = std::env::temp_dir().join(format!("echo-render-sweep-{}", std::process::id()));
+        std::fs::create_dir_all(&tmp).unwrap();
+        // A process id no process has (above macOS's limit), and this one's.
+        let (dead, live) = (tmp.join(format!("{RULES_DIR}99999999")), tmp.join(format!("{RULES_DIR}{}", std::process::id())));
+        for d in [&dead, &live] {
+            std::fs::create_dir_all(d).unwrap();
+        }
+        sweep(&tmp);
+        assert!(!dead.exists() && live.exists());
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 }

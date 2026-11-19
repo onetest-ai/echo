@@ -27,8 +27,9 @@ pub(super) struct Rendered {
 /// Renders running in this process, by plugin.
 static RENDERING: Mutex<Vec<String>> = Mutex::new(Vec::new());
 const AT_ONCE: usize = 2;
-/// The child's answer read back, in bytes at most (5 MB of HTML, escaped); and why it failed.
-const ANSWER_MAX: u64 = 16 << 20;
+/// The child's answer read back, in bytes at most: 5 MB of HTML escaped as JSON (at most 6 bytes for one, a control
+/// character as `\u00XX`) and the rest of the line; and why it failed.
+const ANSWER_MAX: u64 = 6 * (5 << 20) + (1 << 20);
 const WHY_MAX: u64 = 4 << 10;
 /// Past the render's own time, how long the child has to start and answer before its group is stopped.
 const GRACE: Duration = Duration::from_secs(5);
@@ -111,8 +112,7 @@ pub(super) fn page(id: &str, url: &str, test: bool, secs: u64) -> Result<Rendere
             None => std::thread::sleep(Duration::from_millis(50)),
         }
     };
-    // Whatever the child started that still holds its output goes with its group.
-    crate::ai::stop_group(child.id());
+    // The child is reaped: its group id may already be another's, so nothing is sent to it.
     let (out, err) = (out.join().unwrap_or_default(), err.join().unwrap_or_default());
     if !status.success() {
         let why = String::from_utf8_lossy(&err);

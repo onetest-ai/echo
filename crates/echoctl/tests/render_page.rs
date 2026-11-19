@@ -206,7 +206,16 @@ fn a_page_that_never_stops_is_ended_at_its_time() {
     let (out, took) = render(port, "/spin", 4);
     assert!(!out.status.success());
     assert!(took < Duration::from_secs(10), "{took:?}");
-    assert!(String::from_utf8_lossy(&out.stderr).contains("didn't render"), "{}", String::from_utf8_lossy(&out.stderr));
+    let said = String::from_utf8_lossy(&out.stderr);
+    assert!(said.contains("didn't render"), "{said}");
+    // Its WebContent process, spinning in the page's loop, is stopped with it.
+    let pid = said.lines().find_map(|l| l.strip_prefix("web process ")?.split(' ').next()?.parse::<u32>().ok()).expect("the web process named");
+    let alive = || Command::new("kill").args(["-0", &pid.to_string()]).output().unwrap().status.success();
+    let at = Instant::now();
+    while alive() && at.elapsed() < Duration::from_secs(5) {
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    assert!(!alive(), "web process {pid} still running");
 }
 
 #[test]
@@ -229,4 +238,82 @@ fn a_page_reaches_only_hosts_the_gate_lets_through() {
     assert!(v["html"].as_str().unwrap().contains("own host: fine"), "{}", v["html"]);
     assert!(seen.lock().unwrap().iter().all(|p| p == "/page" || p == "/ok" || p == "/favicon.ico"), "{:?}", seen.lock().unwrap());
     assert!(v["stats"]["refused"].to_string().contains("elsewhere.acme.example"), "{}", v["stats"]);
+}
+
+/// A page that first redefines every DOM property and method the link guard could read, then clicks links every way.
+const TAMPER: &str = r#"<!doctype html><body><p id="out">x</p><script>
+const U = 'http://127.0.0.1:{TCP}/c';
+try { Object.defineProperty(Element.prototype, 'localName', {get() { return 'x'; }, configurable: true}); } catch (e) {}
+try { Object.defineProperty(Node.prototype, 'parentNode', {get() { return null; }, configurable: true}); } catch (e) {}
+try { Object.defineProperty(Node.prototype, 'nodeType', {get() { return 3; }, configurable: true}); } catch (e) {}
+try { Event.prototype.preventDefault = function () {}; } catch (e) {}
+try { Event.prototype.composedPath = function () { return []; }; } catch (e) {}
+try { Object.defineProperty(Event.prototype, 'target', {get() { return null; }, configurable: true}); } catch (e) {}
+try { Object.defineProperty(Event.prototype, 'type', {get() { return 'x'; }, configurable: true}); } catch (e) {}
+try { Function.prototype.call = function () {}; Function.prototype.apply = function () {}; } catch (e) {}
+try { Reflect.apply = function () {}; } catch (e) {}
+try { const a = document.createElement('a'); a.href = U; document.body.appendChild(a); a.click(); } catch (e) {}
+try { const a = document.createElement('a'); a.href = U; a.click(); } catch (e) {}
+try { const a = document.createElement('a'); a.href = U; a.download = 'x'; document.body.appendChild(a); a.dispatchEvent(new MouseEvent('click', {bubbles: true})); } catch (e) {}
+try { const a = document.createElement('a'); a.href = U; const s = document.createElement('span'); a.appendChild(s); s.click(); } catch (e) {}
+try { const h = document.createElement('div'); document.body.appendChild(h); const r = h.attachShadow({mode: 'closed'}); const a = document.createElement('a'); a.href = U; r.appendChild(a); a.click(); } catch (e) {}
+let hooks = [];
+try { Object.defineProperty(HTMLElement.prototype, 'click', {value() {}}); hooks.push('click redefined'); } catch (e) { hooks.push('click kept'); }
+try { delete EventTarget.prototype.dispatchEvent; hooks.push(typeof EventTarget.prototype.dispatchEvent); } catch (e) { hooks.push('dispatch kept'); }
+document.getElementById('out').textContent = 'hooks: ' + hooks.join(', ');
+</script></body>"#;
+
+#[test]
+#[ignore = "needs a GUI session (WKWebView): cargo test --test render_page -- --ignored --test-threads=1"]
+fn a_page_that_redefines_the_dom_still_follows_no_link() {
+    let c = canary();
+    let (port, _) = site(vec![("/tamper", TAMPER.replace("{TCP}", &c.tcp.to_string()))]);
+    let v = json(&render(port, "/tamper", 15).0);
+    std::thread::sleep(Duration::from_millis(500));
+    assert!(c.hits.lock().unwrap().is_empty(), "the canary was reached: {:?}", c.hits.lock().unwrap());
+    assert!(v["html"].as_str().unwrap().contains("hooks: click kept, function"), "the guard's own hooks can't be changed or removed: {}", v["html"]);
+}
+
+/// A page that plays media from this computer and from its own host, and looks for a worker every way.
+const CLOSED: &str = r#"<!doctype html><body><video src="http://news.acme.example/x.m3u8" autoplay muted></video><audio src="http://127.0.0.1:{TCP}/a.mp3" autoplay></audio>
+<video autoplay muted><source src="http://127.0.0.1:{TCP}/v.mp4" type="video/mp4"><source src="http://news.acme.example/v.mp4" type="video/mp4"></video>
+<p id="out">x</p><script>
+const out = [];
+const v = document.createElement('video'); v.muted = true; v.src = 'http://news.acme.example/y.mp4'; document.body.appendChild(v); try { v.load(); v.play().catch(() => {}); } catch (e) {}
+const a = new Audio('http://127.0.0.1:{TCP}/b.mp3'); try { a.play().catch(() => {}); } catch (e) {}
+function kinds(w) { return [typeof w.Worker, typeof w.SharedWorker, typeof (w.navigator && w.navigator.serviceWorker), typeof w.WebTransport, typeof w.RTCDataChannel].join('/'); }
+out.push('main ' + kinds(window));
+try { new Worker(URL.createObjectURL(new Blob(['fetch("http://127.0.0.1:{TCP}/w")']))); out.push('worker STARTED'); } catch (e) {}
+try { window.Worker = function () {}; out.push('put back ' + typeof window.Worker); } catch (e) { out.push('put back refused'); }
+const f = document.createElement('iframe'); document.body.appendChild(f); out.push('fresh ' + kinds(f.contentWindow));
+try { new f.contentWindow.Worker(URL.createObjectURL(new Blob(['1']))); out.push('frame worker STARTED'); } catch (e) {}
+for (const u of ['https://127.0.0.1:{UDP}/', 'https://news.acme.example:{UDP}/']) { try { new WebTransport(u); out.push('webtransport STARTED'); } catch (e) {} }
+fetch('https://127.0.0.1:{UDP}/h3', {mode: 'no-cors'}).catch(() => {});
+const b = document.createElement('iframe'); b.src = URL.createObjectURL(new Blob(['<p>b</p>'], {type: 'text/html'}));
+b.onload = () => { out.push('blob ' + kinds(b.contentWindow)); document.getElementById('out').textContent = out.join('; '); };
+document.body.appendChild(b);
+document.getElementById('out').textContent = out.join('; ');
+</script></body>"#;
+
+#[test]
+#[ignore = "needs a GUI session (WKWebView): cargo test --test render_page -- --ignored --test-threads=1"]
+fn a_rendered_page_plays_no_media_and_starts_no_worker() {
+    let c = canary();
+    let page = CLOSED.replace("{TCP}", &c.tcp.to_string()).replace("{UDP}", &c.udp.to_string());
+    let (port, seen) = site(vec![("/closed", page)]);
+    let v = json(&render(port, "/closed", 15).0);
+    // What the page reported (its script's own text is in the DOM too).
+    let all = v["html"].as_str().unwrap();
+    let html = all.split(r#"<p id="out">"#).nth(1).and_then(|r| r.split("</p>").next()).unwrap_or_default();
+    let none = "undefined/undefined/undefined/undefined/undefined";
+    for want in [format!("main {none}"), format!("fresh {none}"), "put back undefined".to_string()] {
+        assert!(html.contains(&want), "{want}: {html}");
+    }
+    // A blob: frame isn't loaded at all (the main frame's navigations are http(s) and about: only); were it, it has none.
+    assert!(!html.contains("blob ") || html.contains(&format!("blob {none}")), "{html}");
+    assert!(!html.contains("STARTED"), "{html}");
+    std::thread::sleep(Duration::from_millis(500));
+    assert!(c.hits.lock().unwrap().is_empty(), "the canary (TCP and UDP) was reached: {:?}", c.hits.lock().unwrap());
+    let asked = seen.lock().unwrap().clone();
+    assert!(!asked.iter().any(|p| p.contains(".m3u8") || p.contains(".mp4") || p.contains(".mp3")), "media was fetched: {asked:?}");
 }

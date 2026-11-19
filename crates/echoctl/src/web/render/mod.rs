@@ -34,19 +34,37 @@ const MAX_MOVES: usize = 5;
 const SNAPSHOT_JS: &str = "(function(){var n=document.getElementsByTagName('*').length;if(n>250000)return JSON.stringify({elements:n});var d=document.documentElement;return JSON.stringify({elements:n,html:d?d.outerHTML:''});})()";
 
 /// Run at document start in every frame (about:blank and srcdoc ones too), before any of the page's code:
-/// - no WebRTC, WebTransport or notifications (on macOS the webview's own setting switches WebRTC off as well,
-///   `macos::configuration`);
+/// - no WebRTC, WebTransport, notifications, workers (dedicated, shared, service): each deleted, then set to nothing,
+///   unwritable and unconfigurable, so a page can't put one back or find one in another frame (each frame runs this);
+///   on macOS the webview's own setting switches WebRTC off as well (`macos::configuration`);
 /// - a link (`a`, `area`) is never followed by a click: on a link's activation WebKit connects to its host before the
 ///   navigation is decided, outside the rule list (a loopback canary saw it, for download links and for links in no
 ///   document, a fragment or a closed shadow root). Nobody clicks in a hidden render, so every click on a link is
 ///   refused: on the window, capturing, first of all listeners; and in `click()` and `dispatchEvent` of a click, for an
-///   element in a link however it is held. The originals are called through `Reflect.apply` taken here, so a page that
-///   replaces `Function.prototype.call` gets nothing.
-const INIT_JS: &str = "(function(){for(var k of ['RTCPeerConnection','webkitRTCPeerConnection','RTCDataChannel','RTCIceCandidate','RTCSessionDescription','WebTransport','Notification']){try{delete window[k]}catch(e){}}\
-var A=Reflect.apply;function L(n){for(;n;n=n.parentNode||n.host){var g=n.localName;if(g==='a'||g==='area')return true}return false}\
-window.addEventListener('click',function(e){var p=e.composedPath();for(var i=0;i<p.length;i++){var g=p[i].localName;if(g==='a'||g==='area'){e.preventDefault();return}}if(L(e.target))e.preventDefault()},true);\
-var C=HTMLElement.prototype.click;Object.defineProperty(HTMLElement.prototype,'click',{value:function(){if(!L(this))A(C,this,[])},writable:true,configurable:true});\
-var D=EventTarget.prototype.dispatchEvent;Object.defineProperty(EventTarget.prototype,'dispatchEvent',{value:function(e){if(e&&e.type==='click'&&L(this))return false;return A(D,this,[e])},writable:true,configurable:true});})();";
+///   element in a link however it is held.
+///
+/// Every getter and method the guard uses is taken here, before the page runs, and called through `Reflect.apply`
+/// taken here too: a page that redefines `localName`, `parentNode`, `preventDefault`, `composedPath`, `target`, `type`
+/// or `Function.prototype.call` changes nothing it reads. Its `click` and `dispatchEvent` are unwritable and
+/// unconfigurable.
+const INIT_JS: &str = concat!(
+    "(function(){var W=window,O=Object,R=Reflect.apply,G=O.getOwnPropertyDescriptor,P=O.defineProperty;",
+    "function off(o,k){try{delete o[k]}catch(e){}try{P(o,k,{value:undefined,writable:false,configurable:false})}catch(e){}}",
+    "var gone=['RTCPeerConnection','webkitRTCPeerConnection','RTCDataChannel','RTCIceCandidate','RTCSessionDescription','WebTransport','Notification','Worker','SharedWorker','ServiceWorker','ServiceWorkerContainer','ServiceWorkerRegistration'];",
+    "for(var i=0;i<gone.length;i++)off(W,gone[i]);try{off(Navigator.prototype,'serviceWorker')}catch(e){}",
+    "var EP=Element.prototype,NP=Node.prototype,VP=Event.prototype,TP=EventTarget.prototype,HP=HTMLElement.prototype;",
+    "var gName=G(EP,'localName').get,gKind=G(NP,'nodeType').get,gUp=G(NP,'parentNode').get,gHost=G(ShadowRoot.prototype,'host').get,",
+    "mPath=G(VP,'composedPath').value,mStop=G(VP,'preventDefault').value,gType=G(VP,'type').get,gTarget=G(VP,'target').get,",
+    "mListen=G(TP,'addEventListener').value,mClick=G(HP,'click').value,mDispatch=G(TP,'dispatchEvent').value;",
+    "function nm(n){try{return R(gKind,n,[])===1?R(gName,n,[]):''}catch(e){return ''}}",
+    "function up(n){var p=null;try{p=R(gUp,n,[])}catch(e){}if(p)return p;try{return R(gHost,n,[])}catch(e){return null}}",
+    "function link(n){for(var k=0;n&&k<4096;k++){var g=nm(n);if(g==='a'||g==='area')return true;n=up(n)}return false}",
+    "R(mListen,W,['click',function(e){var p=[];try{p=R(mPath,e,[])}catch(x){}for(var k=0;k<p.length;k++){if(link(p[k])){R(mStop,e,[]);return}}",
+    "var t=null;try{t=R(gTarget,e,[])}catch(x){}if(link(t))R(mStop,e,[])},true]);",
+    "P(HP,'click',{value:function(){if(!link(this))R(mClick,this,[])},writable:false,configurable:false});",
+    "P(TP,'dispatchEvent',{value:function(e){var t='';try{t=R(gType,e,[])}catch(x){}if(t==='click'&&link(this))return false;return R(mDispatch,this,[e])},writable:false,configurable:false});",
+    "})();"
+);
 
 /// What the render needs on the way: its gate, its time.
 pub(crate) struct Render {
@@ -137,7 +155,7 @@ fn test_net(map: &str) -> Result<Net> {
     let fake = |n: usize| IpAddr::V4(Ipv4Addr::new(93, 184, 215, n as u8 + 1));
     let names = hosts.clone();
     Ok(Net {
-        own: Arc::new(Vec::new),
+        own: Arc::new(|| Ok(Vec::new())),
         // The fakes speak plain http: the page is asked for that way (`jshost::web::rendered`).
         ports: &[80, 443],
         lookup: Arc::new(move |host, _| names.iter().position(|(h, _)| h == host).map(|n| vec![fake(n)]).ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "not mapped in ECHOCTL_TEST_HOSTS"))),

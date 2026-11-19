@@ -441,16 +441,22 @@ pictures, escaping and limits; `rendered: true`; `bytes` the DOM's HTML; `images
 
   The proxy never fails over to a direct connection. Network.framework sends this computer's own addresses around any
   proxy, so a content rule list blocks every address written as one that is on this computer or the user's network,
-  as well as this computer's own interface addresses, `localhost`, `.local` and single-label names, and `file:`.
-  WebRTC is off in every frame (WebKit's own setting, and the constructors deleted at document start). A click on any
-  link (`a`, `area`, wherever it is held) does nothing: WebKit connects to a link's host when it is activated,
-  before the rule list applies.
+  as well as this computer's own interface addresses, `localhost`, `.local` and single-label names, and `file:`; and
+  every media load (`<video>`, `<audio>`, HLS: AVFoundation may fetch with its own network stack). The script run at
+  document start in every frame:
+  - removes WebRTC (WebKit's own setting switches it off too), WebTransport, notifications and workers (dedicated,
+    shared, service), each left unwritable so no frame gets one back;
+  - refuses every click on a link (`a`, `area`, wherever it is held): WebKit connects to a link's host when it is
+    activated, before the rule list applies;
+  - reads the DOM only through getters and methods it took before the page ran, its own hooks unchangeable, so a page
+    that redefines `localName`, `preventDefault`, `composedPath` and the like gets around nothing.
 - **Nothing kept:** the store is new and in memory (cookies, storage, cache and service workers last only for that
   render).
-- **Denied:** downloads, popups, permissions (camera, microphone, location, notifications). The main frame goes only
-  to http(s) addresses.
+- **Denied:** downloads, popups, permissions (camera, microphone, location, notifications). Frames go only to http(s)
+  and `about:` addresses (a `data:` or `blob:` frame isn't loaded).
 - **Caps:**
-  - 30 s (`timeout` less), the child stopped soon after;
+  - 30 s (`timeout` less), the child stopped soon after, the page's WebContent process with it; a killed render's
+    temporary rule-list folder is removed by the next render;
   - settled at the page's `load` plus 1 s with no new connection, or 15 s after `load` (the DOM is read anyway 2 s
     before the end);
   - 5 moves of the main frame;
