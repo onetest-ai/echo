@@ -793,7 +793,12 @@ mod tests {
     fn acme_lines(n: usize) {
         crate::projects::add_client("Acme", &["acme.example".into()], false).unwrap();
         let t = crate::projects::create("Acme rollout", Some("acme"), None).unwrap().id;
-        let name = |i: usize| format!("Kim {}", ["Ito", "Roy", "Doe", "Lane"][i % 4].repeat(1 + i / 4));
+        // Each name of one size, however many people, and its surname its own (names sharing two words are each other's
+        // "maybe the same": pairs by design): the work per person stays the same.
+        let name = |i: usize| {
+            let surname: String = (0..5).map(|k| (b'a' + (i / 26usize.pow(k) % 26) as u8) as char).collect();
+            format!("{} {}{}", ["Kim", "Ana", "Raj", "Lee"][i % 4], surname[..1].to_uppercase(), &surname[1..])
+        };
         let email = |i: usize| format!("p{i}@acme.example");
         let members = (0..n).map(|i| crate::projects::Member { name: name(i), email: Some(email(i)), role: Some("Engineer".into()), ..Default::default() }).collect();
         crate::projects::update(&t, |p| { p.people = members; Ok(()) }).unwrap();
@@ -820,20 +825,20 @@ mod tests {
         let time = |n: usize| {
             let (_env, _root) = crate::paths::testenv::folders("share-people-lines");
             acme_lines(n);
-            // The best of three: one slow run on a busy machine isn't the code.
-            let runs: Vec<(std::time::Duration, Value)> = (0..3).map(|_| { let t = std::time::Instant::now(); let ppl = people().unwrap(); (t.elapsed(), ppl) }).collect();
+            // The best of five: a slow run on a busy machine isn't the code.
+            let runs: Vec<(std::time::Duration, Value)> = (0..5).map(|_| { let t = std::time::Instant::now(); let ppl = people().unwrap(); (t.elapsed(), ppl) }).collect();
             runs.into_iter().min_by_key(|(d, _)| *d).unwrap()
         };
-        let (small, ppl) = time(200);
+        let (small, ppl) = time(400);
         let find = |k: &str| ppl.as_array().unwrap().iter().find(|p| p["key"] == k).cloned().unwrap();
         assert_eq!(find("p20@acme.example")["reports_to"]["key"], "p10@acme.example", "by key");
         assert_eq!(find("p24@acme.example")["reports_to"]["key"], "p8@acme.example", "by address, any case");
         assert_eq!(find("p28@acme.example")["reports_to"]["key"], "p14@acme.example", "by name");
         assert!(find("p32@acme.example")["reports_to"].is_null() && find("p36@acme.example")["reports_to"].is_null(), "themselves; nobody listed");
         assert_eq!(find("p10@acme.example")["reports"], json!([{"key": "p20@acme.example", "name": find("p20@acme.example")["name"]}]));
-        // Four times the people: about four times as long; every pair or more was #816.
-        let (big, _) = time(800);
-        assert!(big < small * 9, "200 people: {small:?}, 800: {big:?}");
+        // Four times the people: about four times as long (every pair, 16 times, or more was #816).
+        let (big, _) = time(1600);
+        assert!(big < small * 9, "400 people: {small:?}, 1,600: {big:?}");
     }
 
     #[test]

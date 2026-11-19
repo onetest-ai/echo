@@ -793,16 +793,18 @@ mod tests {
         let base = json!({"claudeMdExcludes": ["x"], "hooks": {"PreToolUse": [{"matcher": "*", "hooks": [{"type": "command", "command": "guard"}]}]}});
         let v = "0123456789abcdef0123456789abcdef";
         let s = proof_settings(base, Path::new("/Apps/echoctl"), v, false, false);
+        // The program as the hook's shell gets it: single quotes, on Windows double ones (`hook`).
+        let exe = if cfg!(windows) { "\"/Apps/echoctl\"" } else { "'/Apps/echoctl'" };
         assert_eq!(s["claudeMdExcludes"][0], "x");
         assert_eq!(s["disableAllHooks"], false);
         let pre = s["hooks"]["PreToolUse"].as_array().unwrap();
         assert_eq!(pre[0]["hooks"][0]["command"], "guard", "Echo's guard stays");
-        assert_eq!(pre[1]["hooks"][0]["command"], format!("'/Apps/echoctl' proof gate {v}"));
+        assert_eq!(pre[1]["hooks"][0]["command"], format!("{exe} proof gate {v}"));
         assert_eq!(pre[1]["hooks"][0]["onFailure"], "block");
-        assert_eq!(s["hooks"]["SessionStart"][0]["hooks"][0]["command"], format!("'/Apps/echoctl' proof hello {v}"));
+        assert_eq!(s["hooks"]["SessionStart"][0]["hooks"][0]["command"], format!("{exe} proof hello {v}"));
         let none = proof_settings(json!({}), Path::new("/Apps/echoctl"), v, true, true);
-        assert_eq!(none["hooks"]["PreToolUse"][0]["hooks"][0]["command"], format!("'/Apps/echoctl' proof gate {v} --deny-all"));
-        assert_eq!(none["hooks"]["SessionStart"][0]["hooks"][0]["command"], format!("'/Apps/echoctl' proof hello {v} --mark"), "a terminal marks itself");
+        assert_eq!(none["hooks"]["PreToolUse"][0]["hooks"][0]["command"], format!("{exe} proof gate {v} --deny-all"));
+        assert_eq!(none["hooks"]["SessionStart"][0]["hooks"][0]["command"], format!("{exe} proof hello {v} --mark"), "a terminal marks itself");
     }
 
     #[test]

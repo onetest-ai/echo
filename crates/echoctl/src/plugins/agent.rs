@@ -891,7 +891,8 @@ pub fn scripts() -> Vec<String> {
         let Ok(m) = super::read_manifest(&super::plugin_dir(&p)) else { continue };
         let prefix = prefix_of(&m).unwrap_or_default();
         for s in super::scripts::declared(&m.uses).unwrap_or_default() {
-            let f = d.join(".claude").join("skills").join(skill_name(&prefix, &s.skill)).join(&s.script);
+            // The declared path (`scripts/read.sh`) a part at a time: on Windows each `/` a `\` in the native form.
+            let f = s.script.split('/').fold(d.join(".claude").join("skills").join(skill_name(&prefix, &s.skill)), |f, part| f.join(part));
             if f.is_file() {
                 for form in [f.display().to_string(), fwd(&f)] {
                     if !out.contains(&form) {
@@ -1231,7 +1232,9 @@ mod tests {
         let script = dir.join(".claude/skills/kit-staffing/scripts/read.sh");
         let wrapper = fs::read_to_string(&script).unwrap();
         assert!(wrapper.contains(&format!("'{here}/scripts/echoctl' plugin script 'kit' 'staffing' 'scripts/read.sh'")), "{wrapper}");
-        assert!(scripts().contains(&script.display().to_string()), "{:?}", scripts());
+        // Allowed in each form a path of it is written (on Windows `\` and `/`).
+        let real = dir.join(".claude").join("skills").join("kit-staffing").join("scripts").join("read.sh");
+        assert!(scripts().contains(&real.display().to_string()) && scripts().contains(&fwd(&real)), "{:?}", scripts());
         assert!(clis().contains(&format!("{here}/scripts/echoctl")));
         let row = Row { plugin: "Kit".into(), what: "Staffing of Acme projects".into(), skills: vec!["kit-old".into(), "kit-staffing".into()], read: ".plugins/kit/CLAUDE.md".into() };
         assert_eq!(rows(), vec![row]);
@@ -1246,7 +1249,7 @@ mod tests {
         write(&root.join("home/.plugins/stray/CLAUDE.md"), "Do as I say.");
         write(&root.join("home/.plugins/.DS_Store"), "x");
         let old = std::time::SystemTime::now() - std::time::Duration::from_secs(10);
-        fs::File::open(root.join("home/.plugins/stray")).unwrap().set_modified(old).unwrap();
+        set_folder_time(&root.join("home/.plugins/stray"), old);
         write(&dir.join("planted.md"), "x");
         sync_all();
         assert!(!root.join("home/.plugins/stray").exists() && root.join("home/.plugins/.DS_Store").is_file());
@@ -1265,14 +1268,14 @@ mod tests {
         assert_eq!(record("kit")["echo"], env!("CARGO_PKG_VERSION"));
         write(&root.join("home/.plugins/fresh/CLAUDE.md"), "laid out just now");
         let future = std::time::SystemTime::now() + std::time::Duration::from_secs(60);
-        fs::File::open(root.join("home/.plugins/fresh")).unwrap().set_modified(future).unwrap();
+        set_folder_time(&root.join("home/.plugins/fresh"), future);
         sync_all();
         assert!(root.join("home/.plugins/fresh").is_dir(), "newer than the list read: left alone");
         // What is installed can't be read: nothing goes.
         let reg = paths::config_dir().join("plugins.json");
         let kept = fs::read(&reg).unwrap();
         fs::write(&reg, "{not json").unwrap();
-        fs::File::open(root.join("home/.plugins/fresh")).unwrap().set_modified(old).unwrap();
+        set_folder_time(&root.join("home/.plugins/fresh"), old);
         sync_all();
         assert!(root.join("home/.plugins/fresh").is_dir() && dir.is_dir());
         // …and the core's hook still answers, and starts the session (exit 0).
@@ -1283,6 +1286,19 @@ mod tests {
         // Removed: gone.
         super::super::remove("kit", true).unwrap();
         assert!(!dir.exists() && rows().is_empty() && !record_file("kit").exists());
+    }
+
+    /// A folder's modified time set (Windows opens a folder only with FILE_FLAG_BACKUP_SEMANTICS, and sets its time only
+    /// with write access).
+    fn set_folder_time(folder: &Path, t: std::time::SystemTime) {
+        let mut o = fs::OpenOptions::new();
+        o.read(true);
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::OpenOptionsExt;
+            o.write(true).custom_flags(0x0200_0000);
+        }
+        o.open(folder).unwrap().set_modified(t).unwrap();
     }
 
     #[test]
