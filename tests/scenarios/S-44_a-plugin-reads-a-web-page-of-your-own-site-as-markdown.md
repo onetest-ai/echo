@@ -7,7 +7,7 @@ cases:
   - tests/cases/plugins/TC-190_a-plugin-reads-a-web-page-as-markdown-only-once-its-address-is-listed.md
   - tests/cases/plugins/TC-191_a-plugin-saves-a-pages-pictures-and-a-file-as-handles-in-its-cache.md
   - tests/cases/plugins/TC-192_a-plugin-is-told-why-a-page-isnt-read-not-html-moved-too-big-or-not-its-to-reach.md
-  - tests/cases/plugins/TC-232_a-plugin-with-network-web-reads-a-public-https-page-and-its-redirects-never-this-computer.md
+  - tests/cases/plugins/TC-241_a-plugin-with-network-web-reads-a-public-https-page-and-its-redirects-never-this-computer.md
 ---
 
 # S-44: A plugin reads a web page of your own site
@@ -32,7 +32,7 @@ cases:
 | 1 | `plugins/TC-190_a-plugin-reads-a-web-page-as-markdown-only-once-its-address-is-listed.md` | — | Run its precondition lines as written, except `serve.sh up` (the lead's). Skip its teardown |
 | 2 | `plugins/TC-191_a-plugin-saves-a-pages-pictures-and-a-file-as-handles-in-its-cache.md` | 1 | The site runs and its address is listed (stage 1): skip the precondition lines. Skip its teardown |
 | 3 | `plugins/TC-192_a-plugin-is-told-why-a-page-isnt-read-not-html-moved-too-big-or-not-its-to-reach.md` | 1 | Skip the precondition lines. Its teardown is TC-190's: stop the site, remove Web demo and `test-plugins`, but not the lead's window server (`serve.sh down` is the lead's at the end) |
-| 4 | `plugins/TC-232_a-plugin-with-network-web-reads-a-public-https-page-and-its-redirects-never-this-computer.md` | — | Run its precondition lines as written, except `serve.sh up` (the lead's): its own site on 48231, `ECHOCTL_TEST_HOSTS` added to `<dir>/env`. Its teardown, but not `serve.sh down` (the lead's) |
+| 4 | `plugins/TC-241_a-plugin-with-network-web-reads-a-public-https-page-and-its-redirects-never-this-computer.md` | — | Run its precondition lines as written, except `serve.sh up` (the lead's): its own site on 48231, `ECHOCTL_TEST_HOSTS` added to `<dir>/env`. Its teardown, but not `serve.sh down` (the lead's) |
 
 ## Notes
 - The site is made up and on this computer (`python3 -m http.server` over `tests/fixtures/web-site`); nothing is fetched from the network. Only the CLI is used; the host half runs in the terminal's own process (`echoctl plugin call`) as it does in the app.

@@ -1,9 +1,9 @@
 ---
-id: TC-232
+id: TC-241
 title: A plugin with uses.network.web reads a public https page and follows its redirect, its own sheet line saying so; plain http, another port, this computer and the user's network are refused before anything is asked
 priority: high
 type: functional
-requirements: [F-PLUG-139]
+requirements: [F-PLUG-152]
 module: plugins
 run: agent
 platform: any
@@ -11,7 +11,7 @@ data: small
 tags: [plugins, host-half, network, web, cli]
 ---
 
-# TC-232: A plugin with uses.network.web reads a public https page, never this computer
+# TC-241: A plugin with uses.network.web reads a public https page, never this computer
 
 **Module:** Plugins | **Priority:** High | **Type:** Functional
 

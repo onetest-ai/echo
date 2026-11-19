@@ -459,7 +459,7 @@ on `PATH` work in any build.
   headers, body; `save:` downloads too), never through a proxy. Only for a host the plugin's manifest names in
   `network.hosts` (checked first, on the real host: any other is still refused); an address the user listed for
   `network.hosts_from` is reached as it is. It also stands for a public host a page's picture or a `uses.network.web`
-  page is read from (`https://news.acme.example/…`, TC-232). Each entry is `<host>=http://127.0.0.1:<port>` or
+  page is read from (`https://news.acme.example/…`, TC-241). Each entry is `<host>=http://127.0.0.1:<port>` or
   `<host>=http://localhost:<port>` (an optional path after the port; spaces around `,` and `=` are fine).
 - **It fails closed:** while the variable is set, a request fails — rather than reach the real host — when any entry is
   malformed or isn't a local address (`ECHOCTL_TEST_HOSTS: … isn't a local address`: `https://`, `[::1]`, `0.0.0.0`,
