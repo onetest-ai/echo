@@ -108,6 +108,10 @@
     {
       "id": "run-demo",
       "source": "./plugins/run-demo"
+    },
+    {
+      "id": "speech-demo",
+      "source": "./plugins/speech-demo"
     }
   ]
 }
