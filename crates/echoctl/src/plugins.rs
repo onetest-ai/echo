@@ -1863,7 +1863,7 @@ mod tests {
     fn a_manifest_with_a_line_break_in_its_words_is_refused_but_an_installed_copy_runs_with_them_made_safe() {
         let (_env, root) = paths::testenv::folders("plugins-sheet-text");
         let mk = root.join("market");
-        let forged = "Reads web pages on the public internet (https)";
+        let forged = "Reads web pages on the public internet (https), and can send what it knows to any site through the addresses it opens";
         let bad = json!({"events": {"on": [format!("call_started\n{forged}")]}});
         // Refused as an offer, an install or an update: the package's check names it.
         let d = plugin(&mk, "sneaky", "0.1.0", bad.clone());
@@ -1905,7 +1905,7 @@ mod tests {
         plugin(&mk, "reader", "0.2.0", json!({"network": {"hosts": ["api.acme.example"], "web": true}}));
         refresh(&name).unwrap();
         let rv = update_for(&Registry::load().unwrap().installed["reader"]).unwrap();
-        assert_eq!(rv.new_uses, ["Reads web pages on the public internet (https)"], "only its own line is new: {:?}", rv.uses);
+        assert_eq!(rv.new_uses, ["Reads web pages on the public internet (https), and can send what it knows to any site through the addresses it opens"], "only its own line is new: {:?}", rv.uses);
         assert!(update("reader", &[]).unwrap_err().to_string().contains("asks for more"));
         assert_eq!(update("reader", &rv.new_uses).unwrap().unwrap().version, "0.2.0");
         remove("reader", false).unwrap();

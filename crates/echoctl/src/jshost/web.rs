@@ -747,7 +747,7 @@ mod tests {
         plugins::refresh(&name).unwrap();
         let sheet = plugins::review("crawler", Some(&name)).unwrap().uses;
         assert_eq!(sheet.len(), 3, "{sheet:?}");
-        assert_eq!(sheet[2], "Reads web pages on the public internet (https)", "a line of its own");
+        assert_eq!(sheet[2], "Reads web pages on the public internet (https), and can send what it knows to any site through the addresses it opens", "a line of its own");
         plugins::install("crawler", Some(&name), &sheet).unwrap();
         // The user lists the other site (on this computer): the plugin's own grant.
         plugins::set_setting("crawler", "site", &json!(format!("http://127.0.0.1:{other}"))).unwrap();

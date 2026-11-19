@@ -59,7 +59,7 @@ as U+FFFD, and Echo logs it. Evidence: `capabilities::make_sheet_safe`, `plugins
 | `events.on` | the events it hears (§ Events) |
 | `deliver.to` | where it sends to the user |
 | `deliver_provider.kinds` | the delivery kinds it provides (§ Delivery) |
-| `network.hosts`, `network.hosts_from`, `network.ask`, `network.web` | the `https://` hosts it fetches (§ Network); string settings without a default whose addresses the user lists; `ask: true`: it may ask the user for one address to fetch once (§ Network, A typed address); `web: true`: `ctx.web.read` and `ctx.web.fetch` read any https page on the public internet, its redirects followed (§ Reading a web page, The public web) — a line of its own on the sheet, "Reads web pages on the public internet (https)", so an update adding it asks again. Evidence: `capabilities::describe_network`, `capabilities::WEB_LINE` |
+| `network.hosts`, `network.hosts_from`, `network.ask`, `network.web` | the `https://` hosts it fetches (§ Network); string settings without a default whose addresses the user lists; `ask: true`: it may ask the user for one address to fetch once (§ Network, A typed address); `web: true`: `ctx.web.read` and `ctx.web.fetch` read any https page on the public internet, its redirects followed (§ Reading a web page, The public web) — a line of its own on the sheet, "Reads web pages on the public internet (https), and can send what it knows to any site through the addresses it opens", so an update adding it asks again. Evidence: `capabilities::describe_network`, `capabilities::WEB_LINE` |
 | `channel.plugin` | the Claude Code plugin it installs (§ Claude runs) |
 | `sessions`, `sessions.commands` | its runtime skills for Echo's sessions; its commands Claude in Echo may run (§ Claude in Echo) |
 | `folders.what`, `folders.write` | folders the user picks, read-only, or changed with `folders.write` (§ Folders and files) |
@@ -395,7 +395,7 @@ prompt, no click needed — queued and background work reads as a command does).
   text). 5 MB.
   Nothing is fetched. Also for a page's DOM rendered elsewhere.
 
-**The public web** (`uses.network.web: true`; the sheet: "Reads web pages on the public internet (https)", its own
+**The public web** (`uses.network.web: true`; the sheet: "Reads web pages on the public internet (https), and can send what it knows to any site through the addresses it opens", its own
 line): `ctx.web.read` and `ctx.web.fetch` (not `ctx.http.fetch`, not `ctx.http.stream`) also reach any page the
 plugin's other grants don't — `https://` only, port 80 or 443, a host name or an IPv4 address (an IPv6 address
 written as one refused), whose every address is public by the same rule as a page's pictures (above: a name that
