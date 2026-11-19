@@ -284,7 +284,7 @@ impl Drop for Reading {
 }
 
 /// The program that reads: Echo itself (in a unit test, the `echoctl` that sits beside the test program).
-fn reader_exe() -> Result<PathBuf> {
+pub(super) fn reader_exe() -> Result<PathBuf> {
     let exe = std::env::current_exe().context("Echo's own program can't be found")?;
     // (a unit test) the `echoctl` in the folder of the build above the test program, which `cargo test` has built.
     #[cfg(test)]

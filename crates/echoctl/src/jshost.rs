@@ -35,6 +35,7 @@ pub mod net;
 mod speech;
 mod tls;
 mod prelude;
+mod render;
 use prelude::PRELUDE;
 mod web;
 mod widgets;

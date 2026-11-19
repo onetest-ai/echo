@@ -84,10 +84,11 @@ fn bytes_opt(v: &Value, default: u64, most: u64) -> Result<u64> {
     }
 }
 
-/// `ctx.web.read(url, {max, timeout, images})`: the page at `url` (an address the plugin may reach, as `ctx.http.fetch`) read as
+/// `ctx.web.read(url, {max, timeout, images, render})`: the page at `url` (an address the plugin may reach, as `ctx.http.fetch`) read as
 /// Markdown: {url, title, markdown, links, images, lang, byline, published, description, source, needs_js, truncated,
 /// bytes}. `url` is the address read: the one asked for, or — with `uses.network.web` — where its redirects ended. `images: 'save'` also saves its pictures
-/// (`save_pictures`).
+/// (`save_pictures`). `render: true` (only with `uses.network.web`, a public https page) reads the page as a browser shows
+/// it, its JavaScript run (`rendered`), and says `rendered: true`.
 pub(super) fn read(id: &str, url: &str, opts: &Value) -> Result<Value> {
     let max = bytes_opt(&opts["max"], PAGE_MAX, PAGE_MAX)?;
     let save = match &opts["images"] {
@@ -95,12 +96,39 @@ pub(super) fn read(id: &str, url: &str, opts: &Value) -> Result<Value> {
         Value::String(s) if s == "save" => true,
         _ => bail!("images is 'save' or nothing"),
     };
-    let mut html = vec![];
+    let render = match &opts["render"] {
+        Value::Null | Value::Bool(false) => false,
+        Value::Bool(true) => true,
+        _ => bail!("render is true or false"),
+    };
     let secs = opts["timeout"].as_u64().filter(|s| *s > 0).map_or(PAGE_SECS, |s| s.min(PAGE_SECS));
-    let (url, reach, head, bytes) = get_page(id, url, max, secs, "text/html,application/xhtml+xml", &html_only, &mut html)?;
+    let (url, reach, text, bytes, cut) = if render {
+        let (at, reach, r) = rendered(id, url, secs)?;
+        let mut html = r.html;
+        let cut = r.truncated || html.len() as u64 > max;
+        if html.len() as u64 > max {
+            let mut end = max as usize;
+            while !html.is_char_boundary(end) {
+                end -= 1;
+            }
+            html.truncate(end);
+        }
+        let n = html.len() as u64;
+        (at, reach, html, n, cut)
+    } else {
+        let mut html = vec![];
+        let (url, reach, head, bytes) = get_page(id, url, max, secs, "text/html,application/xhtml+xml", &html_only, &mut html)?;
+        (url, reach, decode_html(&html, head.charset.as_deref()), bytes, false)
+    };
     let url = url.as_str();
-    let p = page::read(&decode_html(&html, head.charset.as_deref()), url);
+    let p = page::read(&text, url);
     let mut v = p.to_json();
+    if render {
+        v["rendered"] = json!(true);
+        if cut {
+            v["truncated"] = json!(true);
+        }
+    }
     if p.title.is_empty() {
         v["title"] = json!(url.split_once("://").map_or(url, |(_, r)| r).trim_end_matches('/'));
     }
@@ -231,6 +259,23 @@ fn picture_reach(id: &str, src: &str, page: Option<&(String, u16)>, page_scheme:
     let ip = public_address(&host, port, until)?;
     let ip = if ip.is_ipv6() { format!("[{ip}]") } else { ip.to_string() };
     Ok((Reach { listed: false, fake: None }, Some(format!("{host}:{port}:{ip}"))))
+}
+
+/// `render: true`: the page rendered in a child process (`render::page`), only for a plugin with `uses.network.web` and
+/// only a page on the public internet (`web_reach`: https, ports 80/443, every address public; a page on this
+/// computer or the user's own network is never rendered). The address it ended at, how it was reached, the page.
+fn rendered(id: &str, url: &str, secs: u64) -> Result<(String, Reach, super::render::Rendered)> {
+    if !reads_web(id) {
+        bail!("{id} renders a page only with uses.network.web (reading any page on the public internet), which its sheet doesn't ask for");
+    }
+    let until = Instant::now() + Duration::from_secs(secs);
+    let (reach, _) = web_reach(url, until).map_err(|e| anyhow!("Echo renders only a page on the public internet: {e:#}"))?;
+    // A development build's test: its fake service speaks plain http, so the child asks for the page that way.
+    let test = reach.fake.is_some();
+    let ask = if test { format!("http://{}", &url[8..]) } else { url.to_string() };
+    let r = super::render::page(id, &ask, test, secs)?;
+    let at = if test { r.url.replacen("http://", "https://", 1) } else { r.url.clone() };
+    Ok((at, reach, r))
 }
 
 /// Whether plugin `id`'s sheet has `uses.network.web`: it reads any https page on the public internet.
@@ -480,6 +525,11 @@ mod tests {
                 };
                 reply("302 Found", &format!("Location: {to}\r\n"), b"")
             }
+            "/js" => reply(
+                "200 OK",
+                "Content-Type: text/html\r\n",
+                b"<html><head><title>Pilot notes</title></head><body><main id=\"m\"></main><script>document.getElementById('m').innerHTML = '<h1>Pilot notes</h1><p>Written by script: the pilot moves to November, three stores first and the rest in two waves after the holidays.</p><a href=\"/plan\">the plan</a>';</script></body></html>",
+            ),
             "/cp1251" => {
                 let mut body = format!("<main><p>{filler}</p><p>").into_bytes();
                 body.extend_from_slice(&[0xcf, 0xf0, 0xe8, 0xe2, 0xe5, 0xf2]);
@@ -550,6 +600,12 @@ mod tests {
         let at = |p: &str| format!("http://127.0.0.1:{port}{p}");
         let read = |url: &str, opts: Value| call("reader", "read", &json!({"url": url, "opts": opts}));
         let refused = |r: Result<Value>| r.unwrap_err().to_string();
+
+        // Rendering a page needs uses.network.web; asked for, nothing is fetched.
+        let asked = seen.paths.lock().unwrap().len();
+        assert!(refused(read(&at("/js"), json!({"render": true}))).contains("only with uses.network.web"));
+        assert!(refused(read(&at("/js"), json!({"render": "yes"}))).contains("render is true or false"));
+        assert_eq!(seen.paths.lock().unwrap().len(), asked);
 
         // Only what ctx.http.fetch may reach, refused before anything is asked.
         let asked = other_seen.conns.load(Ordering::SeqCst);
@@ -742,6 +798,13 @@ mod tests {
         assert_eq!(asked_page(&other_seen), before, "the listed site's page never asked again");
         // ctx.http.fetch isn't widened.
         assert!(refused(call("crawler", "http", &json!({"url": "https://news.acme.example/page"}))).contains("may reach only"));
+        // A rendered page is only a public https one: never this computer, the user's network or a site the user listed.
+        let render = |url: &str| call("crawler", "read", &json!({"url": url, "opts": {"render": true}}));
+        let conns = other_seen.conns.load(Ordering::SeqCst);
+        for url in ["https://127.0.0.1/".to_string(), "https://192.168.1.10/".into(), "https://[::1]/".into(), "https://localhost/".into(), format!("http://127.0.0.1:{other}/page"), "http://news.acme.example/js".into()] {
+            assert!(refused(render(&url)).contains("Echo renders only a page on the public internet"), "{url}");
+        }
+        assert_eq!(other_seen.conns.load(Ordering::SeqCst), conns, "nothing asked");
         drop(_map);
         plugins::remove("crawler", false).unwrap();
     }
@@ -809,6 +872,44 @@ mod tests {
         assert_eq!(pic("https://8.8.8.8/a.png").unwrap().1.as_deref(), Some("8.8.8.8:443:8.8.8.8"));
         assert_eq!(pic("https://1.1.1.1:8443/a.png").unwrap().1.as_deref(), Some("1.1.1.1:8443:1.1.1.1"), "the page's own host and port");
         assert!(picture_reach("nobody", "https://8.8.8.8/a.png", None, "https", until).err().expect("refused").to_string().contains("your own network"), "a page that isn't public");
+    }
+
+    // A development build's fake stands for the public host; the page renders in this Mac's webview.
+    #[cfg(all(debug_assertions, target_os = "macos"))]
+    #[test]
+    #[ignore = "needs a GUI session (WKWebView): cargo test a_rendered_page_is_read -- --ignored"]
+    fn a_rendered_page_is_read_as_a_browser_shows_it() {
+        let (_env, root) = paths::testenv::folders("jshost-web-render");
+        let (port, _) = site(1);
+        let mk = root.join("market");
+        let d = mk.join("plugins/renderer");
+        std::fs::create_dir_all(&d).unwrap();
+        std::fs::write(d.join("echo-plugin.json"), json!({"id": "renderer", "name": "Renderer", "version": "0.1.0", "main": "main.js", "uses": {"network": {"web": true}}}).to_string()).unwrap();
+        std::fs::write(d.join("main.js"), "export function apply(ctx) {\n  ctx.command('ping', () => 'pong')\n  ctx.command('read', async (a) => await ctx.web.read(a.url, a.opts || {}))\n}\n").unwrap();
+        std::fs::write(mk.join("echo-marketplace.json"), json!({"name": "t", "plugins": [{"id": "renderer", "source": "./plugins/renderer"}]}).to_string()).unwrap();
+        let name = plugins::market_add(mk.to_str().unwrap(), Some("t")).unwrap();
+        plugins::refresh(&name).unwrap();
+        let sheet = plugins::review("renderer", Some(&name)).unwrap().uses;
+        plugins::install("renderer", Some(&name), &sheet).unwrap();
+        sync();
+        let up = (0..50).find_map(|_| call("renderer", "ping", &json!({})).ok().or_else(|| {
+            std::thread::sleep(Duration::from_millis(50));
+            None
+        }));
+        assert_eq!(up, Some(json!("pong")));
+        let _map = EnvHosts::set(&_env, &format!("news.acme.example=http://127.0.0.1:{port}"));
+        let read = |opts: Value| call("renderer", "read", &json!({"url": "https://news.acme.example/js", "opts": opts}));
+        // Fetched, the page is empty: its text comes from its script.
+        let plain = read(json!({})).unwrap();
+        assert!(!plain["markdown"].as_str().unwrap().contains("Written by script"), "{plain}");
+        assert_eq!(plain["rendered"], Value::Null);
+        // Rendered, it reads as a browser shows it.
+        let p = read(json!({"render": true})).unwrap();
+        assert!(p["markdown"].as_str().unwrap().contains("Written by script: the pilot moves to November"), "{p}");
+        assert_eq!((p["rendered"].as_bool(), p["url"].as_str(), p["title"].as_str()), (Some(true), Some("https://news.acme.example/js"), Some("Pilot notes")));
+        assert_eq!(p["links"], json!([{"text": "the plan", "href": "https://news.acme.example/plan"}]));
+        drop(_map);
+        plugins::remove("renderer", false).unwrap();
     }
 
     #[test]
