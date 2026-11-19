@@ -167,6 +167,7 @@ pub fn sync() -> Result<store::Report> {
         Ok(s) => {
             r.touched.extend(s.touched);
             r.added += s.added;
+            r.unchanged += s.unchanged;
             r.chunks += s.chunks;
             r.embedded += s.embedded;
         }
@@ -181,6 +182,8 @@ pub fn sync() -> Result<store::Report> {
                 r.gone.extend(s.gone);
                 r.added += s.added;
                 r.changed += s.changed;
+                // Counted unchanged from their fact files above (`feed_missing`).
+                r.unchanged = r.unchanged.saturating_sub(s.changed);
                 r.removed += s.removed + read.removed;
                 r.chunks += s.chunks;
                 r.embedded += s.embedded;
@@ -198,6 +201,7 @@ pub fn sync() -> Result<store::Report> {
             for f in reps {
                 r.removed += f.removed;
                 r.files_read += f.read;
+                r.unchanged += f.unchanged;
                 if let Some(s) = &f.store {
                     r.added += s.added;
                     r.changed += s.changed;

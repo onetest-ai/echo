@@ -35,6 +35,7 @@ tags: [cli, recall, search, retention]
 | # | Action | Expected Result |
 |---|--------|----------------|
 | 1 | Run `target/debug/echoctl intake set --enabled true`, then `target/debug/echoctl intake sync` | Exit code 0 both; the sync's JSON has `added` plus `unchanged` above 0, the data may be synced already by an earlier case (what is past its horizon is never written, so `retired` is 0) |
+| 1a | Run `target/debug/echoctl intake sync` again | Exit code 0; `added`, `changed`, `removed` and `chunks` are 0 and `unchanged` is step 1's `added` plus `unchanged`: every document (calls, mail, the channel post, the thread folder's file) counted unchanged, none written again |
 | 2 | Run `target/debug/echoctl intake search "Initech all hands" --limit 5` | 5 hits, every one with `section_kind` "card" and `breadcrumb_path` "Initech all hands > Call card"; their `text` starts "Call: Initech all hands ·" and names its people |
 | 3 | Run `target/debug/echoctl intake search "all hands news" --section transcript` | `count` is 0: the old calls' transcripts left the index |
 | 4 | Run `ls <dir>/home/calls/*initech-all-hands-01/` | `segments.json` and `meta.json` are still there: only the index lost them |

@@ -1779,6 +1779,30 @@ mod tests {
     }
 
     #[test]
+    fn a_document_read_again_unchanged_on_a_later_day_is_not_written_again() {
+        let (_env, root) = crate::paths::testenv::folders("brain-unchanged-later");
+        let db = root.join("knowledge.sqlite");
+        let today = chrono::Local::now().date_naive();
+        let i = || {
+            let mut i = input("call/c", &format!("# C\n\n## Minutes\n\n### Summary\nThe gateway goes first.\n\n## {CALL_CARD}\n\nCall: C\n"));
+            i.event_date = Some(today.to_string());
+            i
+        };
+        let state = || {
+            let c = open(&db).unwrap();
+            let doc: (String, String) = c.query_row("SELECT content_hash, indexed_at FROM documents WHERE source = 'call/c'", [], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
+            let chunks: Vec<(i64, String, String)> = c.prepare("SELECT id, sha, created_at FROM chunks WHERE source = 'call/c' ORDER BY ord").unwrap().query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).unwrap().map(|x| x.unwrap()).collect();
+            (doc, chunks)
+        };
+        let keep = |d: chrono::NaiveDate| Keep { today: d, closed: BTreeMap::new() };
+        assert_eq!(sync_kept(&db, vec![i()], Some(&Words), &["call"], Some(&keep(today))).unwrap().added, 1);
+        let before = state();
+        let r = sync_kept(&db, vec![i()], Some(&Words), &["call"], Some(&keep(today + chrono::Duration::days(30)))).unwrap();
+        assert_eq!((r.added, r.changed, r.unchanged, r.chunks, r.embedded), (0, 0, 1, 0, 0), "{r:?}");
+        assert_eq!(state(), before, "its hash, sections and their times stay");
+    }
+
+    #[test]
     fn a_date_only_listing_shows_only_what_the_reader_may_see() {
         let (_env, root) = crate::paths::testenv::folders("brain-date-only-access");
         let db = crowded(&root);
