@@ -63,7 +63,7 @@ $E plugin install "$D/reader" --yes
 | 2 | `$E plugin call acme-reader text '{}' --file "$D/in/Budget.docx"` | `text` holds `Umbrella budget` and `Q3 is approved`; `pages` is `null` |
 | 3 | `$E plugin call acme-reader text '{"max": 10}' --file "$D/in/Brief.md"` | `text` is `# Acme kic` and `truncated` is `true` |
 | 4 | `$E plugin call acme-reader text '{}' --file "$D/in/blob.bin"` | Fails: `not a file with text in it (.bin)`; exit 1 |
-| 5 | `$E plugin call acme-reader text '{"pages": "2-1"}' --file "$D/in/Brief.md"` | Fails: `pages is a number or a range like "2-5"` |
+| 5 | `$E plugin call acme-reader text '{"pages": "2-1"}' --file "$D/in/Brief.md"` | Fails: `pages is a whole number or a range like "2-5" (1 is the first page), not “2-1”` |
 | 5a | `$E plugin call acme-reader text '{"pages": 1}' --file "$D/in/Brief.md"`; `$E plugin call acme-reader text '{"pages": "-2"}' --file "$D/in/Brief.md"` | The first fails `this file has no pages: leave pages out`; the second `pages is a whole number or a range like "2-5"` |
 | 6 | Only where PDFium is installed (`scripts/fetch-pdfium.sh <dest>`, run with `ECHOCTL_PDFIUM_DIR=<dest>`; otherwise the call fails with `PDFium isn't installed` and the step is skipped): `$E plugin call acme-reader text '{}' --file "$D/in/Plan.pdf"`, then the same with `'{"pages": 2}'`, then `'{"pages": 3}'` | First: `pages` is `2`, `text` holds `Globex plan page one` and `Globex plan page two`. Second: `pages` is still `2`, `text` holds only `Globex plan page two`. Third fails `the file has 2 pages: pages starts at 3` |
 

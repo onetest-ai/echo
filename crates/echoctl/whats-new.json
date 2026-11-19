@@ -1,5 +1,13 @@
 [
   {
+    "version": "0.10.3",
+    "items": [
+      { "icon": "plugin", "title": "Plugins that read the web", "text": "A plugin you allow can read any public web page over https, never this computer or your own network.", "open": "settings/plugins" },
+      { "icon": "plugin", "title": "Plugins that read files and audio", "text": "Plugins can read the text of PDFs and Office files you hand them and transcribe audio with Echo's own speech model.", "open": "settings/plugins" },
+      { "icon": "sparkle", "title": "Plugins that talk with Claude", "text": "A plugin's Claude can look at pictures, answer as it writes and carry a conversation on from turn to turn.", "open": "settings/plugins" }
+    ]
+  },
+  {
     "version": "0.10.2",
     "items": [
       { "icon": "sparkle", "title": "Start a new conversation", "text": "When a Claude session has ended, its panel offers New conversation beside Resume.", "open": "today" },
