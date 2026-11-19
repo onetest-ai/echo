@@ -413,6 +413,7 @@
     "layout": {
       "heading": "Layout",
       "views": [
+        "What was said",
         "My notes",
         "Inbox",
         "Claude",
