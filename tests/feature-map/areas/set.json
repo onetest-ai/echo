@@ -150,7 +150,7 @@
   },
   {
    "id": "F-SET-17",
-   "feature": "Health → Claude Code (runs, found in a terminal, Echo's plugin; Get, Connect, Add to PATH), an older Echo plugin (Update), each permission with Open settings, Ask for permissions, Check again; Settings shows a ⚠ count",
+   "feature": "Health → Claude Code (runs, found in a terminal, Echo's plugin; Get, Connect, Add to PATH), an older Echo plugin in the default Claude config or an AI profile's own (profile named, a gone project folder skipped; Update), each permission with Open settings, Ask for permissions, Check again; Settings shows a ⚠ count",
    "priority": "high",
    "check": "person",
    "axes": [

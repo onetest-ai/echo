@@ -75,51 +75,83 @@ pub(super) fn plugin_installs() -> Vec<(String, Option<String>)> {
         .collect()
 }
 
-/// Echo plugin installs older than this Echo: [{scope, project, version}]. An old plugin's terminal
-/// pane did things the app does now (it claimed every transcribed call for its own minutes).
-pub fn stale_plugins() -> Vec<Value> {
-    let path = installed_plugins_file();
-    let v: Value = fs::read(path).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
-    let plugins = v.get("plugins").unwrap_or(&v);
-    plugins
-        .as_object()
-        .into_iter()
-        .flatten()
-        .filter(|(k, _)| k.starts_with("echo@"))
-        .flat_map(|(k, list)| list.as_array().cloned().unwrap_or_default().into_iter().map(move |i| (k.clone(), i)))
-        .filter(|(_, i)| i["version"].as_str().is_some_and(|ver| crate::update::newer(env!("CARGO_PKG_VERSION"), ver)))
-        .map(|(k, i)| serde_json::json!({"plugin": k, "scope": i["scope"], "project": i["projectPath"], "version": i["version"]}))
-        .collect()
+/// Every Claude config Echo's runs use: the default one (`installed_plugins_file`'s) and each AI profile's own
+/// folder (`Profile::config_folder`, for the profiles Echo manages). [(profile name, config folder)].
+fn claude_configs() -> Vec<(Option<String>, PathBuf)> {
+    let mut out = vec![(None, installed_plugins_file().parent().and_then(Path::parent).map(Path::to_path_buf).unwrap_or_default())];
+    for p in crate::ai::Settings::load().map(|s| s.all()).unwrap_or_default() {
+        if p.kind.managed() && !out.iter().any(|(_, d)| *d == p.config_folder()) {
+            out.push((Some(p.name.clone()), p.config_folder()));
+        }
+    }
+    out
 }
 
-/// Bring every Echo plugin install up to date: the marketplace first, then each install in its scope
-/// (a project's from its folder). What each step said, for the log; an error when one failed.
+/// Echo plugin installs older than this Echo, in every Claude config: [{scope, project, version, plugin, profile,
+/// config}]. An old plugin's terminal pane did things the app does now (it claimed every transcribed call for its
+/// own minutes). A project install whose folder is gone isn't listed: Claude Code can't load it.
+pub fn stale_plugins() -> Vec<Value> {
+    let mut out = Vec::new();
+    for (profile, dir) in claude_configs() {
+        let v: Value = fs::read(dir.join("plugins/installed_plugins.json")).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+        let plugins = v.get("plugins").unwrap_or(&v);
+        for (k, list) in plugins.as_object().into_iter().flatten().filter(|(k, _)| k.starts_with("echo@")) {
+            for i in list.as_array().into_iter().flatten() {
+                let old = i["version"].as_str().is_some_and(|ver| crate::update::newer(env!("CARGO_PKG_VERSION"), ver));
+                let gone = i["projectPath"].as_str().is_some_and(|p| !Path::new(p).is_dir());
+                if old && !gone {
+                    out.push(json!({"plugin": k, "scope": i["scope"], "project": i["projectPath"], "version": i["version"], "profile": profile, "config": dir}));
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Bring every Echo plugin install up to date: per Claude config the marketplace first (with that config's
+/// `CLAUDE_CONFIG_DIR`), then each install in its scope (a project's from its folder). One failing step doesn't
+/// stop the rest. What each step said, for the log; an error naming every failure (and what did update) when any failed.
 #[cfg_attr(not(feature = "tray"), allow(dead_code))]
 pub fn update_plugins() -> Result<String> {
     let claude = claude_bin().ok_or_else(|| anyhow::anyhow!("Claude Code is not installed"))?;
     let stale = stale_plugins();
-    let mut said = String::new();
-    let run = |args: &[&str], cwd: Option<&str>, said: &mut String| -> Result<()> {
+    let (mut said, mut done, mut failed) = (String::new(), Vec::<String>::new(), Vec::<String>::new());
+    let mut run = |args: &[&str], config: &Value, cwd: Option<&str>, what: String| {
         let mut c = std::process::Command::new(&claude);
         c.args(args).stdin(std::process::Stdio::null());
+        if let Some(d) = config.as_str() {
+            c.env("CLAUDE_CONFIG_DIR", d);
+        }
         if let Some(d) = cwd.filter(|d| Path::new(d).is_dir()) {
             c.current_dir(d);
         }
-        let o = c.output()?;
-        said.push_str(&String::from_utf8_lossy(&o.stdout));
-        said.push_str(&String::from_utf8_lossy(&o.stderr));
-        anyhow::ensure!(o.status.success(), "claude {} failed", args.join(" "));
-        Ok(())
+        match c.output() {
+            Ok(o) => {
+                said.push_str(&String::from_utf8_lossy(&o.stdout));
+                said.push_str(&String::from_utf8_lossy(&o.stderr));
+                if o.status.success() { done.push(what) } else { failed.push(what) }
+            }
+            Err(e) => failed.push(format!("{what} ({e})")),
+        }
     };
-    let markets: std::collections::BTreeSet<String> = stale.iter().filter_map(|s| s["plugin"].as_str()?.split_once('@').map(|(_, m)| m.to_string())).collect();
-    for m in &markets {
-        run(&["plugin", "marketplace", "update", m], None, &mut said)?;
+    let markets: std::collections::BTreeSet<(String, String, String)> = stale
+        .iter()
+        .filter_map(|s| Some((s["plugin"].as_str()?.split_once('@')?.1.to_string(), s["profile"].as_str().unwrap_or_default().to_string(), s["config"].as_str()?.to_string())))
+        .collect();
+    for (m, profile, config) in &markets {
+        run(&["plugin", "marketplace", "update", m], &Value::from(config.as_str()), None, format!("marketplace {m}{}", in_profile(profile)));
     }
     for s in &stale {
         let (Some(p), Some(scope)) = (s["plugin"].as_str(), s["scope"].as_str()) else { continue };
-        run(&["plugin", "update", p, "--scope", scope], s["project"].as_str(), &mut said)?;
+        let what = format!("{p} {} ({scope}{})", s["version"].as_str().unwrap_or("?"), in_profile(s["profile"].as_str().unwrap_or_default()));
+        run(&["plugin", "update", p, "--scope", scope], &s["config"], s["project"].as_str(), what);
     }
+    anyhow::ensure!(failed.is_empty(), "couldn't update {}{}", failed.join(", "), if done.is_empty() { String::new() } else { format!("; updated {}", done.join(", ")) });
     Ok(said)
+}
+
+fn in_profile(profile: &str) -> String {
+    if profile.is_empty() { String::new() } else { format!(", profile {profile}") }
 }
 
 /// Where Claude Code installed the Echo plugin (the newest user-scope install, else any).
@@ -276,4 +308,78 @@ pub fn add_to_user_path(dir: &Path) -> Result<()> {
         bail!("could not update the user PATH");
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn installs(dir: &Path, version: &str, scope: &str, project: Option<&Path>) {
+        fs::create_dir_all(dir.join("plugins")).unwrap();
+        let mut i = json!({"scope": scope, "version": version, "installPath": dir.join("cache")});
+        if let Some(p) = project {
+            i["projectPath"] = json!(p);
+        }
+        fs::write(dir.join("plugins/installed_plugins.json"), json!({"version": 2, "plugins": {"echo@onetest": [i]}}).to_string()).unwrap();
+    }
+
+    fn work_profile() -> crate::ai::Profile {
+        crate::ai::Settings::update(|s| {
+            s.profiles.push(crate::ai::Profile { id: "work".into(), name: "work".into(), kind: crate::ai::Kind::Claude, base_url: None, token: None, live_model: None, notes_model: None, account: None, email: None, sso: false, models: Default::default(), wrapper: None });
+            Ok(())
+        })
+        .unwrap();
+        crate::ai::Settings::load().unwrap().get("work").unwrap()
+    }
+
+    #[test]
+    fn a_project_install_whose_folder_is_gone_isnt_stale_and_a_profiles_old_install_names_the_profile() {
+        let (_env, root) = crate::paths::testenv::folders("stale-plugins");
+        let default = installed_plugins_file().parent().unwrap().parent().unwrap().to_path_buf();
+        let gone = root.join("deleted-copy");
+        installs(&default, "0.0.1", "project", Some(&gone));
+        assert!(stale_plugins().is_empty(), "an orphaned project install can't load");
+        fs::create_dir_all(&gone).unwrap();
+        assert_eq!(stale_plugins().len(), 1, "the folder is there: stale");
+        installs(&default, env!("CARGO_PKG_VERSION"), "user", None);
+        assert!(stale_plugins().is_empty());
+        let p = work_profile();
+        installs(&p.config_folder(), "0.0.1", "user", None);
+        let s = stale_plugins();
+        assert_eq!(s.len(), 1);
+        assert_eq!(s[0]["profile"], "work");
+        assert_eq!(s[0]["config"], json!(p.config_folder()));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn update_plugins_runs_each_install_in_its_own_config_and_reports_each_failure() {
+        use std::os::unix::fs::PermissionsExt;
+        let (_env, root) = crate::paths::testenv::folders("update-plugins");
+        let default = installed_plugins_file().parent().unwrap().parent().unwrap().to_path_buf();
+        installs(&default, "0.0.1", "user", None);
+        let p = work_profile();
+        installs(&p.config_folder(), "0.0.1", "user", None);
+        let bin = root.join("bin");
+        fs::create_dir_all(&bin).unwrap();
+        let log = root.join("calls.log");
+        // The fake records its config folder and arguments; the plugin update in the profile's config fails.
+        fs::write(bin.join("claude"), format!("#!/bin/sh\necho \"$CLAUDE_CONFIG_DIR|$*\" >> '{}'\ncase \"$CLAUDE_CONFIG_DIR@$1$2\" in */claude/work@pluginupdate) exit 1;; esac\nexit 0\n", log.display())).unwrap();
+        fs::set_permissions(bin.join("claude"), fs::Permissions::from_mode(0o755)).unwrap();
+        let path = std::env::var_os("PATH");
+        std::env::set_var("PATH", &bin);
+        let r = update_plugins();
+        match path {
+            Some(p) => std::env::set_var("PATH", p),
+            None => std::env::remove_var("PATH"),
+        }
+        let err = format!("{:#}", r.unwrap_err());
+        assert!(err.contains("couldn't update echo@onetest 0.0.1 (user, profile work)") && err.contains("updated marketplace onetest") && err.contains("echo@onetest 0.0.1 (user)"), "{err}");
+        let calls: Vec<String> = fs::read_to_string(&log).unwrap().lines().map(str::to_owned).collect();
+        let (d, w) = (default.display().to_string(), p.config_folder().display().to_string());
+        for c in [format!("{d}|plugin marketplace update onetest"), format!("{d}|plugin update echo@onetest --scope user"), format!("{w}|plugin marketplace update onetest"), format!("{w}|plugin update echo@onetest --scope user")] {
+            assert!(calls.contains(&c), "{c} in {calls:?}");
+        }
+        assert_eq!(calls.len(), 4);
+    }
 }
