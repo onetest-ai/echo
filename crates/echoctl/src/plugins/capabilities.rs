@@ -39,7 +39,7 @@ pub(super) const CAPABILITIES: &[Capability] = &[
 ];
 
 /// The sheet's line for `uses.speech` (`ctx.speech.transcribe`, `jshost::speech`).
-pub const SPEECH_LINE: &str = "Transcribes audio files you hand it (WAV, up to 60 minutes and 200 MB) with Echo's own speech model, on this computer, or on the transcription server you connected; it starts only while Echo is not recording or transcribing a call. The text goes only to the plugin";
+pub const SPEECH_LINE: &str = "Transcribes audio files you hand it (WAV, webm/opus, ogg/opus, m4a or mp3, up to 60 minutes and 200 MB) with Echo's own speech model, on this computer, or on the transcription server you connected; it starts only while Echo is not recording or transcribing a call. The text goes only to the plugin";
 
 /// `uses.speech: true`: its host half transcribes the files it was handed.
 pub(super) fn describe_speech(v: &Value) -> Result<String> {

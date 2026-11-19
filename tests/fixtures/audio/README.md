@@ -21,3 +21,9 @@ makes `build` add the remote track to the mic that much quieter and later, as la
 user's lines have a `gap` below 0, starting before the other side's line ends (talking over them).
 `ukrainian-call` and `russian-call` reuse `mixed-languages`' Ukrainian and Russian lines (no new clips): a call has one
 language, and each must come out in its own with en, uk and ru allowed.
+
+`compressed/` holds `very-short`'s remote track (`remote.wav`, "Quick one: is the call at three still on?") in the kinds a plugin's
+`ctx.speech.transcribe` decodes — `very-short.opus.webm` (what a window's MediaRecorder gives), `.opus.ogg`, `.live.opus.webm` (unknown element sizes, as a MediaRecorder writes, `-f webm -live 1`),
+`.m4a` (AAC), `.mp3`, and `.stereo48.opus.webm` (48 kHz stereo) — made with `ffmpeg -i remote.wav` (`-c:a libopus -b:a 16k`,
+`-c:a aac -b:a 24k`, `-c:a libmp3lame -b:a 24k`, `-ac 2 -ar 48000 -c:a libopus -b:a 32k`).
+Made-up speech like the clips; used by `jshost::speech::tests` and `plugins/TC-240`.

@@ -67,6 +67,8 @@ mod view;
 mod vocab;
 mod permissions;
 mod recorder;
+#[cfg(feature = "decode")]
+mod decode;
 #[cfg(feature = "transcribe")]
 mod nemo;
 #[cfg(feature = "transcribe")]

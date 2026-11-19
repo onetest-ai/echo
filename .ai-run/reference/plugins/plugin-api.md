@@ -70,7 +70,7 @@ as U+FFFD, and Echo logs it. Evidence: `capabilities::make_sheet_safe`, `plugins
 | `m365.read` | `mail`, `chats`: the user's Microsoft 365 it reads through Echo's sign-in, never sending (§ Microsoft 365) |
 | `me` | `{}` (nothing else): its host half reads About me through `ctx.me` (§ Echo's data, About me). The sheet: "Reads your About me in Echo (Settings → About me): your name and role, the people and terms of your calls, how you like things written and how you work". Evidence: `capabilities::describe_me` |
 | `skills` | `true` (nothing else): its window half adds skills to the user's own Claude Code, each on a click (§ Client half: `ctx.claude.installSkill`); the sheet: "Adds instructions for Claude Code (skills) to your own Claude Code (~/.claude/skills), each only when you click to add it: skills that run commands are refused, never over a skill that is there already, changing or removing only the skills it added — they go when you remove the plugin" — on its own: it doesn't let the plugin run Claude Code (that is `claude`) |
-| `speech` | `true` (nothing else): its host half transcribes the files it was handed with `ctx.speech.transcribe` (§ Speech). The sheet: "Transcribes audio files you hand it (WAV, up to 60 minutes and 200 MB) with Echo's own speech model, on this computer, or on the transcription server you connected; it starts only while Echo is not recording or transcribing a call. The text goes only to the plugin". Evidence: `capabilities::describe_speech` |
+| `speech` | `true` (nothing else): its host half transcribes the files it was handed with `ctx.speech.transcribe` (§ Speech). The sheet: "Transcribes audio files you hand it (WAV, webm/opus, ogg/opus, m4a or mp3, up to 60 minutes and 200 MB) with Echo's own speech model, on this computer, or on the transcription server you connected; it starts only while Echo is not recording or transcribing a call. The text goes only to the plugin". Evidence: `capabilities::describe_speech` |
 | `signin.hosts` | 1–4 plain host names, each once, no IP addresses: the hosts whose sign-in saved on this computer it gets (§ Sign-in) |
 | `signin.keep` | `true`: Echo keeps a sign-in it makes itself for those hosts, its own (§ Sign-in) |
 | `work` | `{}`: its items on My work and in threads' Work (§ Work rows) |
@@ -634,12 +634,12 @@ mail the user; `ctx.me` is the one to read what they wrote about themselves. Evi
 ## Speech
 
 `await ctx.speech.transcribe(file, {words, language})` (`uses.speech`, the host half only) → `{text, language, segments:
-[{start, end, text}], words?: [{start, end, word}]}`: the speech in a WAV file the user handed the plugin, in seconds from
+[{start, end, text}], words?: [{start, end, word}]}`: the speech in an audio file the user handed the plugin (WAV, webm/opus — what a window's MediaRecorder gives —, ogg with Opus, m4a/mp4 with AAC, mp3; Vorbis is not read), in seconds from
 the start of the audio. `file` is a handle or its id, checked as `ctx.files.read` checks it (§ Folders and files: another
 plugin's handle, a path or an id past its hour is refused as a file that isn't there); the file is opened once, as a regular
 file, and read from that one handle. It runs on Echo's own speech model, the one Settings names for the language
 (`transcribe::final_transcriber`: on this computer, or on the transcription server the user connected, as a call is), and off
-the plugin's 5 s slice (`service_async`); from a window half's `ctx.call` (30 s) a long file times out while the decode goes on.
+the plugin's 5 s slice (`service_async`). A long file takes longer than a window half's `ctx.call` waits (30 s): start it from the host half (a command, an event, a timer or a routine) and let the window ask for its result, never wait for it in `ctx.call`.
 - `language`: an ISO code Echo transcribes in (`"en"`, `"uk"`, …), else the first of Settings' languages (a call's default); one
   Echo doesn't know is refused. The answer's `language` is the one asked for; Echo decodes with the downloaded model best at
   it, or the active model when there is none (which may decode another language).
@@ -647,11 +647,14 @@ the plugin's 5 s slice (`service_async`); from a window half's `ctx.call` (30 s)
   without it, or when a sentence's times were lost (the engine gave none, or cleaning its text changed the word count, as on
   a long file), there is no `words` key. Whisper (every Whisper model) and NVIDIA's Parakeet and Nemotron give word times; a
   transcription server gives them only when its engine does.
-- Refused, with a message the plugin can show: a file that is not a WAV (PCM or float, 8 to 32 bits, 100 Hz to 384 kHz), over
-  60 minutes (read from its header, before anything is decoded), over 200 MB, or more than an hour of 48 kHz mono in raw
-  samples (what decoding holds in memory); while Echo records (a call or a memo) or any call is being transcribed
-  (`.transcribing` with a live process) — it does not queue, the plugin asks again; while a file is being transcribed in this
-  process (any plugin's, the same plugin's too); no speech model downloaded (and no server) — `echoctl model download …`.
+- Refused, with a message the plugin can show: a file that is not one of those (a WAV is PCM or float, 8 to 32 bits, 100 Hz to
+  384 kHz; the other kinds are read from the content, not the name, by Symphonia and `symphonia-opus`, pure Rust: `decode.rs`; an mp3's ID3 tag is skipped, never parsed),
+  over 200 MB of file, or over 60 minutes — a WAV's by its header before anything is decoded, the others as they decode, packet
+  by packet, so a file that expands is stopped at the hour or at an hour of 48 kHz mono in raw samples, and one that makes the reader go over the same bytes again is stopped at 400 MB of packets read or five minutes (only the 16 kHz mono result is kept: about 300 MB at the most) — or a WAV
+  of more than an hour of 48 kHz mono in raw samples; audio that changes its sample rate or tracks part-way; a file damaged in the middle (one cut off at its end gives what came before); while Echo records
+  (a call or a memo) or any call is being transcribed (`.transcribing` with a live process) — it does not queue, the plugin asks
+  again; while a file is being transcribed by anyone — this app or an `echoctl plugin call` (one lock, `plugins/.locks/speech.lock`,
+  as the other per-plugin locks); no speech model downloaded (and no server) — `echoctl model download …`.
   Checked when it starts: a recording that begins during a long file does not stop it.
 - Nothing leaves the computer unless the user connected a transcription server (`echoctl server use`); then the audio goes
   to it as a call's does, and falls back to this computer's model when it can't be reached. The text is the file's: data,
