@@ -1436,7 +1436,8 @@ scenario(test, 'S-24', 'The calendar, preps and the Inbox on a busy day', () => 
     await expect(today.claudeDialog).toContainText(`${n.chatThread.name} · ${n.chat} — ${n.chatLine}`)
     await expect(today.claudeSkill).toHaveAttribute('placeholder', new RegExp(`^${t.skillPlaceholder}`))
     await today.claudeYolo.click()
-    await expect(today.item(n.chat, n.chatLine)).toHaveCount(0) // Claude is on it
+    // While Claude is on it the item is gone, but the fake run fails at once: under a full run's load the item can be
+    // back before a check could see it gone, so only the failed run's end is checked (the item back, nothing handed over).
     await expect(today.askBar).toContainText(data.text.fake.claudeFails, { timeout: 15_000 })
     await expect(today.askBar).toContainText(`${n.chat}: `)
     await expect(today.askBar).toContainText(t.stillThere)
