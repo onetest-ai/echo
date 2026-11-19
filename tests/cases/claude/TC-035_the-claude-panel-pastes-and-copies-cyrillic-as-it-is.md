@@ -29,4 +29,4 @@ external_id: TC-CLA-035
 Text goes in and out of the panel's terminal in any language unchanged.
 
 ## Notes
-- Stays person-run: it needs the real clipboard and an Echo with no locale (started from Finder). The tools' UTF-8 is checked by `window::tests::the_clipboard_tools_speak_utf8_without_a_locale`.
+- Stays person-run: it needs the real clipboard and an Echo with no locale (started from Finder). The tools' UTF-8 is checked by `window::tests::the_clipboard_tools_speak_utf8_without_a_locale`. On Windows, `window::tests::windows_copy_puts_the_text_itself_on_the_clipboard` (ignored: it needs a desktop) reads back exactly what a copy put there.
