@@ -29,6 +29,13 @@ Each `uses` key is a line on the permission sheet, in Echo's words; the user agr
 update adding a line asks again (`echoctl plugin update --yes`). Only these keys are known; `brain_source` and `export`
 are not granted. Evidence: `plugins::CAPABILITIES`, `plugins::describe_folders`, `plugins::sheet`
 
+A manifest's words that reach the sheet or the CLI's review — its `name`, its routines' `name` and `what`, and every
+string in `uses` (`folders.what`, `ai.wrapper.name`, the words it lists) — hold no control character (C0, DEL, C1
+with U+0085), line or paragraph separator (U+2028, U+2029) or direction override or isolate (U+202A–U+202E,
+U+2066–U+2069): an install, an update and `echoctl plugin check` refuse one that does ("its <field> holds a control,
+line-breaking or direction character …"). A copy installed before this check still loads, each such character shown
+as U+FFFD, and Echo logs it. Evidence: `capabilities::make_sheet_safe`, `plugins::read_manifest`
+
 | Key | Shape and use |
 |---|---|
 | `claude` | runs Claude (§ Claude runs); the sheet: "Runs Claude Code on your AI profiles, acting on its own as you set routines in Settings (Auto, or skipping every permission check)", then with `{"skip": true}` "; a run you mark so may skip every permission check" (only then is a run's own `tools: "skip"` honoured), then ". In a folder you gave it, Claude works with that folder's own Claude Code setup: it reads the folder and, if the plugin may change it, edits files there or in a copy for you to review — as you set routines; on your click in its screens it opens Claude Code there in Echo's Claude panel for you to ask, as you set Claude in the window" (§ Claude runs: `ctx.claude.session`; no capability of its own: `claude` and `folders` cover it) |
@@ -373,13 +380,12 @@ points into this computer or the user's network even in part is refused, looked 
 Echo connects to the address it checked, never through a proxy. A host its other grants reach (`network.hosts`, a
 listed address, the typed one) keeps their rules. A redirect (301, 302, 303, 307, 308) is followed, 5 at most: its
 `Location` read against the address it came from, and the address it names checked again before anything is asked of
-it: when the read began at one of the plugin's grants, as the first was (its grants, never the typed address again,
-else as a public https page); when it began as a public page, only as a public https page — never into a
+it: while every address so far was one of the plugin's grants, as the first was (its grants, never the typed address
+again, else as a public https page); once any of them was a public page, only as a public https page — never into a
 `network.hosts` host or an address the user listed. The size and time caps are the whole read's: no redirect is
 followed past its time. A name that points into this computer or the user's network and one that isn't found are
 refused in the same words ("Echo found no public address for <host> (never this computer or your own network)"), so
-no name inside it can be probed. A word a manifest lists (an event, a kind, a setting) holds no control character or
-line separator, so it never adds a line to the sheet. Rejected, with why: plain http ("… over plain http: Echo reads a page on the
+no name inside it can be probed. Rejected, with why: plain http ("… over plain http: Echo reads a page on the
 public internet only over https"), another port ("… on port <n>: … only on ports 80 and 443"), this computer or the
 user's network ("<plugin> reads only pages on the public internet and the addresses it may reach: <host> is on this
 computer or your own network"), a redirect to any of these ("the page moved to <address>, which Echo doesn't read: …")

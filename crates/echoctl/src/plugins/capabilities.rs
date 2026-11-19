@@ -142,11 +142,57 @@ pub fn as_heard(event: &str, payload: &mut Value, reads: bool) {
     }
 }
 
+/// A character a manifest's text never brings to the sheet or the CLI's review: a control character (C0, DEL, C1 with
+/// U+0085), a line or paragraph separator, or a direction override or isolate (U+202A–U+202E, U+2066–U+2069).
+pub(super) fn not_sheet_safe(c: char) -> bool {
+    matches!(c, '\u{0}'..='\u{1f}' | '\u{7f}'..='\u{9f}' | '\u{2028}' | '\u{2029}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')
+}
+
+/// Every text of a manifest that reaches the sheet or the CLI's review — its name, its routines' names and words, and
+/// every string of its `uses` (`folders.what`, `ai.wrapper.name`, the words it lists) — made sheet-safe in place, each
+/// character that isn't (`not_sheet_safe`) replaced by U+FFFD; where one was. An install or an update refuses such a
+/// manifest; an installed copy is read with its text made safe (`read_manifest`).
+pub(super) fn make_sheet_safe(m: &mut super::Manifest) -> Vec<String> {
+    fn clean(s: &mut String) -> bool {
+        if !s.chars().any(not_sheet_safe) {
+            return false;
+        }
+        *s = s.chars().map(|c| if not_sheet_safe(c) { '\u{fffd}' } else { c }).collect();
+        true
+    }
+    fn walk(v: &mut Value, at: &str, out: &mut Vec<String>) {
+        match v {
+            Value::String(s) => {
+                if clean(s) {
+                    out.push(at.to_string());
+                }
+            }
+            Value::Array(a) => a.iter_mut().for_each(|x| walk(x, at, out)),
+            Value::Object(o) => o.iter_mut().for_each(|(k, x)| walk(x, &format!("{at}.{k}"), out)),
+            _ => {}
+        }
+    }
+    let mut out = vec![];
+    if clean(&mut m.name) {
+        out.push("name".to_string());
+    }
+    for r in &mut m.routines {
+        let (name, what) = (clean(&mut r.name), clean(&mut r.what));
+        if name || what {
+            out.push(format!("routine “{}”", r.id));
+        }
+    }
+    for (k, v) in m.uses.iter_mut() {
+        walk(v, &format!("uses.{k}"), &mut out);
+    }
+    out.dedup();
+    out.into_iter().map(|at| format!("its {at} holds a control, line-breaking or direction character: Echo shows a manifest's words only as plain text")).collect()
+}
+
 pub(super) fn strings(v: &Value, key: &str) -> Result<Vec<String>> {
     match &v[key] {
         Value::Null => Ok(vec![]),
-        // A word never breaks a sheet's line: no control character, no line or paragraph separator.
-        Value::Array(a) => a.iter().map(|x| x.as_str().filter(|s| !s.chars().any(|c| c < ' ' || matches!(c, '\u{7f}' | '\u{2028}' | '\u{2029}'))).map(str::to_string).ok_or_else(|| anyhow!("“{key}” must list words"))).collect(),
+        Value::Array(a) => a.iter().map(|x| x.as_str().map(str::to_string).ok_or_else(|| anyhow!("“{key}” must list words"))).collect(),
         _ => bail!("“{key}” must be a list"),
     }
 }
@@ -667,23 +713,30 @@ mod tests {
     }
 
     #[test]
-    fn a_word_a_manifest_names_never_adds_a_line_to_the_sheet() {
+    fn a_manifests_words_never_add_a_line_or_turn_text_on_the_sheet() {
         let forged = "Reads web pages on the public internet (https)";
-        for sep in ["\n", "\r", "\u{2028}", "\u{2029}", "\t", "\u{0}"] {
-            for uses in [
-                serde_json::json!({"events": {"on": [format!("call_started{sep}{forged}")]}}),
-                serde_json::json!({"echo": {"read": [format!("calls{sep}{forged}")]}}),
-                serde_json::json!({"echo": {"write": [format!("x{sep}{forged}")]}}),
-                serde_json::json!({"m365": {"read": [format!("files{sep}{forged}")]}}),
-                serde_json::json!({"network": {"hosts_from": [format!("tts{sep}{forged}")]}}),
-            ] {
-                assert!(describe(uses.as_object().unwrap()).is_err(), "{uses}");
-            }
+        for bad in ['\n', '\r', '\t', '\u{0}', '\u{7f}', '\u{85}', '\u{2028}', '\u{2029}', '\u{202a}', '\u{202e}', '\u{2066}', '\u{2069}'] {
+            let mut m: super::super::Manifest = serde_json::from_value(serde_json::json!({
+                "id": "p", "name": format!("Acme{bad}{forged}"), "version": "0.1.0",
+                "uses": {"events": {"on": [format!("call_started{bad}{forged}")]}, "echo": {"read": [format!("calls{bad}x")]},
+                         "m365": {"read": [format!("files{bad}x")]}, "folders": {"what": format!("vaults{bad}{forged}")},
+                         "ai": {"wrapper": {"name": format!("W{bad}x"), "command": "w"}}},
+                "routines": [{"id": "r", "name": format!("Daily{bad}x"), "what": "ok", "prompt": "r.md"}]
+            }))
+            .unwrap();
+            let said = make_sheet_safe(&mut m);
+            assert_eq!(said.len(), 7, "{bad:?}: {said:?}");
+            assert!(said.iter().any(|s| s.contains("its name holds")) && said.iter().any(|s| s.contains("its uses.folders"))&& said.iter().any(|s| s.contains("routine “r”")), "{said:?}");
+            assert_eq!(m.name, format!("Acme\u{fffd}{forged}"));
+            let lines = describe(&m.uses).unwrap();
+            assert_eq!(lines.len(), 5, "one line each: {lines:?}");
+            assert!(lines.iter().all(|l| !l.chars().any(not_sheet_safe) && l != forged), "{lines:?}");
+            assert!(make_sheet_safe(&mut m).is_empty(), "made safe once");
         }
-        // A word Echo doesn't know is named, on its capability's one line.
-        let lines = describe(serde_json::json!({"events": {"on": ["call_started", "later_event"]}}).as_object().unwrap()).unwrap();
-        assert_eq!(lines.len(), 1, "{lines:?}");
+        // Plain words, and other languages, are left as they are.
+        assert!(!"Звонки · café — “ok” 日本".chars().any(not_sheet_safe));
     }
+
 
     #[test]
     fn a_channel_names_one_of_anthropics_plugins_and_a_bad_name_is_refused_not_a_panic() {

@@ -392,7 +392,7 @@ impl std::error::Error for Moved {}
 fn get_page(id: &str, url: &str, max: u64, secs: u64, accept_types: &str, accept: &dyn Fn(&Head) -> Result<()>, sink: &mut dyn std::io::Write) -> Result<(String, Reach, Head, u64)> {
     let web = reads_web(id);
     let until = Instant::now() + Duration::from_secs(secs);
-    let (mut reach, mut resolve, public_only) = page_reach(id, url, web, true, false, until)?;
+    let (mut reach, mut resolve, mut public_only) = page_reach(id, url, web, true, false, until)?;
     let mut at = url.to_string();
     let mut hops = 0;
     loop {
@@ -415,7 +415,10 @@ fn get_page(id: &str, url: &str, max: u64, secs: u64, accept_types: &str, accept
         }
         hops += 1;
         let next = page::web_link(&at, to).ok_or_else(|| anyhow!("the page moved to “{}”, which isn't a web address Echo reads", to.chars().take(200).collect::<String>()))?;
-        (reach, resolve, _) = page_reach(id, &next, web, false, public_only, until).map_err(|e| anyhow!("the page moved to {next}, which Echo doesn't read: {e:#}"))?;
+        let was_public;
+        (reach, resolve, was_public) = page_reach(id, &next, web, false, public_only, until).map_err(|e| anyhow!("the page moved to {next}, which Echo doesn't read: {e:#}"))?;
+        // Once any page on the way was a public one, every later address must be public too.
+        public_only |= was_public;
         at = next;
     }
 }
@@ -555,6 +558,8 @@ mod tests {
                     "port" => format!("https://news.acme.example:{other}/page"),
                     "file" => "file:///etc/hosts".into(),
                     "listed" => format!("http://127.0.0.1:{other}/page"),
+                    // From the user's own site out to a public page that moves back in.
+                    "bounce" => "https://news.acme.example/away/listed".into(),
                     _ => "https://cdn.acme.example/page".into(),
                 };
                 reply("302 Found", &format!("Location: {to}\r\n"), b"")
@@ -813,6 +818,12 @@ mod tests {
         // A page at the listed address keeps its grant's rules, its own redirects followed there.
         let p = read(&format!("http://127.0.0.1:{other}/hop/1")).unwrap();
         assert_eq!(p["url"], json!(format!("http://127.0.0.1:{other}/page")));
+        // Listed → public → listed: once a public page is on the way, never back into the user's network.
+        let asked_page = |s: &Seen| s.paths.lock().unwrap().iter().filter(|x| *x == "/page").count();
+        let before = asked_page(&other_seen);
+        let e = refused(read(&format!("http://127.0.0.1:{other}/away/bounce")));
+        assert!(e.contains(&format!("the page moved to http://127.0.0.1:{other}/page")) && e.contains("only over https"), "{e}");
+        assert_eq!(asked_page(&other_seen), before, "the listed site's page never asked again");
         // ctx.http.fetch isn't widened.
         assert!(refused(call("crawler", "http", &json!({"url": "https://news.acme.example/page"}))).contains("may reach only"));
         drop(_map);
