@@ -97,7 +97,7 @@ pub fn save_settings(s: &embed::Settings) -> Result<()> {
 }
 
 /// The configured embedder, if one is set.
-/// Whether the Brain is on (Settings → Brain; `echoctl brain set --enabled`).
+/// Whether the Brain is on (Settings → Brain; `echoctl intake set --enabled`).
 pub fn enabled() -> bool {
     settings().enabled()
 }

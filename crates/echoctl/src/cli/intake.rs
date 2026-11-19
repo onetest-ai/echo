@@ -1,4 +1,4 @@
-//! The Brain: `echoctl brain …` and the top-level `echoctl mcp`.
+//! The Brain: `echoctl intake …` and the top-level `echoctl mcp`.
 
 use anyhow::Result;
 use clap::Subcommand;

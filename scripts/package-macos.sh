@@ -99,7 +99,7 @@ else
   echo "warning: $ARCH build: no NeMo-Speech runtime, so no Nemotron models" >&2
 fi
 # PDFium for the Brain's thread folders (PDF pages, page images; loaded at runtime,
-# `brain/files/pdf.rs`): Frameworks/pdfium, signed below; its license in Resources. Apple Silicon only
+# `intake/files/pdf.rs`): Frameworks/pdfium, signed below; its license in Resources. Apple Silicon only
 # (the pinned build); without it PDFs in thread folders aren't read.
 if [[ "$ARCH" == arm64 ]]; then
   rm -rf dist/pdfium

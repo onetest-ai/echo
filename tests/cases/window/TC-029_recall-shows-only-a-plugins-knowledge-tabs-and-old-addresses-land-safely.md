@@ -40,7 +40,7 @@ target/debug/echoctl plugin marketplace add "$M" --name acme-know
 
 | # | Action | Expected Result |
 |---|--------|----------------|
-| 1 | `target/debug/echoctl brain set --enabled true`; reload `{{base_url}}/`, navigate to `{{base_url}}/#today`, wait for "Your day" | The navigation "Activities" has no button "Recall": Intake on alone doesn't bring it |
+| 1 | `target/debug/echoctl intake set --enabled true`; reload `{{base_url}}/`, navigate to `{{base_url}}/#today`, wait for "Your day" | The navigation "Activities" has no button "Recall": Intake on alone doesn't bring it |
 | 2 | Navigate to `{{base_url}}/#brain`, then `{{base_url}}/#brain/sources`, then `{{base_url}}/#brain/people` (each a full load, each waited for a moment) | Each opens Calls (a call or "Pick a call"); no heading "Recall", no "Sources" or "People" tab, no error |
 | 3 | `target/debug/echoctl plugin install acme-shelf --yes`; reload `{{base_url}}/`, wait for "Your day" | The navigation "Activities" has a button "Recall" between Tasks and Settings |
 | 4 | Click "Recall" | The URL is `{{base_url}}/#brain`; the heading "Recall" with one tab "Acme shelf" (selected) and the text "Acme shelf: the vault is empty."; no tab "Sources" or "People", no scope picker, no "Settings" button |
@@ -51,7 +51,7 @@ target/debug/echoctl plugin marketplace add "$M" --name acme-know
 Acme shelf is removed; Intake is on (the teardown turns it off).
 
 ## Teardown
-- `target/debug/echoctl brain set --enabled false`; `target/debug/echoctl plugin marketplace remove acme-know`
+- `target/debug/echoctl intake set --enabled false`; `target/debug/echoctl plugin marketplace remove acme-know`
 - `tests/fixtures/serve.sh down <dir>`; close the test tab
 
 ## Notes

@@ -22,7 +22,7 @@ tags: [privacy, m365, mail, senders, threads]
   - **C**: a personal address outside the organisation at a provider that passes DMARC (an outlook.com or gmail.com address); `<C>`
 - Small data built right before the run: `tests/fixtures/make-data.sh <dir>`; every `echoctl` command runs as `target/debug/echoctl …` after `. <dir>/env`. Account A signed in to the run's own config: `tests/fixtures/serve.sh up <dir> <port>`, in the window Settings → Calendar & chat → connect Microsoft 365 (as `calendar/TC-002`); `<dir>/config/graph.json` exists
 - The thread **Acme rollout** (`acme-rollout`, client Acme) on the data
-- Why it is a person's case: Graph returns the mail and Exchange's authentication verdict only for a real mailbox (`graph::mail`); the verdicts alone are `brain::senders::tests`
+- Why it is a person's case: Graph returns the mail and Exchange's authentication verdict only for a real mailbox (`graph::mail`); the verdicts alone are `intake::senders::tests`
 - From B, send A one mail with the subject `Acme rollout check from colleague` and the text `Test mail, nothing real.`; from C, send A one with the subject `Acme rollout check from outside` and the same text. Wait until both are in A's Inbox (Outlook, any client)
 
 ## Test Data

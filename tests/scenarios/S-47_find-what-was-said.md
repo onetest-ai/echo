@@ -29,7 +29,7 @@ points inside `<dir>` (otherwise stop: the real data folder and config are never
 | Asset | Made by | Used by stages |
 |---|---|---|
 | The `standard` data build (with Intake's mail and post facts) | the lead (`serve.sh up`) | 1–7 |
-| Recall on and indexed (`brain set --enabled true`, `brain sync`) | glue before stage 2 | 2–7 |
+| Recall on and indexed (`intake set --enabled true`, `intake sync`) | glue before stage 2 | 2–7 |
 
 ## Prelude
 1. Open a new tab for this scenario; load `{{base_url}}/`.
@@ -39,7 +39,7 @@ points inside `<dir>` (otherwise stop: the real data folder and config are never
 | # | Case | Depends on | Before it |
 |---|------|------------|-----------|
 | 1 | `calls/TC-232_with-intake-off-enter-in-the-calls-box-keeps-to-titles-and-people.md` | — | — |
-| 2 | `calls/TC-233_enter-in-the-calls-box-lists-titles-and-people-then-what-was-said-by-source.md` | — | Run `target/debug/echoctl brain set --enabled true`, then `target/debug/echoctl brain sync` (with the env, checked); load `{{base_url}}/` again |
+| 2 | `calls/TC-233_enter-in-the-calls-box-lists-titles-and-people-then-what-was-said-by-source.md` | — | Run `target/debug/echoctl intake set --enabled true`, then `target/debug/echoctl intake sync` (with the env, checked); load `{{base_url}}/` again |
 | 3 | `calls/TC-234_a-searchs-kinds-sections-and-client-narrow-it-and-a-date-in-the-words-is-a-dashed-chip.md` | 2 | — |
 | 4 | `calls/TC-235_a-moment-opens-in-what-was-said-with-the-turns-around-it-and-opens-the-call-there.md` | 2 | — |
 | 5 | `calls/TC-236_a-search-with-no-match-says-so-in-one-line-with-search-every-source.md` | 2 | — |

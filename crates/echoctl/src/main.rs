@@ -259,9 +259,10 @@ enum Cmd {
         #[arg(long)]
         write: Option<String>,
     },
-    /// The Brain: cross-call intelligence over calls (later channels, mail, folders) (JSON)
+    /// Intake and search: mail and channel facts, senders, the dictionary, the search index (JSON)
     #[cfg(feature = "intake")]
-    Brain {
+    #[command(alias = "brain")]
+    Intake {
         #[command(subcommand)]
         cmd: cli::intake::BrainCmd,
     },
@@ -785,7 +786,7 @@ fn main() -> Result<()> {
         Cmd::Speakers { call, names, relabel } => speakers::command(&call, &names, relabel),
         Cmd::Vocab { cmd } => cli::capture::vocab(cmd),
         #[cfg(feature = "intake")]
-        Cmd::Brain { cmd } => cli::intake::brain_command(cmd),
+        Cmd::Intake { cmd } => cli::intake::brain_command(cmd),
         Cmd::Project { cmd } => cli::project::project_command(cmd),
         Cmd::Client { cmd } => cli::project::client_command(cmd),
         Cmd::Org { cmd } => cli::project::org_command(cmd),
@@ -913,4 +914,20 @@ fn main() -> Result<()> {
     // A change that failed is noted too, with why.
     notes::note_action(&argv, out.as_ref().err().map(|e| format!("failed: {e:#}")).as_deref());
     out
+}
+
+#[cfg(all(test, feature = "intake"))]
+mod tests {
+    use super::*;
+    use clap::CommandFactory;
+
+    #[test]
+    fn echoctl_brain_is_a_hidden_alias_of_echoctl_intake() {
+        for name in ["intake", "brain"] {
+            let cli = Cli::try_parse_from(["echoctl", name, "search", "cap", "--limit", "3"]).unwrap();
+            assert!(matches!(cli.cmd, Cmd::Intake { cmd: cli::intake::BrainCmd::Search { limit: 3, .. } }), "{name}");
+        }
+        let help = Cli::command().render_help().to_string();
+        assert!(help.contains("\n  intake ") && !help.contains("\n  brain "), "{help}");
+    }
 }

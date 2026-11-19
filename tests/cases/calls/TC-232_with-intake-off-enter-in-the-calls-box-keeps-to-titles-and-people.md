@@ -16,7 +16,7 @@ tags: [calls, search, recall]
 
 ## Preconditions
 - Test data built by `tests/fixtures/make_data.py <dir> --set standard` and served at `{{base_url}}`; Recall (Intake and
-  search) is off, as the data leaves it: `target/debug/echoctl brain status`, run after `set -a; . <dir>/env; set +a`
+  search) is off, as the data leaves it: `target/debug/echoctl intake status`, run after `set -a; . <dir>/env; set +a`
   with `ECHOCTL_CONFIG_DIR` inside `<dir>`, shows `"enabled"` false or no settings
 
 ## Test Data

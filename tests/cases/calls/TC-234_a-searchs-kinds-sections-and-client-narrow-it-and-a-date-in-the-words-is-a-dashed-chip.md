@@ -15,7 +15,7 @@ tags: [calls, search, recall, filters]
 **Module:** Calls | **Priority:** High | **Type:** Functional
 
 ## Preconditions
-- As TC-233: standard data served at `{{base_url}}`, Recall on and synced (`brain set --enabled true`, `brain sync`, run
+- As TC-233: standard data served at `{{base_url}}`, Recall on and synced (`intake set --enabled true`, `intake sync`, run
   with the data's env and `ECHOCTL_CONFIG_DIR` checked inside `<dir>`), the page loaded again
 - Intake's facts of the standard set: the mail "Re: SSO cutover window" and the post "Acme › Okta and SSO", both Acme's
 

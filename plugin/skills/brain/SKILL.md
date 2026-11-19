@@ -6,7 +6,7 @@ argument-hint: "[question or what to change]"
 
 # echo: what was said
 
-CLI: `${CLAUDE_PLUGIN_ROOT}/scripts/echoctl brain` (below: `brain`). If the session has Echo's MCP tools
+CLI: `${CLAUDE_PLUGIN_ROOT}/scripts/echoctl intake` (below: `intake`). If the session has Echo's MCP tools
 (`mcp__echo__search_sources`, `mcp__echo__read_source`, `mcp__echo__read_link`), prefer them: they answer the same,
 scoped to this session's profile. A command that answers that Intake is off → say so (Settings → Intake → Use Intake)
 and stop.
@@ -18,10 +18,10 @@ never guess them from search hits.
 ## Answering a question
 
 ```
-- [ ] 1. Scope: which client or thread is it about? Its id: list_scopes (CLI: `brain scopes`, or
+- [ ] 1. Scope: which client or thread is it about? Its id: list_scopes (CLI: `intake scopes`, or
          `echoctl project list`)
 - [ ] 2. Search: search_sources {"query": "<the question's words>", "client" | "thread": "<id>"}
-         (CLI: brain search "<words>" --client <id> | --thread <id> [--limit 12])
+         (CLI: intake search "<words>" --client <id> | --thread <id> [--limit 12])
 - [ ] 3. Search again in other words — the other language (calls mix English, Ukrainian, Russian), a person's name,
          a product or project term
 - [ ] 4. Read around the best hits: read_link <its echo:// link> (the turns around the moment), read_source <source>
@@ -62,8 +62,8 @@ never guess them from search hits.
 ## Topics and terms
 
 ```sh
-brain taxonomy show                   # every topic and term with sections and threads
-brain taxonomy edit '<json>'          # the user's change: a new version, nothing rebuilt
+intake taxonomy show                  # every topic and term with sections and threads
+intake taxonomy edit '<json>'         # the user's change: a new version, nothing rebuilt
 ```
 
 Edits (`layer`: `shared` = the practice, or a client's id; `term: true` for a term, else a topic):
@@ -86,11 +86,11 @@ transcription).
 ## Who may speak, and the rest
 
 ```sh
-brain senders [--client <id>]                         # mail and channel senders: trusted, ignored, waiting
-brain senders --client <id> --trust jane@acme.example | --ignore … | --forget …
-brain files                                           # the threads' folders: what was read, and why not
-brain sync                                            # read what's new now (it also runs every 5 minutes)
-brain set --enabled true|false                        # Intake at all
+intake senders [--client <id>]                        # mail and channel senders: trusted, ignored, waiting
+intake senders --client <id> --trust jane@acme.example | --ignore … | --forget …
+intake files                                          # the threads' folders: what was read, and why not
+intake sync                                           # read what's new now (it also runs every 5 minutes)
+intake set --enabled true|false                       # Intake at all
 ```
 
 Trusting a sender makes Echo read their mail and posts for that client from now on: ask first.

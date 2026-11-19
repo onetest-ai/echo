@@ -46,5 +46,5 @@ Acme rollout has two mail sources, each limited to its words.
 - Acme rollout's sources (removed again in the teardown).
 
 ## Notes
-- Which mail such a source reads takes a real mailbox: `threads/TC-029`. The rule itself is `ledger::mail::tests` and `brain::sources::tests`.
+- Which mail such a source reads takes a real mailbox: `threads/TC-029`. The rule itself is `ledger::mail::tests` and `intake::sources::tests`.
 - The Sources form's subject field shows only with Recall on and Microsoft 365 signed in: `threads/TC-029` step 1.

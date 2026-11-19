@@ -447,7 +447,7 @@ pub fn status() -> Result<Value> {
     Ok(Value::Object(out))
 }
 
-/// Every folder's files with what happened to each (`echoctl brain files`).
+/// Every folder's files with what happened to each (`echoctl intake files`).
 pub fn list_all() -> Result<Value> {
     let c = store::open(&crate::intake::store_path())?;
     ensure_schema(&c)?;

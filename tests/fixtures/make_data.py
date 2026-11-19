@@ -2244,7 +2244,7 @@ def build_preps(d, H, rows, events):
 
 def build_intake(d):
     """Intake's facts as a sync of Acme rollout's mail and channel would have kept them: one mail and one post, both about
-    the SSO cutover. Read only once Recall is on (`echoctl brain set --enabled true`, then `brain sync` indexes them)."""
+    the SSO cutover. Read only once Recall is on (`echoctl intake set --enabled true`, then `intake sync` indexes them)."""
     rollout = [{"id": "acme-rollout", "name": "Acme rollout", "client": "acme"}]
 
     def facts(source, kind, title, when, who, sender, link, lines):

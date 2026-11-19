@@ -78,7 +78,7 @@ if ($Phase -ne "package") {
     foreach ($dll in $nemoDlls) { Copy-Item "$nemoDir\bin\$dll" "$stage\nemo-speech\" }
     Copy-Item "$nemoDir\share\licenses\nemo-speech\*" "$stage\nemo-speech\licenses\" -Recurse
 
-    # PDFium for the Brain's thread folders (crates/echoctl/src/brain/files/pdf.rs loads it from pdfium\
+    # PDFium for the Brain's thread folders (crates/echoctl/src/intake/files/pdf.rs loads it from pdfium\
     # next to echoctl.exe): bblanchon/pdfium-binaries' build of chromium/7881 (the version pdfium-render
     # expects), BSD-3, checked by SHA-256. Same build as scripts/fetch-pdfium.sh.
     $pdfiumBuild = "7881"

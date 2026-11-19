@@ -184,7 +184,7 @@ pub fn action_kind(argv: &[String]) -> Option<&'static str> {
         "client" | "org" if matches!(second, "list" | "people" | "show") => None,
         "plugin" if matches!(second, "list" | "mine" | "guide" | "check") => None,
         "dashboard" if matches!(second, "list" | "presets" | "export") => None,
-        "vocab" | "series" | "ai" | "model" | "config" | "home" | "brain" | "jobs" if matches!(second, "" | "list" | "show") => None,
+        "vocab" | "series" | "ai" | "model" | "config" | "home" | "intake" | "brain" | "jobs" if matches!(second, "" | "list" | "show") => None,
         "jobs" if second == "runs" || second == "routines" => None,
         _ => Some("change"),
     }
