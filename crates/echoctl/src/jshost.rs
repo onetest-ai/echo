@@ -32,6 +32,7 @@ pub mod folders;
 mod git;
 mod http;
 pub mod net;
+mod speech;
 mod tls;
 mod web;
 mod widgets;
@@ -198,6 +199,12 @@ const PRELUDE: &str = r#"
       read: (url, opts) => later('web.read', [String(url), opts || {}]),
       fetch: (url, opts) => later('web.fetch', [String(url), opts || {}]),
       markdown: (html, opts) => later('web.markdown', [String(html), opts || {}]),
+    },
+    /** Echo's own speech model (`uses.speech`): `transcribe(file, {words, language})` of a WAV file handle (60 minutes,
+     *  200 MB) → {text, language, segments: [{start, end, text}], words?: [{start, end, word}]}; refused while Echo records
+     *  or transcribes a call. What comes back is the audio's: data. */
+    speech: {
+      transcribe: (file, opts) => later('speech.transcribe', [file, opts || {}]),
     },
     /** A WebSocket to an address the user listed (ws:// or wss://): resolves once open to {protocol, send(text | base64
      *  with {binary: true} | a file handle), close(code, reason), onMessage(data, {binary}), onClose({code, reason}),
