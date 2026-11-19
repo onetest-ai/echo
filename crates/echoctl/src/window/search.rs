@@ -140,8 +140,12 @@ fn sources(hits: &[Value], words: &[String]) -> Vec<Value> {
                 out.len() - 1
             }
         };
+        // A turn is one moment of its source, however many chunks hold it.
+        let mo = moment_of(h, words);
         if let Some(m) = out[at]["moments"].as_array_mut() {
-            m.push(moment_of(h, words));
+            if mo["t"].is_null() || !m.iter().any(|x| x["section_kind"] == mo["section_kind"] && x["t"] == mo["t"] && x["who"] == mo["who"]) {
+                m.push(mo);
+            }
         }
     }
     out
@@ -165,6 +169,12 @@ fn has_word(line: &str, words: &[String]) -> bool {
     line.split(|c: char| !c.is_alphanumeric()).any(|w| !w.is_empty() && words.iter().any(|x| x == &w.to_lowercase()))
 }
 
+/// How many of the words a line holds, each once (the line that holds most of the query is the moment).
+fn words_in(line: &str, words: &[String]) -> usize {
+    let have: Vec<String> = line.split(|c: char| !c.is_alphanumeric()).filter(|w| !w.is_empty()).map(str::to_lowercase).collect();
+    words.iter().filter(|x| have.contains(x)).count()
+}
+
 /// A line as it reads: no list mark, no bold, no time chips, a Markdown link by its label.
 fn plain(line: &str) -> String {
     let mut s = line.trim().trim_start_matches(['-', '*', '•']).trim().replace("**", "");
@@ -186,7 +196,8 @@ fn moment_of(h: &Value, words: &[String]) -> Value {
     let kind = h["section_kind"].as_str().unwrap_or("");
     let text = h["text"].as_str().unwrap_or("");
     let lines: Vec<&str> = text.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with('#')).collect();
-    let line = lines.iter().find(|l| has_word(l, words)).or(lines.first()).copied().unwrap_or("");
+    // The line with most of the words (the first of equals); none has one: the chunk's first.
+    let line = lines.iter().copied().enumerate().filter(|(_, l)| has_word(l, words)).max_by_key(|(i, l)| (words_in(l, words), std::cmp::Reverse(*i))).map(|x| x.1).or(lines.first().copied()).unwrap_or("");
     let (mut t, mut said, mut who) = (None, line, h["speaker"].as_str().map(str::to_owned));
     // A transcript's or a chat's line: "[07:48] Omar Haddad (Acme): …".
     if let Some((at, rest)) = clock_at_start(line).filter(|_| kind == "transcript" || kind == "chat") {
@@ -276,7 +287,11 @@ fn turns_around(dir: &Path, t: f64, before: bool, words: &[String]) -> Vec<Value
     }
     // The index's clock drops the fraction of a second (`[00:35]` for 35.6 s): the turn that started within that second.
     let Some(last) = turns.iter().rposition(|x| x.0 < t + 1.0).or((!turns.is_empty()).then_some(0)) else { return vec![] };
-    let at = (0..=last).rev().take_while(|&i| turns[i].0 >= t.floor()).find(|&i| has_word(&turns[i].4, words)).unwrap_or(last);
+    // Of those, the one with most of the words (the latest of equals), as the list's moment picks its line.
+    let at = (0..=last).rev().take_while(|&i| turns[i].0 >= t.floor()).filter(|&i| has_word(&turns[i].4, words)).fold(None, |best: Option<(usize, usize)>, i| {
+        let n = words_in(&turns[i].4, words);
+        if best.is_none_or(|b| n > b.1) { Some((i, n)) } else { best }
+    }).map_or(last, |b| b.0);
     let from = if before { at.saturating_sub(1) } else { at };
     turns[from..(at + 2).min(turns.len())]
         .iter()
@@ -416,6 +431,33 @@ mod tests {
         let long_ago = (chrono::Local::now().date_naive() - chrono::Duration::days(200)).to_string();
         let old = get(&format!("/api/search?q=cutover&until={long_ago}"));
         assert_eq!((old["older"].as_bool(), old["sources"].as_array().map(Vec::len)), (Some(true), Some(0)));
+    }
+
+    #[test]
+    fn a_chunk_of_several_turns_shows_the_turn_with_most_of_the_words_in_the_list_and_the_panel() {
+        let words = vec!["security".to_string(), "review".to_string()];
+        let text = "[04:03] Dana Lee (Acme): The security checklist is ready.\n\n[04:17] Omar Haddad (Acme): Then the security review is on Friday.\n\n[04:33] Kim Park: Fine.\n";
+        let h = json!({"chunk_id": "1", "source": "call/x", "section_kind": "transcript", "text": text, "breadcrumb_path": "Acme sync > Transcript", "refs": {}});
+        let m = moment_of(&h, &words);
+        assert_eq!((m["who"].as_str(), m["t"].as_f64()), (Some("Omar Haddad"), Some(257.0)), "the turn with both words, not the first with one");
+        // No turn holds a word (a title-only match): the chunk's first turn.
+        assert_eq!(moment_of(&h, &["budget".to_string()])["who"], "Dana Lee");
+        // The panel's turn is the same one when the turns started in one second.
+        let (_env, root) = crate::paths::testenv::folders("window-search-most-words");
+        let d = root.join("c");
+        std::fs::create_dir_all(&d).unwrap();
+        std::fs::write(
+            d.join("segments.json"),
+            json!([
+                {"speaker": "remote", "name": "Dana Lee", "start": 257.1, "end": 257.5, "text": "The security checklist is ready."},
+                {"speaker": "remote", "name": "Omar Haddad", "start": 257.6, "end": 258.0, "text": "Then the security review is on Friday."},
+            ])
+            .to_string(),
+        )
+        .unwrap();
+        let turns = turns_around(&d, 257.0, false, &words);
+        assert_eq!(turns.len(), 1, "{turns:?}");
+        assert_eq!(turns[0]["who"], "Omar Haddad");
     }
 
     #[test]
