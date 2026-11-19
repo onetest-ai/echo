@@ -34,7 +34,7 @@ tags: [cli, recall, search, mcp]
 
 | # | Action | Expected Result |
 |---|--------|----------------|
-| 1 | `target/debug/echoctl intake set --enabled true`; `target/debug/echoctl intake sync` | Both exit 0; the sync's JSON has `added` above 0 and no `pages_read` or `pages_pending` |
+| 1 | `target/debug/echoctl intake set --enabled true`; `target/debug/echoctl intake sync` | Both exit 0; the sync's JSON has `added` plus `unchanged` above 0 (the data may be synced already by an earlier case) and no `pages_read` or `pages_pending` |
 | 2 | `mcp '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'` | `result.tools[].name` is exactly `list_scopes`, `search_sources`, `list_sources`, `read_source`, `read_link` |
 | 2a | `mcp '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"list_scopes","arguments":{}}}'` | `isError` false; `structuredContent.clients` and `.threads` list ids with their documents, among the threads `acme-rollout` |
 | 3 | For each of `find_people`, `get_person`, `find_related`, `get_evidence`: `mcp '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"<it>","arguments":{}}}'` | Each answers `result.isError` true with `no tool` in its text |

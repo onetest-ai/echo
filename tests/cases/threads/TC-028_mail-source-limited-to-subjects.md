@@ -40,7 +40,7 @@ tags: [threads, profile, sources, mail]
 Acme rollout has two mail sources, each limited to its words.
 
 ## Teardown
-- `target/debug/echoctl project source acme-rollout --remove mail:person:jane@acme.example` and `… --remove mail:any:*`
+- `target/debug/echoctl project source acme-rollout --remove mail:person:jane@acme.example` and `… --remove 'mail:any:*'`
 
 ## Changes
 - Acme rollout's sources (removed again in the teardown).
