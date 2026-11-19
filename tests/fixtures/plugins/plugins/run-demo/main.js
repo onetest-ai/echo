@@ -1,4 +1,4 @@
-// A test plugin (tests/cases/plugins/TC-216, TC-217, TC-232): a Claude run under a key, stopped by that key; what Echo
+// A test plugin (tests/cases/plugins/TC-216, TC-217, TC-242): a Claude run under a key, stopped by that key; what Echo
 // records now; a run with pictures, its answer streamed, in a conversation it continues and forgets.
 // The test data's fake Claude Code goes on until it is stopped when the prompt holds "echo-test: keep running", and
 // answers in a stream when it holds "echo-test: talk".

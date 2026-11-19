@@ -1,9 +1,9 @@
 ---
-id: TC-232
+id: TC-242
 title: A plugin's Claude run with no tools takes the pictures it holds, streams its answer piece by piece, continues its conversation on its own profile until forgotten with its transcript, and refuses what isn't a picture, one too big or too many
 priority: high
 type: functional
-requirements: [F-PLUG-139]
+requirements: [F-PLUG-153]
 module: plugins
 run: agent
 platform: any
@@ -11,7 +11,7 @@ data: small
 tags: [plugins, host-half, claude-run, fake-claude]
 ---
 
-# TC-232: A plugin's Claude run takes its pictures, streams its answer and continues its conversation
+# TC-242: A plugin's Claude run takes its pictures, streams its answer and continues its conversation
 
 **Module:** Plugins | **Priority:** High | **Type:** Functional
 

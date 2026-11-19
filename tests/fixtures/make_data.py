@@ -583,7 +583,7 @@ fi
 # A plugin's run whose prompt holds "echo-test: keep running" goes on until it is stopped (plugins/TC-216); its pid in
 # <dir>/fake-running.pid.
 case "$*" in *"echo-test: keep running"*) echo $$ > "$(dirname "$0")/../fake-running.pid"; exec sleep 300;; esac
-# A plugin's run whose prompt holds "echo-test: talk" (after -p, or in its stream-json message on stdin, plugins/TC-232):
+# A plugin's run whose prompt holds "echo-test: talk" (after -p, or in its stream-json message on stdin, plugins/TC-242):
 # Claude Code's stream — its start, its answer in two pieces, its result — in the session it was asked to resume, else
 # a new one; its arguments in <dir>/fake-talk.args, its stdin message in <dir>/fake-talk.stdin, its folder in <dir>/fake-talk.cwd.
 IN=; case "$*" in *"--input-format stream-json"*) IN="$(head -n 1)";; esac
