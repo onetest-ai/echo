@@ -17,7 +17,7 @@ in the same PR. The rules are in `.ai-run/guides/architecture/architecture.md`.
 | AI jobs | `ai.rs`, `livenotes.rs`, `notes.rs`, `guard.rs`, `projectsync.rs` |
 | Threads and ledger | `projects.rs`, `ledger.rs`, `people.rs`, `tasks.rs` |
 | Recall (Intake and search) | `intake/` (feature `intake`; `brain` is its alias) |
-| Echo plugins | `plugins.rs`, `jshost.rs`, `web/` (a page read as Markdown), `claudejob.rs`, `share.rs` (feature `js`) |
+| Echo plugins | `plugins.rs`, `jshost.rs`, `web/` (a page read as Markdown, the public-address check, the render gate proxy, the render child `web/render/`), `netif/` (this computer's own addresses), `claudejob.rs`, `share.rs` (feature `js`) |
 | Claude Code plugin | `plugin/` |
 
 ## Feature gates

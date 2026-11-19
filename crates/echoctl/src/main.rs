@@ -46,6 +46,7 @@ mod minutes;
 mod notes;
 mod ollama;
 mod models;
+mod netif;
 mod paths;
 mod plugins;
 mod projects;
@@ -512,6 +513,17 @@ enum Cmd {
         #[arg(long, default_value_t = 1 << 20)]
         max: usize,
     },
+    /// (internal) A web page rendered for a plugin (`ctx.web.read({render: true})`): a hidden webview whose every
+    /// connection goes through Echo's gate; the host runs this as a child it can stop (`jshost::render`); one JSON
+    /// line on stdout
+    #[cfg(all(feature = "js", feature = "tray"))]
+    #[command(hide = true, name = "render-page")]
+    RenderPage {
+        #[arg(long)]
+        url: String,
+        #[arg(long, default_value_t = 30)]
+        secs: u64,
+    },
     /// (internal) The minutes run's guard: Claude Code asks it before every tool call of a run
     /// Echo started (`guard.rs`); exit 2 refuses the call
     #[command(hide = true)]
@@ -770,6 +782,8 @@ fn main() -> Result<()> {
         Cmd::Config(args) => cli::app::config(args),
         #[cfg(all(feature = "js", feature = "intake"))]
         Cmd::FilesText { path, pages, max } => std::process::exit(jshost::files::child_main(&path, pages.as_deref(), max)),
+        #[cfg(all(feature = "js", feature = "tray"))]
+        Cmd::RenderPage { url, secs } => std::process::exit(web::render::child_main(&url, secs)),
         Cmd::RunGuard => std::process::exit(guard::command()),
         Cmd::WrapperRun { args } => std::process::exit(ai::wrapper::relay(&args)),
         Cmd::Proof { args } => std::process::exit(ai::wrapper::proof_command(&args)),

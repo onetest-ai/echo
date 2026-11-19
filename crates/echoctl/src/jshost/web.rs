@@ -6,10 +6,11 @@
 //! page shows may come from their own public hosts (`picture_reach`); and a plugin with `uses.network.web` reads any
 //! https page on the public internet, its redirects followed and each checked again (`web_reach`, `get_page`).
 
-use std::net::{IpAddr, ToSocketAddrs};
+use std::net::IpAddr;
 
 use super::http::{admit, get_capped, reach, Head, Reach};
 use super::*;
+use crate::web::public::public_address;
 use crate::web::read::{self as page, Image};
 
 /// A page: 5 MB of HTML (`max` less), 30 s (`timeout` less).
@@ -21,8 +22,6 @@ const IMAGE_MAX: u64 = 10 << 20;
 const IMAGES_TOTAL: u64 = 50 << 20;
 const IMAGES_SECS: u64 = 120;
 const IMAGE_SECS: u64 = 30;
-/// A picture host's name looked up for 10 s at most (and never past the pictures' 2 minutes).
-const LOOKUP_SECS: u64 = 10;
 /// The ports a picture is fetched from on a host the plugin wasn't granted (besides the page's own, on its own host).
 const WEB_PORTS: [u16; 2] = [80, 443];
 /// The redirects followed for a plugin with `uses.network.web` (each address checked again), and the answers that are one.
@@ -85,10 +84,11 @@ fn bytes_opt(v: &Value, default: u64, most: u64) -> Result<u64> {
     }
 }
 
-/// `ctx.web.read(url, {max, timeout, images})`: the page at `url` (an address the plugin may reach, as `ctx.http.fetch`) read as
+/// `ctx.web.read(url, {max, timeout, images, render})`: the page at `url` (an address the plugin may reach, as `ctx.http.fetch`) read as
 /// Markdown: {url, title, markdown, links, images, lang, byline, published, description, source, needs_js, truncated,
 /// bytes}. `url` is the address read: the one asked for, or — with `uses.network.web` — where its redirects ended. `images: 'save'` also saves its pictures
-/// (`save_pictures`).
+/// (`save_pictures`). `render: true` (only with `uses.network.web`, a public https page) reads the page as a browser shows
+/// it, its JavaScript run (`rendered`), and says `rendered: true`.
 pub(super) fn read(id: &str, url: &str, opts: &Value) -> Result<Value> {
     let max = bytes_opt(&opts["max"], PAGE_MAX, PAGE_MAX)?;
     let save = match &opts["images"] {
@@ -96,12 +96,39 @@ pub(super) fn read(id: &str, url: &str, opts: &Value) -> Result<Value> {
         Value::String(s) if s == "save" => true,
         _ => bail!("images is 'save' or nothing"),
     };
-    let mut html = vec![];
+    let render = match &opts["render"] {
+        Value::Null | Value::Bool(false) => false,
+        Value::Bool(true) => true,
+        _ => bail!("render is true or false"),
+    };
     let secs = opts["timeout"].as_u64().filter(|s| *s > 0).map_or(PAGE_SECS, |s| s.min(PAGE_SECS));
-    let (url, reach, head, bytes) = get_page(id, url, max, secs, "text/html,application/xhtml+xml", &html_only, &mut html)?;
+    let (url, reach, text, bytes, cut) = if render {
+        let (at, reach, r) = rendered(id, url, secs)?;
+        let mut html = r.html;
+        let cut = r.truncated || html.len() as u64 > max;
+        if html.len() as u64 > max {
+            let mut end = max as usize;
+            while !html.is_char_boundary(end) {
+                end -= 1;
+            }
+            html.truncate(end);
+        }
+        let n = html.len() as u64;
+        (at, reach, html, n, cut)
+    } else {
+        let mut html = vec![];
+        let (url, reach, head, bytes) = get_page(id, url, max, secs, "text/html,application/xhtml+xml", &html_only, &mut html)?;
+        (url, reach, decode_html(&html, head.charset.as_deref()), bytes, false)
+    };
     let url = url.as_str();
-    let p = page::read(&decode_html(&html, head.charset.as_deref()), url);
+    let p = page::read(&text, url);
     let mut v = p.to_json();
+    if render {
+        v["rendered"] = json!(true);
+        if cut {
+            v["truncated"] = json!(true);
+        }
+    }
     if p.title.is_empty() {
         v["title"] = json!(url.split_once("://").map_or(url, |(_, r)| r).trim_end_matches('/'));
     }
@@ -168,54 +195,6 @@ fn save(id: &str, dir: &str, name: &str, get: impl FnOnce(&mut dyn std::io::Writ
     placed
 }
 
-/// An address on the public internet: not this computer, the user's own network (private, link-local, shared
-/// address space, unique-local), nor a reserved, documentation or multicast range.
-fn public(ip: IpAddr) -> bool {
-    match ip {
-        IpAddr::V4(a) => {
-            let o = a.octets();
-            !(a.is_private()
-                || a.is_loopback()
-                || a.is_link_local()
-                || a.is_unspecified()
-                || a.is_broadcast()
-                || a.is_multicast()
-                || a.is_documentation()
-                || o[0] == 0
-                || o[0] >= 240
-                || (o[0] == 100 && (64..128).contains(&o[1]))
-                || (o[0] == 192 && o[1] == 0 && o[2] == 0)
-                || (o[0] == 198 && (18..20).contains(&o[1])))
-        }
-        IpAddr::V6(a) => {
-            if let Some(v4) = a.to_ipv4_mapped() {
-                return public(IpAddr::V4(v4));
-            }
-            let s = a.segments();
-            // NAT64 (64:ff9b::/96) carries an IPv4 address.
-            if s[..6] == [0x64, 0xff9b, 0, 0, 0, 0] {
-                return public(IpAddr::V4(std::net::Ipv4Addr::new((s[6] >> 8) as u8, s[6] as u8, (s[7] >> 8) as u8, s[7] as u8)));
-            }
-            // Refused whole: IPv4-compatible (::/96) and IPv4-translated (::ffff:0:0/96) forms, 6to4 (2002::/16), Teredo
-            // (2001::/32), local-use NAT64 (64:ff9b:1::/48), discard-only (100::/64), site-local (fec0::/10), besides
-            // loopback, unspecified, multicast, unique-local, link-local and documentation.
-            !(a.is_loopback()
-                || a.is_unspecified()
-                || a.is_multicast()
-                || s[..6] == [0; 6]
-                || s[..6] == [0, 0, 0, 0, 0xffff, 0]
-                || s[0] == 0x2002
-                || (s[0] == 0x2001 && s[1] == 0)
-                || s[..3] == [0x64, 0xff9b, 1]
-                || s[..4] == [0x100, 0, 0, 0]
-                || (s[0] & 0xfe00) == 0xfc00
-                || (s[0] & 0xffc0) == 0xfe80
-                || (s[0] & 0xffc0) == 0xfec0
-                || (s[0] == 0x2001 && s[1] == 0xdb8))
-        }
-    }
-}
-
 /// The host and port of an http(s) address (`[…]` around an IPv6 address taken off).
 fn host_port(url: &str) -> Option<(String, u16, &'static str)> {
     let (scheme, rest) = ["https", "http"].into_iter().find_map(|s| url.get(..s.len() + 3).filter(|p| p.eq_ignore_ascii_case(&format!("{s}://"))).map(|_| (s, &url[s.len() + 3..])))?;
@@ -245,42 +224,6 @@ fn host_port(url: &str) -> Option<(String, u16, &'static str)> {
 /// release build never.
 fn fake_for(host: &str, url: &str) -> Result<Option<String>> {
     test_host(&format!("https://{host}{}", url.split_once("://").and_then(|(_, r)| r.find('/').map(|i| &r[i..])).unwrap_or("")), &[host.to_string()])
-}
-
-/// `f()` on a thread of its own, given up on after `wait` (the thread ends whenever `f` does).
-fn within<T: Send + 'static>(wait: Duration, f: impl FnOnce() -> T + Send + 'static) -> Option<T> {
-    let (tx, rx) = std::sync::mpsc::channel();
-    std::thread::spawn(move || {
-        let _ = tx.send(f());
-    });
-    rx.recv_timeout(wait).ok()
-}
-
-/// The one public address a picture's host is reached at: every address its name has must be public (a name that also
-/// points into the user's network is refused), looked up by `until` (`LOOKUP_SECS` at most). A host written as a
-/// number other than a plain IPv4 or IPv6 address (`2130706433`, `0x7f.1`) is refused, as curl would read it.
-fn public_address(host: &str, port: u16, until: Instant) -> Result<IpAddr> {
-    if let Ok(ip) = host.parse::<IpAddr>() {
-        return if public(ip) { Ok(ip) } else { bail!("{host} is on this computer or your own network") };
-    }
-    let last = host.trim_end_matches('.').rsplit('.').next().unwrap_or("");
-    if last.is_empty() || last.bytes().all(|b| b.is_ascii_digit()) || last.get(..2).is_some_and(|p| p.eq_ignore_ascii_case("0x")) || !host.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-') {
-        bail!("“{host}” isn't a host name Echo reaches");
-    }
-    let wait = until.saturating_duration_since(Instant::now()).min(Duration::from_secs(LOOKUP_SECS));
-    let name = host.to_string();
-    let found = if wait.is_zero() { None } else { within(wait, move || (name.as_str(), port).to_socket_addrs().map(|a| a.map(|a| a.ip()).collect::<Vec<_>>())) };
-    let ips = found.ok_or_else(|| anyhow!("looking up {host} took too long"))?.unwrap_or_default();
-    all_public(host, &ips)
-}
-
-/// The address to reach `host` at, of those its name has: the first, when every one is public. A name that points
-/// into the user's network and one that isn't found are refused in the same words: no name inside it can be told apart.
-fn all_public(host: &str, ips: &[IpAddr]) -> Result<IpAddr> {
-    match ips.first() {
-        Some(ip) if ips.iter().all(|i| public(*i)) => Ok(*ip),
-        _ => bail!("Echo found no public address for {host} (never this computer or your own network)"),
-    }
 }
 
 /// How a picture of a page is reached: as the plugin may reach anything (`http::reach`: its grants, the fake service of a
@@ -316,6 +259,24 @@ fn picture_reach(id: &str, src: &str, page: Option<&(String, u16)>, page_scheme:
     let ip = public_address(&host, port, until)?;
     let ip = if ip.is_ipv6() { format!("[{ip}]") } else { ip.to_string() };
     Ok((Reach { listed: false, fake: None }, Some(format!("{host}:{port}:{ip}"))))
+}
+
+/// `render: true`: the page rendered in a child process (`render::page`), only for a plugin with `uses.network.web` and
+/// only a page on the public internet (`web_reach`: https, ports 80/443, every address public; a page on this
+/// computer or the user's own network is never rendered). The address it ended at, how it was reached, the page.
+fn rendered(id: &str, url: &str, secs: u64) -> Result<(String, Reach, super::render::Rendered)> {
+    if !reads_web(id) {
+        bail!("{id} renders a page only with uses.network.web (reading any page on the public internet), which its sheet doesn't ask for");
+    }
+    let until = Instant::now() + Duration::from_secs(secs);
+    let (reach, _) = web_reach(url, until).map_err(|e| anyhow!("Echo renders only a page on the public internet: {e:#}"))?;
+    // A development build's test: its fake service speaks plain http, so on macOS the child asks for the page that way
+    // (on Windows the child puts the fake behind TLS itself, `web::render::windows::test_tls`).
+    let test = reach.fake.is_some();
+    let ask = if test && cfg!(target_os = "macos") { format!("http://{}", &url[8..]) } else { url.to_string() };
+    let r = super::render::page(id, &ask, test, secs)?;
+    let at = if test { r.url.replacen("http://", "https://", 1) } else { r.url.clone() };
+    Ok((at, reach, r))
 }
 
 /// Whether plugin `id`'s sheet has `uses.network.web`: it reads any https page on the public internet.
@@ -470,6 +431,7 @@ fn save_pictures(id: &str, page_url: &str, page_reach: &Reach, images: &[Image])
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::web::public::all_public;
     use std::io::{Read as _, Write as _};
     use std::sync::atomic::AtomicUsize;
 
@@ -564,6 +526,11 @@ mod tests {
                 };
                 reply("302 Found", &format!("Location: {to}\r\n"), b"")
             }
+            "/js" => reply(
+                "200 OK",
+                "Content-Type: text/html\r\n",
+                b"<html><head><title>Pilot notes</title></head><body><main id=\"m\"></main><script>document.getElementById('m').innerHTML = '<h1>Pilot notes</h1><p>Written by script: the pilot moves to November, three stores first and the rest in two waves after the holidays.</p><a href=\"/plan\">the plan</a>';</script></body></html>",
+            ),
             "/cp1251" => {
                 let mut body = format!("<main><p>{filler}</p><p>").into_bytes();
                 body.extend_from_slice(&[0xcf, 0xf0, 0xe8, 0xe2, 0xe5, 0xf2]);
@@ -634,6 +601,12 @@ mod tests {
         let at = |p: &str| format!("http://127.0.0.1:{port}{p}");
         let read = |url: &str, opts: Value| call("reader", "read", &json!({"url": url, "opts": opts}));
         let refused = |r: Result<Value>| r.unwrap_err().to_string();
+
+        // Rendering a page needs uses.network.web; asked for, nothing is fetched.
+        let asked = seen.paths.lock().unwrap().len();
+        assert!(refused(read(&at("/js"), json!({"render": true}))).contains("only with uses.network.web"));
+        assert!(refused(read(&at("/js"), json!({"render": "yes"}))).contains("render is true or false"));
+        assert_eq!(seen.paths.lock().unwrap().len(), asked);
 
         // Only what ctx.http.fetch may reach, refused before anything is asked.
         let asked = other_seen.conns.load(Ordering::SeqCst);
@@ -826,6 +799,13 @@ mod tests {
         assert_eq!(asked_page(&other_seen), before, "the listed site's page never asked again");
         // ctx.http.fetch isn't widened.
         assert!(refused(call("crawler", "http", &json!({"url": "https://news.acme.example/page"}))).contains("may reach only"));
+        // A rendered page is only a public https one: never this computer, the user's network or a site the user listed.
+        let render = |url: &str| call("crawler", "read", &json!({"url": url, "opts": {"render": true}}));
+        let conns = other_seen.conns.load(Ordering::SeqCst);
+        for url in ["https://127.0.0.1/".to_string(), "https://192.168.1.10/".into(), "https://[::1]/".into(), "https://localhost/".into(), format!("http://127.0.0.1:{other}/page"), "http://news.acme.example/js".into()] {
+            assert!(refused(render(&url)).contains("Echo renders only a page on the public internet"), "{url}");
+        }
+        assert_eq!(other_seen.conns.load(Ordering::SeqCst), conns, "nothing asked");
         drop(_map);
         plugins::remove("crawler", false).unwrap();
     }
@@ -878,39 +858,6 @@ mod tests {
     }
 
     #[test]
-    fn only_public_addresses_are_public() {
-        for ip in ["8.8.8.8", "1.1.1.1", "2606:4700:4700::1111", "::ffff:8.8.8.8", "64:ff9b::808:808"] {
-            assert!(public(ip.parse().unwrap()), "{ip}");
-        }
-        for ip in ["127.0.0.1", "10.1.2.3", "172.16.0.1", "192.168.68.1", "169.254.1.1", "100.64.0.1", "0.0.0.0", "255.255.255.255", "224.0.0.1", "192.0.2.1", "198.18.0.1", "::1", "::", "fc00::1", "fd12::1", "fe80::1", "::ffff:127.0.0.1", "::ffff:192.168.1.1", "64:ff9b::7f00:1", "2001:db8::1"] {
-            assert!(!public(ip.parse().unwrap()), "{ip}");
-        }
-        // IPv6 forms that carry or tunnel to an IPv4 address, and the old site-local range.
-        for ip in ["::127.0.0.1", "::8.8.8.8", "::ffff:0:127.0.0.1", "::ffff:0:8.8.8.8", "2002:7f00:1::1", "2002:808:808::1", "2001::1", "2001:0:4136:e378:8000:63bf:3fff:fdd2", "64:ff9b:1::7f00:1", "64:ff9b:1::808:808", "fec0::1", "feff::1", "100::1"] {
-            assert!(!public(ip.parse().unwrap()), "{ip}");
-        }
-        let soon = || Instant::now() + Duration::from_secs(10);
-        for host in ["2130706433", "0x7f.1", "127.1", "evil.example\\x", "a b"] {
-            assert!(public_address(host, 80, soon()).is_err(), "{host}");
-        }
-        assert!(public_address("127.0.0.1", 80, soon()).unwrap_err().to_string().contains("your own network"));
-        assert!(public_address("localhost", 80, soon()).unwrap_err().to_string().contains("your own network"));
-        // A name looked up only within the time left.
-        assert!(public_address("acme.example", 443, Instant::now()).unwrap_err().to_string().contains("took too long"));
-    }
-
-    #[test]
-    fn a_name_that_takes_too_long_to_look_up_is_given_up_on() {
-        let at = Instant::now();
-        let slow = within(Duration::from_millis(100), || {
-            std::thread::sleep(Duration::from_secs(3));
-            1
-        });
-        assert!(slow.is_none() && at.elapsed() < Duration::from_secs(1), "{:?}", at.elapsed());
-        assert_eq!(within(Duration::from_secs(5), || 2), Some(2));
-    }
-
-    #[test]
     fn a_public_pages_pictures_come_only_from_web_ports_and_never_an_ipv6_literal() {
         let (_env, _root) = paths::testenv::folders("jshost-web-ports");
         let until = Instant::now() + Duration::from_secs(10);
@@ -926,6 +873,44 @@ mod tests {
         assert_eq!(pic("https://8.8.8.8/a.png").unwrap().1.as_deref(), Some("8.8.8.8:443:8.8.8.8"));
         assert_eq!(pic("https://1.1.1.1:8443/a.png").unwrap().1.as_deref(), Some("1.1.1.1:8443:1.1.1.1"), "the page's own host and port");
         assert!(picture_reach("nobody", "https://8.8.8.8/a.png", None, "https", until).err().expect("refused").to_string().contains("your own network"), "a page that isn't public");
+    }
+
+    // A development build's fake stands for the public host; the page renders in this Mac's webview.
+    #[cfg(all(debug_assertions, target_os = "macos"))]
+    #[test]
+    #[ignore = "needs a GUI session (WKWebView): cargo test a_rendered_page_is_read -- --ignored"]
+    fn a_rendered_page_is_read_as_a_browser_shows_it() {
+        let (_env, root) = paths::testenv::folders("jshost-web-render");
+        let (port, _) = site(1);
+        let mk = root.join("market");
+        let d = mk.join("plugins/renderer");
+        std::fs::create_dir_all(&d).unwrap();
+        std::fs::write(d.join("echo-plugin.json"), json!({"id": "renderer", "name": "Renderer", "version": "0.1.0", "main": "main.js", "uses": {"network": {"web": true}}}).to_string()).unwrap();
+        std::fs::write(d.join("main.js"), "export function apply(ctx) {\n  ctx.command('ping', () => 'pong')\n  ctx.command('read', async (a) => await ctx.web.read(a.url, a.opts || {}))\n}\n").unwrap();
+        std::fs::write(mk.join("echo-marketplace.json"), json!({"name": "t", "plugins": [{"id": "renderer", "source": "./plugins/renderer"}]}).to_string()).unwrap();
+        let name = plugins::market_add(mk.to_str().unwrap(), Some("t")).unwrap();
+        plugins::refresh(&name).unwrap();
+        let sheet = plugins::review("renderer", Some(&name)).unwrap().uses;
+        plugins::install("renderer", Some(&name), &sheet).unwrap();
+        sync();
+        let up = (0..50).find_map(|_| call("renderer", "ping", &json!({})).ok().or_else(|| {
+            std::thread::sleep(Duration::from_millis(50));
+            None
+        }));
+        assert_eq!(up, Some(json!("pong")));
+        let _map = EnvHosts::set(&_env, &format!("news.acme.example=http://127.0.0.1:{port}"));
+        let read = |opts: Value| call("renderer", "read", &json!({"url": "https://news.acme.example/js", "opts": opts}));
+        // Fetched, the page is empty: its text comes from its script.
+        let plain = read(json!({})).unwrap();
+        assert!(!plain["markdown"].as_str().unwrap().contains("Written by script"), "{plain}");
+        assert_eq!(plain["rendered"], Value::Null);
+        // Rendered, it reads as a browser shows it.
+        let p = read(json!({"render": true})).unwrap();
+        assert!(p["markdown"].as_str().unwrap().contains("Written by script: the pilot moves to November"), "{p}");
+        assert_eq!((p["rendered"].as_bool(), p["url"].as_str(), p["title"].as_str()), (Some(true), Some("https://news.acme.example/js"), Some("Pilot notes")));
+        assert_eq!(p["links"], json!([{"text": "the plan", "href": "https://news.acme.example/plan"}]));
+        drop(_map);
+        plugins::remove("renderer", false).unwrap();
     }
 
     #[test]

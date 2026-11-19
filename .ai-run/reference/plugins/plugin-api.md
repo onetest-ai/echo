@@ -332,8 +332,9 @@ fetch; in a run Echo started it is allowed or refused as `ctx.http.fetch` is (`n
 prompt, no click needed — queued and background work reads as a command does). Each request is a plain GET: no cookies, no credentials or sign-ins, no headers of the plugin's,
 `User-Agent: Mozilla/5.0 (compatible; Echo)`, `Accept-Encoding: identity`. Evidence: `jshost::web`
 
-- `await ctx.web.read(url, {max, timeout, images})` → `{url, title, markdown, links: [{text, href}], images: [{src, alt,
-  caption, width, height}], lang, byline, published, description, source, needs_js, truncated, bytes}`. `url` is the
+- `await ctx.web.read(url, {max, timeout, images, render})` → `{url, title, markdown, links: [{text, href}], images: [{src, alt,
+  caption, width, height}], lang, byline, published, description, source, needs_js, truncated, bytes}` (and
+  `rendered: true` with `render`: A rendered page, below). `url` is the
   address read: the one asked for (no redirect followed: a page that moved rejects with its 3xx), or with
   `network.web` where its redirects ended (its relative links read against it). HTML only (`text/html`,
   `application/xhtml+xml`; anything else rejects "this is <type>, not a web page"), never compressed (a
@@ -343,7 +344,7 @@ prompt, no click needed — queued and background work reads as a command does).
   - `markdown`: the main part (the largest `<article>`, else `<main>`, else `<body>`) without scripts, styles,
     navigation, headers, footers, asides, forms, frames, objects, SVG or templates; headings, paragraphs, lists, code,
     tables, links and pictures kept. The title (its first `<h1>`, else JSON-LD's headline, else `og:title`, else
-    `<title>`) isn't repeated in it. A page that builds itself with JavaScript is never run: what it embeds — JSON-LD
+    `<title>`) isn't repeated in it. A page that builds itself with JavaScript is never run (but with `render`: A rendered page, below): what it embeds — JSON-LD
     (an article's `articleBody`, `headline`, `author`, `datePublished`, `image`), a framework's JSON state
     (`__NEXT_DATA__`, `__NUXT_DATA__`, `application/json` scripts: its strings that read as prose, HTML in them read as
     HTML), `<noscript>` — is read as data, and its text is taken when clearly fuller than the HTML's (`source`: `html`,
@@ -382,7 +383,8 @@ prompt, no click needed — queued and background work reads as a command does).
     only these pictures, GET only, https (http only for an http page), port 80 or 443 (or the page's own port on the
     page's own host), a host name or an IPv4 address (an IPv6 address written as one refused), and only from a public
     address: Echo looks the host up (10 s at most, within the 2 minutes), refuses it when any of its addresses is this
-    computer or a private, link-local, shared, unique-local, site-local or reserved range, or an IPv6 form that carries
+    computer (loopback, any address of its own interfaces, and the /64 of its own global IPv6 ones; when they can't be
+    listed nothing is reached) or a private, link-local, shared, unique-local, site-local or reserved range, or an IPv6 form that carries
     or tunnels to an IPv4 address (IPv4-compatible and -translated, 6to4, Teredo, local-use NAT64; v4-mapped and NAT64
     only to a public IPv4), an address written as a number other than plain IPv4 or IPv6 refused too, and connects to
     the address it checked, never through a proxy. A page on the user's own network or this computer gets only pictures the plugin
@@ -408,13 +410,89 @@ again, else as a public https page); once any of them was a public page, only as
 `network.hosts` host or an address the user listed. The size and time caps are the whole read's: no redirect is
 followed past its time. A name that points into this computer or the user's network and one that isn't found are
 refused in the same words ("Echo found no public address for <host> (never this computer or your own network)"), so
-no name inside it can be probed. Rejected, with why: plain http ("… over plain http: Echo reads a page on the
+no name inside it can be probed. "Public" means outside the private, shared and reserved ranges and this computer's own
+addresses: a company network that uses public addresses, or a VPN whose DNS points names at hosts inside it, can still
+be reached that way — Echo can't tell them from the internet. Rejected, with why: plain http ("… over plain http: Echo reads a page on the
 public internet only over https"), another port ("… on port <n>: … only on ports 80 and 443"), this computer or the
 user's network ("<plugin> reads only pages on the public internet and the addresses it may reach: <host> is on this
 computer or your own network"), a redirect to any of these ("the page moved to <address>, which Echo doesn't read: …")
 or to what isn't a web address, a 6th ("the page moved more than 5 times: Echo follows 5 redirects at most"). Nothing
 else changes: GET only, no cookies, credentials or headers of the plugin's, the same User-Agent and caps, HTML only
 for `read`. Evidence: `jshost::web::web_reach`, `jshost::web::get_page`
+
+**A rendered page** (`ctx.web.read(url, {render: true})`, only with `uses.network.web`; macOS; #835): the page as a
+browser shows it, its JavaScript run, then its DOM read exactly as `read` reads any page (the same Markdown, links,
+pictures, escaping and limits; `rendered: true`; `bytes` the DOM's HTML; `images: 'save'` as for a public page).
+- **Which pages:** only a public https page, checked as The public web checks one (`web_reach`). A page the plugin
+  reaches through its other grants, plain http, another port, this computer or the user's network is refused before
+  anything is asked ("Echo renders only a page on the public internet: …"). Without `network.web`: "<plugin> renders
+  a page only with uses.network.web (reading any page on the public internet), which its sheet doesn't ask for".
+  `render` other than true or false: "render is true or false".
+- **Where it runs:** a hidden WKWebView (on Windows WebView2, below) in a child process of Echo (`echoctl render-page`, no window or Dock icon),
+  apart from Echo's window, its IPC and the plugin's `ctx`. The child has no stdin and an environment of only `HOME`,
+  `TMPDIR`, `USER`, `LOGNAME`, `LANG` and a plain `PATH`. It runs in its own process group, stopped whole past its time.
+  It registers no IPC, custom scheme or devtools; only the DOM's HTML and the address the page ended at come back.
+- **Its network:** every connection goes through Echo's gate (`web::gate`), an HTTP CONNECT proxy on 127.0.0.1 alive
+  for that render only:
+  - it answers only the render's own token, and only CONNECT, to port 443;
+  - every address of the name must be public and none of this computer's own (looked up again on each connection),
+    and it connects to the address it checked;
+  - an IPv6 address written as one is refused, as is any other request (403).
+
+  The proxy never fails over to a direct connection. Network.framework sends this computer's own addresses around any
+  proxy, so a content rule list blocks every address written as one that is on this computer or the user's network,
+  as well as this computer's own interface addresses, `localhost`, `.local` and single-label names, and `file:`; and
+  every media load (`<video>`, `<audio>`, HLS: AVFoundation may fetch with its own network stack). The script run at
+  document start in every frame:
+  - removes WebRTC (WebKit's own setting switches it off too), WebTransport, notifications and workers (dedicated,
+    shared, service), each left unwritable so no frame gets one back;
+  - lets no event from the page reach a link (`a`, `area`, SVG `a`, wherever it is held: `dispatchEvent` of any
+    event to it is refused, and `click`, `auxclick` and `DOMActivate` on one cancelled): WebKit connects to a link's
+    host when it is activated, before the rule list applies;
+  - reads the DOM only through getters and methods it took before the page ran, its own hooks unchangeable, so a page
+    that redefines `localName`, `preventDefault`, `composedPath` and the like gets around nothing.
+- **Nothing kept:** the store is new and in memory (cookies, storage, cache and service workers last only for that
+  render).
+- **Denied:** downloads, popups, permissions (camera, microphone, location, notifications). Frames go only to http(s)
+  and `about:` addresses (a `data:` or `blob:` frame isn't loaded).
+- **Caps:**
+  - 30 s (`timeout` less), the child stopped soon after, the page's WebContent process with it (only once its id is
+    checked to still be a WebContent process); a killed render's
+    temporary rule-list folder is removed by the next render;
+  - settled at the page's `load` plus 1 s with no new connection, or 15 s after `load` (the DOM is read anyway 2 s
+    before the end);
+  - 5 moves of the main frame;
+  - 250,000 elements (counted before the DOM is serialized: "the page has <n> elements…"), 5 MB of HTML (`max` less:
+    `truncated`);
+  - 64 connections (16 at once), 32 hosts, 25 MB through the gate;
+  - one render per plugin and two in all, per process ("<plugin> is already rendering a page: one at a time").
+- **Windows:** the same render in a hidden WebView2 (no window or taskbar button), the same gate, caps and script at
+  document start. Where it differs:
+  - the child's environment is the system's folders (`SystemRoot`, `windir`, `SystemDrive`, `ProgramFiles*`,
+    `ProgramData`), `TEMP`/`TMP`, `USERPROFILE`, `LOCALAPPDATA`, `APPDATA` and a `PATH` of the system folders only;
+    it is started in a job (suspended until it is in) and joins a job of its own, so every process WebView2 starts
+    is ended with the render, at its time or when it is killed;
+  - the browser's switches: the gate as its only proxy, loopback included (`--proxy-bypass-list=<-loopback>`); no name
+    looked up by the browser itself, prefetched or not (`--host-resolver-rules="MAP * ~NOTFOUND , EXCLUDE 127.0.0.1"`:
+    the gate looks names up); WebRTC
+    sends no UDP it doesn't proxy (`--force-webrtc-ip-handling-policy=disable_non_proxied_udp`); no QUIC; no
+    background traffic, component updates, pings or SmartScreen;
+  - the token answers the gate's 407 (`BasicAuthenticationRequested`) only when the challenge names that render's
+    own realm (`Basic realm="echo-<random>"`, `Gate::challenge`); any other challenge, a site's own 401, is cancelled;
+  - instead of a rule list, a request filter sees every request of every frame and worker
+    (`WebResourceRequested`, every source kind): only https to a name, or to a public address none of this
+    computer's, goes on; media, `localhost`, `.local` and single-label names are refused (403). WebSockets don't go
+    through the filter; they reach only the gate. The main frame goes only where the filter lets a request go, or to
+    `about:`;
+  - nothing kept: a new profile folder per render (`%TEMP%\echo-render-<pid>`), InPrivate, removed when the render
+    ends (by the host too, should the child be killed; one left by a killed host is removed by the next render);
+  - denied as well: script dialogs, web messages, devtools, the context menu, password and form autofill; a download
+    is cancelled before it starts and a popup handled with no window;
+  - its stats add `filter`: `{requests, refused, examples}` (the first 32 distinct refusals).
+- **The page's words are untrusted data**, as any page's. Its own requests to public hosts are allowed, and it sees
+  the user's public IP.
+
+Evidence: `jshost::web::rendered`, `jshost::render::page`, `web::render`, `web::gate`
 
 What comes back is the page's: untrusted data. A plugin shows it only through `ctx.markdown` (raw HTML as text, its
 links and pictures only as that allows: § Host half) — never as HTML of its own, never in a prompt as instructions.
