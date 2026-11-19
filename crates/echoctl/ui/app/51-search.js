@@ -52,12 +52,16 @@ function sxDropWords(q, words) {
   const at = words ? q.toLowerCase().indexOf(words.toLowerCase()) : -1
   return (at < 0 ? q : q.slice(0, at) + q.slice(at + words.length)).replace(/\s+/g, ' ').trim()
 }
-/** `text` as HTML: every word looked for (whole, any case) in <mark>; everything through `esc`. */
+/** Text as the index compares it (the search's `fold`): lower case, a Latin letter's accents dropped (café = cafe);
+ *  another script's letters kept whole (й stays й). */
+const sxFold = (s) => String(s).normalize('NFD').replace(/(\p{Script=Latin})[̀-ͯ᪰-᫿᷀-᷿⃐-⃿︠-︯]+/gu, '$1').normalize('NFC').toLowerCase()
+/** `text` as HTML: every word looked for (whole, any case, with or without accents) in <mark>, as it was written;
+ *  everything through `esc`. */
 function sxMark(text, words, esc) {
-  const want = new Set((words || []).map((w) => String(w).toLowerCase()))
+  const want = new Set((words || []).map(sxFold))
   if (!want.size) return esc(text)
   // Words marked next to each other ("SSO cutover") are one mark.
-  return String(text ?? '').split(/([\p{L}\p{N}]+)/u).map((part, i) => (i % 2 && want.has(part.toLowerCase()) ? `<mark>${esc(part)}</mark>` : esc(part))).join('').replace(/<\/mark>( +)<mark>/g, '$1')
+  return String(text ?? '').split(/([\p{L}\p{N}\p{M}]+)/u).map((part, i) => (i % 2 && want.has(sxFold(part)) ? `<mark>${esc(part)}</mark>` : esc(part))).join('').replace(/<\/mark>( +)<mark>/g, '$1')
 }
 /** The sources shown open: those the user opened or closed (`toggled`: source → open), else all of two or fewer, else the first. */
 function sxOpen(sources, toggled) {

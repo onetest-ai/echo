@@ -13,7 +13,7 @@ tray = ["dep:tray-icon", "dep:tao", "dep:wry", "dep:portable-pty", "dep:objc2-we
 transcribe = ["dep:whisper-rs", "dep:ureq", "dep:libloading"]
 # The Brain: cross-call intelligence over a SQLite store (FTS5). SQLite is C, so cross-checks from macOS to
 # Windows run without it (--no-default-features), as without whisper.cpp.
-brain = ["dep:rusqlite", "dep:zip", "dep:quick-xml", "dep:calamine", "dep:pdfium-render"]
+brain = ["dep:rusqlite", "dep:zip", "dep:quick-xml", "dep:calamine", "dep:pdfium-render", "dep:icu_normalizer"]
 # Plugins' host halves in JavaScript (QuickJS), with their WebSocket and pinned TLS to the addresses the user listed.
 js = ["dep:rquickjs", "dep:tungstenite", "dep:rustls", "dep:rustls-platform-verifier", "dep:webpki", "dep:encoding_rs"]
 # Windows / Linux: whisper.cpp on the GPU through Vulkan (NVIDIA, AMD, Intel). Building needs the
@@ -40,6 +40,8 @@ ctrlc = { version = "3", features = ["termination"] }
 sha2 = "0.10"
 # The Brain's store (`brain/`): SQLite with FTS5, compiled in (no system library).
 rusqlite = { version = "0.37", features = ["bundled"], optional = true }
+# The window's search folds a Latin letter's accents as the store's tokenizer does (already built for URLs' hosts).
+icu_normalizer = { version = "2.3", default-features = false, features = ["compiled_data"], optional = true }
 # Transcription server client (`remote.rs`): http or https (rustls; the OS's certificate store, so
 # company TLS proxies work).
 ureq = { version = "3.4", default-features = false, features = ["rustls", "platform-verifier"], optional = true }
