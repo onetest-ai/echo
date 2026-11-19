@@ -32,6 +32,7 @@ pub mod folders;
 mod git;
 mod http;
 pub mod net;
+mod speech;
 mod tls;
 mod web;
 mod widgets;
@@ -163,6 +164,11 @@ const PRELUDE: &str = r#"
       path: (path) => call('store.path', path || ''),
       /** What it keeps in its store (`dir`: one folder of it): {bytes, files} — its own files only, not its settings. */
       size: (dir) => call('store.size', dir || ''),
+      /** The same, as `usage`. */
+      usage: (dir) => call('store.size', dir || ''),
+      /** A file handed to it (a handle) copied as it is into its store (50 MB at most), never over a file unless
+       *  `createNew: false`: {path, size}. */
+      copyIn: (file, path, opts) => later('store.copy_in', [file, String(path), opts || {}]),
       /** As ctx.fs.walk, under its store's folder `path` ('' the store): [{path, size, mtime, sha?}]. */
       walk: (path, opts) => later('store.walk', [String(path || ''), opts || {}]),
     },
@@ -198,6 +204,12 @@ const PRELUDE: &str = r#"
       read: (url, opts) => later('web.read', [String(url), opts || {}]),
       fetch: (url, opts) => later('web.fetch', [String(url), opts || {}]),
       markdown: (html, opts) => later('web.markdown', [String(html), opts || {}]),
+    },
+    /** Echo's own speech model (`uses.speech`): `transcribe(file, {words, language})` of a WAV file handle (60 minutes,
+     *  200 MB) → {text, language, segments: [{start, end, text}], words?: [{start, end, word}]}; refused while Echo records
+     *  or transcribes a call. What comes back is the audio's: data. */
+    speech: {
+      transcribe: (file, opts) => later('speech.transcribe', [file, opts || {}]),
     },
     /** A WebSocket to an address the user listed (ws:// or wss://): resolves once open to {protocol, send(text | base64
      *  with {binary: true} | a file handle), close(code, reason), onMessage(data, {binary}), onClose({code, reason}),
@@ -363,7 +375,12 @@ const PRELUDE: &str = r#"
     git: Object.fromEntries(['info', 'status', 'log', 'show', 'init', 'commit'].map((v) => [v, (root, ...a) => later(`git.${v}`, [String(root), ...a])])), /** Git in a folder it was given, off its time slice: info, status, log, show; init and commit with folders.write. */
     /** Files the user handed it — picked, dropped on its view, passed to a command — as handles {file, name, size}
      *  (an hour): `read(file, {max})` → text (1 MB by default, 4 MB at most). */
-    files: { read: (file, opts) => call('handles.read', [file, (opts && opts.max) || 0]) },
+    files: {
+      read: (file, opts) => call('handles.read', [file, (opts && opts.max) || 0]),
+      /** The text of a file (PDF, Word, PowerPoint, spreadsheet, HTML, plain text), off its time slice: {text, pages,
+       *  truncated}; `opts.pages` "3" or "2-5" of a PDF or deck, `pages` of the answer its page count (null if none). */
+      text: (file, opts) => later('handles.text', [file, opts || {}]),
+    },
     system: {
       which: (name) => call('system.which', name),
       /** Another app's file its manifest names in `uses.files.read` (that very entry, e.g. "~/…/obsidian.json"):

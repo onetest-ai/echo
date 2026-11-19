@@ -35,7 +35,19 @@ pub(super) const CAPABILITIES: &[Capability] = &[
     Capability { id: "m365", ready: true, describe: describe_m365 },
     Capability { id: "me", ready: true, describe: describe_me },
     Capability { id: "skills", ready: true, describe: describe_skills },
+    Capability { id: "speech", ready: true, describe: describe_speech },
 ];
+
+/// The sheet's line for `uses.speech` (`ctx.speech.transcribe`, `jshost::speech`).
+pub const SPEECH_LINE: &str = "Transcribes audio files you hand it (WAV, up to 60 minutes and 200 MB) with Echo's own speech model, on this computer, or on the transcription server you connected; it starts only while Echo is not recording or transcribing a call. The text goes only to the plugin";
+
+/// `uses.speech: true`: its host half transcribes the files it was handed.
+pub(super) fn describe_speech(v: &Value) -> Result<String> {
+    if *v != Value::Bool(true) {
+        bail!("“speech” is true");
+    }
+    Ok(SPEECH_LINE.into())
+}
 
 /// The sheet's line for `uses.me` (`ctx.me`, `share::about_me`).
 pub const ME_LINE: &str = "Reads your About me in Echo (Settings → About me): your name and role, the people and terms of your calls, how you like things written and how you work";
@@ -649,6 +661,17 @@ mod tests {
         assert!(not_ready(uses.as_object().unwrap()).is_empty(), "this Echo has it");
         for bad in [serde_json::json!(true), serde_json::json!({"kinds": ["style"]}), serde_json::json!("yes")] {
             assert!(describe_me(&bad).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn a_plugin_asks_for_speech_as_true_and_the_sheet_says_where_it_runs_and_when_not() {
+        let uses = serde_json::json!({"speech": true});
+        assert_eq!(describe(uses.as_object().unwrap()).unwrap(), vec![SPEECH_LINE.to_string()]);
+        assert!(SPEECH_LINE.contains("on this computer") && SPEECH_LINE.contains("transcription server you connected") && SPEECH_LINE.contains("starts only while Echo is not recording or transcribing a call"));
+        assert!(not_ready(uses.as_object().unwrap()).is_empty(), "this Echo has it");
+        for bad in [serde_json::json!({}), serde_json::json!(false), serde_json::json!("yes")] {
+            assert!(describe_speech(&bad).is_err(), "{bad}");
         }
     }
 

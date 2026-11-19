@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use anyhow::{anyhow, bail, Result};
-use serde_json::Value;
+use serde_json::{json, Value};
 
 use super::*;
 use crate::paths;
@@ -98,7 +98,102 @@ pub fn window_sources() -> Vec<String> {
 /// A setting's value (secrets included), for the capabilities (`jshost`: only with `js`).
 #[cfg_attr(not(feature = "js"), allow(dead_code))]
 pub fn setting(id: &str, key: &str) -> Option<Value> {
-    read_map(&addresses_file(id)).remove(key).or_else(|| read_map(&secrets_file(id)).remove(key)).or_else(|| read_map(&data_dir(id).join("settings.json")).remove(key))
+    read_map(&addresses_file(id)).remove(key).or_else(|| read_map(&secrets_file(id)).remove(key)).or_else(|| read_map(&data_dir(id).join("settings.json")).remove(key)).or_else(|| default_of(id, key))
+}
+
+/// What the manifest gives a setting nobody set: its `default`, but never for a secret or an address the plugin may
+/// reach (only the user enters those).
+#[cfg_attr(not(feature = "js"), allow(dead_code))]
+fn default_of(id: &str, key: &str) -> Option<Value> {
+    let m = installed_manifest(id).ok()?;
+    let d = m.settings.iter().find(|s| s.key == key && s.kind != "secret")?;
+    if address_settings(&m.uses).iter().any(|k| k == key) {
+        return None;
+    }
+    d.default.clone()
+}
+
+/// The command a settings page's "Test connection" runs in the plugin's host half, with `{section}` (what the page is
+/// testing). The host half reads its secrets itself (`ctx.settings.get`) and may answer `true`, a message, or
+/// `{ok, message}`; the window half is given only `{ok, message}`: a message of 300 characters at most, free text,
+/// with the user's secrets (and their usual encodings) and the query strings of URLs taken out of it. That guards
+/// against accidents only: the host half is the plugin's own code, trusted with the secrets.
+pub const TEST_SETTINGS: &str = "__testSettings";
+
+/// What a missing command says (the host half's prelude).
+fn no_test_command() -> String {
+    format!("no command “{TEST_SETTINGS}”")
+}
+
+fn percent_encode(s: &str) -> String {
+    s.bytes().map(|b| if b.is_ascii_alphanumeric() || b"-_.~".contains(&b) { (b as char).to_string() } else { format!("%{b:02X}") }).collect()
+}
+
+/// `text` without the user's secrets: each as it is, URL-encoded, JSON-escaped, and in base64 (alone, and as the
+/// password of `:secret` / `*:secret`), longest first so a secret holding another is taken out whole.
+fn mask_secrets(id: &str, text: &str) -> String {
+    use base64::engine::general_purpose::{STANDARD, STANDARD_NO_PAD, URL_SAFE, URL_SAFE_NO_PAD};
+    use base64::Engine;
+    let mut forms: Vec<String> = vec![];
+    for secret in read_map(&secrets_file(id)).values().filter_map(Value::as_str).filter(|v| v.chars().count() >= 3) {
+        forms.push(secret.to_string());
+        forms.push(percent_encode(secret));
+        forms.push(serde_json::to_string(secret).unwrap_or_default().trim_matches('"').to_string());
+        for plain in [secret.to_string(), format!(":{secret}"), format!("*:{secret}")] {
+            for e in [STANDARD.encode(&plain), STANDARD_NO_PAD.encode(&plain), URL_SAFE.encode(&plain), URL_SAFE_NO_PAD.encode(&plain)] {
+                forms.push(e);
+            }
+        }
+    }
+    forms.retain(|f| f.chars().count() >= 3);
+    forms.sort_by_key(|f| std::cmp::Reverse(f.len()));
+    forms.dedup();
+    forms.iter().fold(text.to_string(), |t, f| t.replace(f.as_str(), "••••"))
+}
+
+/// Each URL in `text` (`scheme://…` up to a space or quote) without its query string and fragment.
+fn strip_queries(text: &str) -> String {
+    let mut out = String::new();
+    let mut rest = text;
+    while let Some(i) = rest.find("://") {
+        let (head, tail) = rest.split_at(i + 3);
+        out.push_str(head);
+        let end = tail.find(|c: char| c.is_whitespace() || "\"'<>)]}".contains(c)).unwrap_or(tail.len());
+        let (url, after) = tail.split_at(end);
+        out.push_str(url.split(['?', '#']).next().unwrap_or(""));
+        rest = after;
+    }
+    out.push_str(rest);
+    out
+}
+
+/// The answer the window half gets for a plugin's `__testSettings` (or why it failed): `{ok, message}`.
+#[cfg_attr(not(feature = "tray"), allow(dead_code))]
+pub fn test_answer(id: &str, outcome: Result<Value>) -> Value {
+    let (ok, message) = match outcome {
+        Ok(v) => match &v {
+            Value::Bool(b) => (*b, String::new()),
+            Value::String(t) => (true, t.clone()),
+            _ => (v["ok"].as_bool().unwrap_or(false), v["message"].as_str().unwrap_or("").to_string()),
+        },
+        Err(e) => {
+            let e = format!("{e:#}");
+            (false, if e == no_test_command() { "this plugin has no connection test".to_string() } else { e })
+        }
+    };
+    let message = strip_queries(&mask_secrets(id, &message));
+    json!({"ok": ok, "message": message.chars().take(300).collect::<String>()})
+}
+
+/// What a plugin's command run from Echo's own places (an Inbox item's button) tells the user: why it failed, if it did.
+/// A connection test's words are masked as the window's route gives them (`test_answer`).
+#[cfg_attr(not(feature = "tray"), allow(dead_code))]
+pub fn call_notice(id: &str, command: &str, ran: Result<Value>) -> Option<String> {
+    if command == TEST_SETTINGS {
+        let a = test_answer(id, ran);
+        return (a["ok"] != true).then(|| a["message"].as_str().unwrap_or_default().to_string());
+    }
+    ran.err().map(|e| format!("{e:#}"))
 }
 
 /// When the user last said no to a plugin's addresses from the window: for a minute after, the page's requests for it

@@ -15,7 +15,23 @@ both, this after the rules. Where this and Echo's code differ, the code wins: fi
 - `main` and `client` point at a `.js`/`.mjs` inside the plugin folder; any other file it ships is read with
   `ctx.package.read(path)` / `ctx.package.list(dir)`. Evidence: `jshost::package_file`
 - A setting is `{key, label, type, default?, help?}`: `key` unique (a–z 0–9 `-` `_`), `type` `string` (default), `bool`,
-  `folder` or `secret`; read with `ctx.settings.get(key)`. Evidence: `plugins::set_setting`
+  `folder` or `secret`; read with `ctx.settings.get(key)`, which gives what the user set, else the setting's `default`,
+  else `null` — never a default for a `secret` or an address list the plugin may reach (only the user enters those).
+  Before this, an unset setting gave `null` even when the manifest had a `default`: a plugin that wrote `get(key) ?? fallback`
+  now gets the manifest's default where it got its fallback, so the two may differ.
+  Evidence: `plugins::set_setting`, `plugins::setting`
+- A settings page's "Test connection": the plugin's host half registers `ctx.command('__testSettings', async ({section}) => …)`
+  and reads what it needs itself (`ctx.settings.get('token')`, secrets included); its answer is `true`, a message
+  (ok), or `{ok, message}`. Its window half runs it with `ctx.call('__testSettings', {section})` and is given only
+  `{ok, message}` — whatever else the host half answered is dropped, `message` is cut at 300 characters, and in it each
+  value the user keeps as a secret (3 characters or more) is replaced by `••••` — as it is, URL-encoded, JSON-escaped,
+  and in base64 (of the secret, of `:secret` and of `*:secret`), longest first — and every URL loses its query string and
+  fragment. A host half that throws gives `{ok: false, message}` (its own words, masked); a plugin that has no such
+  command gives "this plugin has no connection test". The same masking applies when the command runs from an Inbox
+  item's button (`plugin_call`: a failed test's notice). The `message` is free text for the user: it must not echo
+  request details (headers, bodies, URLs with keys). The masking guards against accidents only: the host half is the
+  plugin's own code, trusted with the secrets, and can leak one through any channel it has. Evidence: `plugins::test_answer`,
+  `plugins::call_notice`
 - A plugin and a marketplace tree hold plain files only (no links or special files): 400 files / 20 MB a plugin,
   5000 / 64 MB a marketplace. Evidence: `plugins::check_tree`
 - `echoctl plugin check <folder>` runs an install's checks of the package (manifest, `uses`, widgets, dashboards, skills,
@@ -54,6 +70,7 @@ as U+FFFD, and Echo logs it. Evidence: `capabilities::make_sheet_safe`, `plugins
 | `m365.read` | `mail`, `chats`: the user's Microsoft 365 it reads through Echo's sign-in, never sending (§ Microsoft 365) |
 | `me` | `{}` (nothing else): its host half reads About me through `ctx.me` (§ Echo's data, About me). The sheet: "Reads your About me in Echo (Settings → About me): your name and role, the people and terms of your calls, how you like things written and how you work". Evidence: `capabilities::describe_me` |
 | `skills` | `true` (nothing else): its window half adds skills to the user's own Claude Code, each on a click (§ Client half: `ctx.claude.installSkill`); the sheet: "Adds instructions for Claude Code (skills) to your own Claude Code (~/.claude/skills), each only when you click to add it: skills that run commands are refused, never over a skill that is there already, changing or removing only the skills it added — they go when you remove the plugin" — on its own: it doesn't let the plugin run Claude Code (that is `claude`) |
+| `speech` | `true` (nothing else): its host half transcribes the files it was handed with `ctx.speech.transcribe` (§ Speech). The sheet: "Transcribes audio files you hand it (WAV, up to 60 minutes and 200 MB) with Echo's own speech model, on this computer, or on the transcription server you connected; it starts only while Echo is not recording or transcribing a call. The text goes only to the plugin". Evidence: `capabilities::describe_speech` |
 | `signin.hosts` | 1–4 plain host names, each once, no IP addresses: the hosts whose sign-in saved on this computer it gets (§ Sign-in) |
 | `signin.keep` | `true`: Echo keeps a sign-in it makes itself for those hosts, its own (§ Sign-in) |
 | `work` | `{}`: its items on My work and in threads' Work (§ Work rows) |
@@ -180,6 +197,12 @@ Evidence: `plugins::EVENTS`, `plugins::as_heard`, `share::minutes_payload`, `sha
   `ctx.widgets.set` / `clear` and `ctx.threads.set`; `work.json` is what `ctx.work.provide` answered. The same for
   `client-values.json` (write and remove), changed through `ctx.clients.set`.
   Evidence: `jshost::not_echos`, `jshost::inbox_file`, `jshost::widgets_file`
+- `ctx.store.usage(dir?)` (the same as `ctx.store.size`) → `{bytes, files}`: what the plugin keeps in its store, or in
+  its folder `dir`; its own files only (not `settings.json`). `ctx.cache.size()` is that of `cache/`. Evidence: `jshost::service`
+- `await ctx.store.copyIn(file, path, {createNew})` → `{path, size}`: a file handed to it (a handle: `ctx.system.pickFiles`,
+  `ctx.web.fetch`, a saved picture, `--file`) kept as it is in its store, 50 MB at most, as `ctx.store.write` writes
+  (store paths only, never Echo's own files there, never over a file unless `createNew: false`, the default is `true`),
+  off the time slice. Evidence: `jshost::files::copy_in_store`
 - `await ctx.store.walk(path, {ext, hidden, max, sha})` → `[{path, size, mtime, sha?}]`: as `ctx.fs.walk`, under the
   store's folder `path` (`""` the store) — its paths relative to the store (what `ctx.store.read` takes), off the
   time slice, 20,000 rows by default and 100,000 at most, dot names only with `hidden`, no link followed and nothing
@@ -565,6 +588,33 @@ name for the user, as `echo.read('me')`) when `identity` is asked, else `null`, 
 another hash, an edit to read again. No event: read it when it is needed. `echo.read('me')` stays the way to name and
 mail the user; `ctx.me` is the one to read what they wrote about themselves. Evidence: `share::about_me`
 
+## Speech
+
+`await ctx.speech.transcribe(file, {words, language})` (`uses.speech`, the host half only) → `{text, language, segments:
+[{start, end, text}], words?: [{start, end, word}]}`: the speech in a WAV file the user handed the plugin, in seconds from
+the start of the audio. `file` is a handle or its id, checked as `ctx.files.read` checks it (§ Folders and files: another
+plugin's handle, a path or an id past its hour is refused as a file that isn't there); the file is opened once, as a regular
+file, and read from that one handle. It runs on Echo's own speech model, the one Settings names for the language
+(`transcribe::final_transcriber`: on this computer, or on the transcription server the user connected, as a call is), and off
+the plugin's 5 s slice (`service_async`); from a window half's `ctx.call` (30 s) a long file times out while the decode goes on.
+- `language`: an ISO code Echo transcribes in (`"en"`, `"uk"`, …), else the first of Settings' languages (a call's default); one
+  Echo doesn't know is refused. The answer's `language` is the one asked for; Echo decodes with the downloaded model best at
+  it, or the active model when there is none (which may decode another language).
+- `words: true` adds `words` — each word of `text` with its times — only when the engine timed every sentence's words;
+  without it, or when a sentence's times were lost (the engine gave none, or cleaning its text changed the word count, as on
+  a long file), there is no `words` key. Whisper (every Whisper model) and NVIDIA's Parakeet and Nemotron give word times; a
+  transcription server gives them only when its engine does.
+- Refused, with a message the plugin can show: a file that is not a WAV (PCM or float, 8 to 32 bits, 100 Hz to 384 kHz), over
+  60 minutes (read from its header, before anything is decoded), over 200 MB, or more than an hour of 48 kHz mono in raw
+  samples (what decoding holds in memory); while Echo records (a call or a memo) or any call is being transcribed
+  (`.transcribing` with a live process) — it does not queue, the plugin asks again; while a file is being transcribed in this
+  process (any plugin's, the same plugin's too); no speech model downloaded (and no server) — `echoctl model download …`.
+  Checked when it starts: a recording that begins during a long file does not stop it.
+- Nothing leaves the computer unless the user connected a transcription server (`echoctl server use`); then the audio goes
+  to it as a call's does, and falls back to this computer's model when it can't be reached. The text is the file's: data,
+  shown only through `ctx.markdown`.
+Evidence: `jshost::speech::transcribe`
+
 ## Microsoft 365
 
 Under `uses.m365.read` (`mail`, `chats`), through Echo's own Microsoft 365 sign-in — no sign-in of the plugin's, no
@@ -660,6 +710,16 @@ No line on the sheet: handing a file over is the user's own act. Evidence: `jsho
   `apply`, a timer's or an event handler's own call, or a widget's or work rows' provider. File names come from the user's disk: untrusted text, put into the page only
   through `ctx.ui.esc`. Evidence: `app::choose_files`, `cli::plugin::file_handles`
 - `ctx.files.read(file, {max})` → its text (1 MB by default, 4 MB at most); `file` a handle or its id.
+- `await ctx.files.text(file, {pages, max})` → `{text, pages, truncated}`: the text of a PDF, Word, PowerPoint or
+  spreadsheet file, HTML, Markdown or plain text (a file of another name when its first 8 KB hold no NUL), read by Echo's
+  own readers: no model, no network. The file is read in a child process of Echo (`echoctl files-text`), killed after
+  60 s, so a reader that hangs or crashes never reaches Echo; one extraction at a time for a plugin, two in all (another
+  is refused with why). `pages` (a whole number `3` or a range `"2-5"` / `"7-"`, 1-based) picks pages of a PDF or deck;
+  a file without pages, a malformed or negative number, or a range starting past the last page is refused; in the answer
+  `pages` is the file's page count, `null` for a file without pages. `truncated` when `max` bytes of text (1 MB by
+  default, 4 MB at most) cut the text. Refused: a file over 50 MB, an Office file that unpacks to over 200 MB or holds
+  over 5000 parts, an old `.xls`, a file without text, an HTML page with almost none (a script-drawn page), a PDF where
+  PDFium isn't installed. Needs nothing on the sheet. Evidence: `jshost::files::text`, `jshost::files::child_main`
 - `await ctx.fs.copyIn(file, root, path, {createNew})` → `{path, size}`: its bytes as they are (50 MB at most) into a folder
   it was given, with `folders.write`, as `ctx.fs.write` (never through a link, never a hidden file but those above); never over a file there — unless `createNew: false` (the default is `true`). Evidence:
   `jshost::files::copy_in`
