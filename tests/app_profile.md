@@ -29,7 +29,9 @@ tool gets them **absolute**, the repo root in front (Read, Glob, Grep, Write, Ed
    installs, quits or restarts the real Echo app, except the clean-install runs (S-15, S-16: "Clean-install runs"
    below), which install the release on a Mac where Echo has never been.
 3. **Every `echoctl` command runs with the run's data folder**: `. <dir>/env` first (it sets `ECHOCTL_HOME` and
-   `ECHOCTL_CONFIG_DIR` and unsets Claude Code's session variables). A command without it would touch the real data.
+   `ECHOCTL_CONFIG_DIR` and unsets Claude Code's session variables). Without it, the debug build refuses (exit 2,
+   naming the missing variable) instead of touching the real data (`.ai-run/reference/development/dev-workflow.md`,
+   A dev build under Claude Code).
 4. **Steps are the window (Playwright MCP) or the CLI (Bash).** The runner may use Bash only for `echoctl` with the
    run's env, reading files in the run's data folder, and `tests/fixtures/*`. No other scripts, no edits to the repo.
    `tests/fixtures/*` includes `recordings.py` (copies of the calls recorded once per build), `call.py` (a file-fed

@@ -50,6 +50,15 @@ An agent's worktree builds with `CARGO_TARGET_DIR=<worktree>/target`; `serve.sh`
   `target/debug/echoctl app start`: `app::spawn_app` opens the installed bundle only when the running binary is inside
   one, so a dev build starts itself, with the folders of its environment. Stop it with `echoctl app quit`.
 
+## A dev build under Claude Code
+
+- A debug build (`target/debug/echoctl`) started from Claude Code (`CLAUDECODE` set, as in every Bash tool call) needs
+  both `ECHOCTL_CONFIG_DIR` and `ECHOCTL_HOME`; without either it exits with code 2 before it reads or writes a folder,
+  and names the missing variable (`paths::refuse_real_folders`).
+- Load the env first: `set -a; . <dir>/env; set +a` (served test data's `env` also unsets `CLAUDECODE`).
+- Not affected: a release build (`scripts/build-plugin.sh` builds one for `claude --plugin-dir plugin`), a dev build in
+  your own terminal, `cargo test`'s unit tests (compiled out of them; integration tests running the binary set both).
+
 ## Debugging
 
 - Permissions: `echoctl doctor` (`--probe`, `--request`, `--open <pane>`, `--json`) while the app runs
