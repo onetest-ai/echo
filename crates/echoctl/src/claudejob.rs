@@ -190,6 +190,12 @@ pub struct Spec {
     pub folder: Option<InFolder>,
     /// A plugin's run under a key of its own (`ctx.claude.run({key})`): its files (`Keyed::base`), for `stop_keyed`.
     pub key: Option<PathBuf>,
+    /// Pictures given to the run (`ctx.claude.run({images})`): Claude's image content blocks, sent with the prompt as one
+    /// stream-json message on stdin.
+    pub images: Vec<Value>,
+    /// A plugin's conversation (`ctx.claude.run({resume})`): its record (`Talk::file`), the Claude Code session it
+    /// continues.
+    pub resume: Option<PathBuf>,
 }
 
 impl Spec {
@@ -228,6 +234,8 @@ impl Spec {
             yolo: false,
             folder: None,
             key: None,
+            images: vec![],
+            resume: None,
         })
     }
 }
@@ -398,6 +406,70 @@ fn key_started(base: &Path, pid: u32) {
     }
 }
 
+/// A plugin's conversation (`ctx.claude.run({resume})`), held while one of its runs goes on: one run at a time per
+/// plugin and conversation, across processes. Its record, `c-<key>.json` beside the plugin's keys' files, keeps the
+/// Claude Code session it continues and the profile and folder it runs on — never another plugin's.
+pub struct Talk {
+    pub file: PathBuf,
+    _lock: crate::app::FileLock,
+}
+
+impl Talk {
+    /// Plugin `plugin`'s conversation `key` (a run key's characters); refused while one of its runs goes on.
+    pub fn take(plugin: &str, key: &str) -> Result<Talk> {
+        check_key(key).map_err(|_| anyhow!("a conversation (resume) is 1 to {KEY_MAX} letters, digits, “.”, “_” or “-”"))?;
+        let file = paths::state_dir().join("plugins").join(".runs").join(plugin).join(format!("c-{}.json", key.to_ascii_lowercase()));
+        fs::create_dir_all(file.parent().unwrap_or(&file))?;
+        let Some(lock) = crate::app::FileLock::try_take(&file.with_extension("busy"))? else {
+            bail!("a run in conversation “{key}” is going on already: wait for it");
+        };
+        Ok(Talk { file, _lock: lock })
+    }
+}
+
+/// `ctx.claude.forget(resume)`: the plugin's conversation forgotten, its next run under it starting a new one. False
+/// when there was none; refused while a run of it goes on.
+pub fn forget_talk(plugin: &str, key: &str) -> Result<bool> {
+    let t = Talk::take(plugin, key)?;
+    let had = t.file.is_file();
+    if had {
+        fs::remove_file(&t.file)?;
+    }
+    Ok(had)
+}
+
+/// A session id as Claude Code gives it (a UUID): only such a one goes back to `--resume`.
+fn session_ok(s: &str) -> bool {
+    !s.is_empty() && s.len() <= 64 && !s.starts_with('-') && s.bytes().all(|b| b.is_ascii_hexdigit() || b == b'-')
+}
+
+/// The most pictures a run takes (`ctx.claude.run({images})`), and the largest one.
+pub const IMAGES_MAX: usize = 10;
+pub const IMAGE_BYTES: u64 = 5 << 20;
+
+/// A picture's bytes as Claude's image content block: PNG, JPEG, GIF or WebP by their first bytes, anything else refused.
+pub fn image_block(bytes: &[u8], name: &str) -> Result<Value> {
+    use base64::Engine as _;
+    let kind = if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+        "image/png"
+    } else if bytes.starts_with(&[0xff, 0xd8, 0xff]) {
+        "image/jpeg"
+    } else if bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a") {
+        "image/gif"
+    } else if bytes.len() >= 12 && bytes.starts_with(b"RIFF") && &bytes[8..12] == b"WEBP" {
+        "image/webp"
+    } else {
+        bail!("“{name}” isn't a PNG, JPEG, GIF or WebP picture");
+    };
+    Ok(serde_json::json!({"type": "image", "source": {"type": "base64", "media_type": kind, "data": base64::engine::general_purpose::STANDARD.encode(bytes)}}))
+}
+
+/// A piece of Claude's own answer (not a subagent's) in a stream event (`--include-partial-messages`).
+fn text_delta(ev: &Value) -> Option<&str> {
+    let e = &ev["event"];
+    (ev["type"] == "stream_event" && ev["parent_tool_use_id"].is_null() && e["type"] == "content_block_delta" && e["delta"]["type"] == "text_delta").then(|| e["delta"]["text"].as_str()).flatten()
+}
+
 /// What Echo tells the run around the plugin's prompt: `tools` — a routine's or Yolo's run as the folder session,
 /// acting on its own; else no tools at all.
 fn preamble(tools: bool, cli: &str) -> String {
@@ -445,6 +517,12 @@ pub fn usage(result: &Value) -> Value {
 /// what it cost (`usage`). The changes and sends it made with Echo's CLI are in `<run dir>/actions.jsonl`
 /// (`notes::run_actions`).
 pub fn run(spec: &Spec) -> Result<(String, String, Value)> {
+    run_with(spec, None)
+}
+
+/// `run`, each piece of Claude's answer handed to `on_text` as it comes (`ctx.claude.run({onText})`): Claude Code's
+/// partial messages (`--include-partial-messages`). The answer at the end is the same.
+pub fn run_with(spec: &Spec, mut on_text: Option<&mut dyn FnMut(&str)>) -> Result<(String, String, Value)> {
     fs::create_dir_all(&spec.run_dir)?;
     let mut log = fs::File::create(spec.run_dir.join("log.txt"))?;
     let profile_id = if spec.profile.is_empty() { crate::ai::default_id() } else { spec.profile.clone() };
@@ -460,6 +538,15 @@ pub fn run(spec: &Spec) -> Result<(String, String, Value)> {
         None if spec.session || profile.kind.managed() => home.clone(),
         None => crate::ai::system_folder()?,
     };
+    // A conversation it continues (`resume`): on the profile and in the folder it began in, never moved to another.
+    let talk: Value = spec.resume.as_ref().and_then(|f| fs::read(f).ok()).and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or(Value::Null);
+    if let Some(p) = talk["profile"].as_str().filter(|p| *p != profile.id) {
+        bail!("this conversation is on the AI profile “{p}”, not {}: run it there, or forget it (ctx.claude.forget) to begin a new one", profile.name);
+    }
+    if talk["cwd"].as_str().is_some_and(|c| Path::new(c) != cwd) {
+        bail!("this conversation is in another folder: run it there, or forget it (ctx.claude.forget) to begin a new one");
+    }
+    let session = talk["session"].as_str().filter(|s| session_ok(s)).map(str::to_owned);
     let clis = notes::run_clis(&plugin);
     // The launcher by its full path, told which Echo to run (`ECHOCTL_BIN`, below): this one — `echoctl` on
     // PATH may be another version.
@@ -500,8 +587,27 @@ pub fn run(spec: &Spec) -> Result<(String, String, Value)> {
     let _ = fs::remove_file(&actions);
     let _ = fs::write(spec.run_dir.join("permissions.json"), serde_json::json!({"asked": asked_for, "used": used}).to_string());
     let _ = writeln!(log, "{}  Echo runs “{}” on {}{} (asked: {asked_for}; runs with {used})", Local::now().format("%H:%M:%S"), spec.title, profile.name, model.as_deref().map(|m| format!(", model {m}")).unwrap_or_default());
+    if !spec.images.is_empty() || session.is_some() {
+        let _ = writeln!(log, "{}  with {} picture(s){}", Local::now().format("%H:%M:%S"), spec.images.len(), session.as_deref().map(|s| format!(", continuing session {s}")).unwrap_or_default());
+    }
     let exe = std::env::current_exe().context("Echo's own program can't be found")?;
-    let mut a: Vec<String> = vec!["-p".into(), prompt, "--output-format".into(), "stream-json".into(), "--verbose".into()];
+    // With pictures the prompt goes with them as one stream-json message on stdin (`message`), else after `-p`.
+    let message = (!spec.images.is_empty()).then(|| {
+        let mut content = spec.images.clone();
+        content.push(serde_json::json!({"type": "text", "text": prompt}));
+        format!("{}\n", serde_json::json!({"type": "user", "message": {"role": "user", "content": content}}))
+    });
+    let mut a: Vec<String> = match &message {
+        Some(_) => ["-p", "--input-format", "stream-json"].map(String::from).to_vec(),
+        None => vec!["-p".into(), prompt],
+    };
+    a.extend(["--output-format".into(), "stream-json".into(), "--verbose".into()]);
+    if on_text.is_some() {
+        a.push("--include-partial-messages".into());
+    }
+    if let Some(s) = &session {
+        a.extend(["--resume".into(), s.clone()]);
+    }
     let (settings_file, env) = match (in_dir, acts) {
         // A folder run: the folder's own project, nothing of Echo's session.
         (Some((f, m, _)), _) => {
@@ -526,13 +632,17 @@ pub fn run(spec: &Spec) -> Result<(String, String, Value)> {
             (None, vec![])
         }
     };
+    // A conversation is kept by Claude Code, to be continued.
+    if spec.resume.is_some() {
+        a.retain(|x| x != "--no-session-persistence");
+    }
     // The permission mode it asks Claude Code for: checked against the one it starts in.
     let asked = (acts.is_some() || spec.folder.is_some()).then(|| asked_mode(&a));
     let child = crate::ai::guard_ready(profile, &cwd, "run a plugin's job").and_then(|()| notes::admit_child(|| {
         if spec.key.as_deref().is_some_and(key_stopped) {
             bail!("stopped");
         }
-        let mut c = crate::ai::prepare_claude(profile, &a, &cwd, false)?;
+        let mut c = crate::ai::prepare_claude(profile, &a, &cwd, message.is_some())?;
         c.env("ECHOCTL_BIN", &exe);
         // A mail the run writes (`echoctl compose`) is noted here, for its outcome (`drafts::of_run`).
         c.env(crate::drafts::RUN_DRAFTS, spec.run_dir.join("drafts.jsonl"));
@@ -550,7 +660,18 @@ pub fn run(spec: &Spec) -> Result<(String, String, Value)> {
     if let (Ok(c), Some(k)) = (&child, &spec.key) {
         key_started(k, c.id());
     }
-    let out = child.and_then(|c| finish(c, &mut log, &spec.run_dir, spec.timeout, asked));
+    // Its message on stdin, then stdin closed; written aside, as the run's output is read meanwhile.
+    let mut writer = None;
+    let child = child.map(|mut c| {
+        if let (Some(line), Some(mut i)) = (message, c.stdin.take()) {
+            writer = Some(std::thread::spawn(move || drop(i.write_all(line.as_bytes()))));
+        }
+        c
+    });
+    let out = child.and_then(|c| finish(c, &mut log, &spec.run_dir, spec.timeout, asked, &mut |t| if let Some(f) = on_text.as_mut() { f(t) }));
+    if let Some(w) = writer {
+        let _ = w.join();
+    }
     // Its process reaped: its number may be another's soon (Windows reuses them), so no stop reads it any more.
     if let Some(k) = &spec.key {
         let _ = fs::remove_file(key_file(k, "pid"));
@@ -576,6 +697,10 @@ pub fn run(spec: &Spec) -> Result<(String, String, Value)> {
     }
     let (answer, result) = out?;
     let _ = fs::write(spec.run_dir.join("answer.md"), &answer);
+    // The conversation's session, for its next run: the one Claude Code answered in, on this profile and in this folder.
+    if let (Some(f), Some(s)) = (&spec.resume, result["session_id"].as_str().filter(|s| session_ok(s))) {
+        let _ = paths::write_atomic(f, serde_json::json!({"session": s, "profile": profile.id, "cwd": cwd}).to_string().as_bytes());
+    }
     Ok((answer, model.unwrap_or_default(), usage(&result)))
 }
 
@@ -604,9 +729,16 @@ fn mode_differs(asked: &str, init: &Value) -> Option<String> {
 
 /// The run to its end (`projectsync::finish_run_watched`), its start checked against the permission mode Echo asked
 /// for (`asked`; None: a run with no tools): when it started in another, its log and its record (`permissions.json`,
-/// `mode`) say so.
-fn finish(child: std::process::Child, log: &mut fs::File, run_dir: &Path, timeout: Duration, asked: Option<&str>) -> Result<(String, Value)> {
-    let mut on_init = |init: &Value, log: &mut fs::File| {
+/// `mode`) say so. Each piece of Claude's answer streamed goes to `on_text`.
+fn finish(child: std::process::Child, log: &mut fs::File, run_dir: &Path, timeout: Duration, asked: Option<&str>, on_text: &mut dyn FnMut(&str)) -> Result<(String, Value)> {
+    let mut on_event = |ev: &Value, log: &mut fs::File| {
+        if let Some(t) = text_delta(ev) {
+            on_text(t);
+        }
+        if !(ev["type"] == "system" && ev["subtype"] == "init") {
+            return;
+        }
+        let init = ev;
         let Some(why) = asked.and_then(|a| mode_differs(a, init)) else { return };
         let _ = writeln!(log, "{}  {why}", Local::now().format("%H:%M:%S"));
         let record = run_dir.join("permissions.json");
@@ -614,7 +746,7 @@ fn finish(child: std::process::Child, log: &mut fs::File, run_dir: &Path, timeou
         r["mode"] = Value::String(why);
         let _ = fs::write(&record, r.to_string());
     };
-    crate::projectsync::finish_run_watched(child, log, timeout, "run a plugin's job", "Echo quit during the run", &mut on_init)
+    crate::projectsync::finish_run_watched(child, log, timeout, "run a plugin's job", "Echo quit during the run", &mut on_event)
 }
 
 #[cfg(test)]
@@ -724,7 +856,7 @@ mod tests {
         let _fake = crate::ai::fake::install(&root);
         let p = crate::ai::fake::profile("work", None, &crate::ai::fake::signed_in("pat@example.com"));
         set_permissions(Permissions::Skip, Some(Permissions::Skip), Some(Permissions::Skip));
-        let wont = Spec { title: "Won't do: x".into(), prompt: "Who is it for?".into(), profile: "work".into(), model: String::new(), tools: Tools::None, run_dir: root.join("wont/1"), timeout: Duration::from_secs(60), session: false, task: None, thread: None, yolo: false, folder: None, key: None };
+        let wont = Spec { title: "Won't do: x".into(), prompt: "Who is it for?".into(), profile: "work".into(), model: String::new(), tools: Tools::None, run_dir: root.join("wont/1"), timeout: Duration::from_secs(60), session: false, task: None, thread: None, yolo: false, folder: None, key: None, images: vec![], resume: None };
         let _ = run(&wont);
         let args: Vec<String> = fs::read_to_string(crate::ai::fake::file(&p, "p.args")).unwrap().split('\0').map(str::to_owned).collect();
         assert!(args.windows(2).any(|w| w[0] == "--tools" && w[1].is_empty()), "{args:?}");
@@ -759,7 +891,7 @@ mod tests {
         let routine = || routine_asking("");
         let yolo = || {
             n.set(n.get() + 1);
-            let s = Spec { title: "Yolo: x".into(), prompt: "Do it".into(), profile: "work".into(), model: String::new(), tools: Tools::Setting, run_dir: root.join(format!("yolo/{}", n.get())), timeout: Duration::from_secs(60), session: true, task: Some("acme/T001".into()), thread: Some("acme".into()), yolo: true, folder: None, key: None };
+            let s = Spec { title: "Yolo: x".into(), prompt: "Do it".into(), profile: "work".into(), model: String::new(), tools: Tools::Setting, run_dir: root.join(format!("yolo/{}", n.get())), timeout: Duration::from_secs(60), session: true, task: Some("acme/T001".into()), thread: Some("acme".into()), yolo: true, folder: None, key: None, images: vec![], resume: None };
             let _ = run(&s);
             started(&s.run_dir)
         };
@@ -804,7 +936,7 @@ mod tests {
             fs::write(crate::ai::fake::file(&p, "p.reply"), format!("{init}\n{result}\n")).unwrap();
             let child = crate::ai::prepare_claude(&p, &["-p".into(), "x".into()], &root, false).unwrap().spawn().unwrap();
             let mut log = fs::File::create(dir.join("log.txt")).unwrap();
-            let (answer, _) = finish(child, &mut log, &dir, Duration::from_secs(30), asked).unwrap();
+            let (answer, _) = finish(child, &mut log, &dir, Duration::from_secs(30), asked, &mut |_| {}).unwrap();
             let record: Value = serde_json::from_str(&fs::read_to_string(dir.join("permissions.json")).unwrap()).unwrap();
             (answer, fs::read_to_string(dir.join("log.txt")).unwrap(), record)
         };
@@ -871,6 +1003,8 @@ mod tests {
             yolo: false,
             folder: Some(InFolder { cwd: vault.clone(), mode }),
             key: None,
+            images: vec![],
+            resume: None,
         };
         let record = |dir: &str| serde_json::from_str::<Value>(&fs::read_to_string(root.join("store/runs").join(dir).join("permissions.json")).unwrap()).unwrap();
         // Routines on Auto (the default), whatever the folder session's setting: every mode in the folder, its own
@@ -1034,5 +1168,115 @@ mod tests {
         assert!(at.elapsed() < Duration::from_secs(2), "the gate waited for the stop's kill: {:?}", at.elapsed());
         assert!(stopping.join().unwrap());
         let _ = child.wait();
+    }
+
+    /// The smallest PNG's first bytes, enough to be taken for one.
+    const PNG: &[u8] = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR";
+
+    #[test]
+    #[cfg(unix)]
+    fn a_run_with_no_tools_gets_its_pictures_with_the_prompt_as_one_stream_json_message_on_stdin() {
+        let (_env, root) = crate::paths::testenv::folders("claudejob-images");
+        let _fake = crate::ai::fake::install(&root);
+        let p = crate::ai::fake::profile("work", None, &crate::ai::fake::signed_in("pat@example.com"));
+        let result = serde_json::json!({"type": "result", "result": "A red square", "is_error": false});
+        fs::write(crate::ai::fake::file(&p, "p.reply"), result.to_string()).unwrap();
+        let mut spec = Spec::from_value(&serde_json::json!({"prompt": "What is in the picture?", "tools": "none", "profile": "work", "dir": "runs/i1"}), &root.join("store")).unwrap();
+        spec.images = vec![image_block(PNG, "red.png").unwrap(), image_block(b"\xff\xd8\xff\xe0 jfif", "b.jpg").unwrap()];
+        let (answer, _, _) = run(&spec).unwrap();
+        assert_eq!(answer, "A red square");
+        let args: Vec<String> = fs::read_to_string(crate::ai::fake::file(&p, "p.args")).unwrap().split('\0').map(str::to_owned).collect();
+        assert_eq!(args[..3], ["-p", "--input-format", "stream-json"], "no prompt on the command line: {args:?}");
+        assert!(args.windows(2).any(|w| w[0] == "--tools" && w[1].is_empty()) && !args.iter().any(|a| a.contains("What is in")), "{args:?}");
+        // One message: the pictures, then Echo's preamble and the plugin's prompt.
+        let turns = fs::read_to_string(crate::ai::fake::file(&p, "p.turns")).unwrap();
+        assert_eq!(turns.lines().count(), 1, "{turns}");
+        let m: Value = serde_json::from_str(turns.lines().next().unwrap()).unwrap();
+        let c = m["message"]["content"].as_array().unwrap();
+        assert_eq!((m["type"].as_str(), c.len()), (Some("user"), 3));
+        assert_eq!((c[0]["source"]["media_type"].as_str(), c[1]["source"]["media_type"].as_str()), (Some("image/png"), Some("image/jpeg")));
+        use base64::Engine as _;
+        assert_eq!(base64::engine::general_purpose::STANDARD.decode(c[0]["source"]["data"].as_str().unwrap()).unwrap(), PNG);
+        assert!(c[2]["type"] == "text" && c[2]["text"].as_str().unwrap().ends_with("What is in the picture?") && c[2]["text"].as_str().unwrap().contains("You have no tools"));
+        assert!(fs::read_to_string(root.join("store/runs/i1/log.txt")).unwrap().contains("with 2 picture(s)"));
+        // GIF and WebP too; anything else refused.
+        assert_eq!(image_block(b"GIF89a....", "a.gif").unwrap()["source"]["media_type"], "image/gif");
+        assert_eq!(image_block(b"RIFF\0\0\0\0WEBPVP8 ", "a.webp").unwrap()["source"]["media_type"], "image/webp");
+        assert!(image_block(b"%PDF-1.4", "a.pdf").unwrap_err().to_string().contains("isn't a PNG, JPEG, GIF or WebP"));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn a_streamed_run_hands_over_claudes_own_text_as_it_comes_and_answers_the_same() {
+        let (_env, root) = crate::paths::testenv::folders("claudejob-stream");
+        let _fake = crate::ai::fake::install(&root);
+        let p = crate::ai::fake::profile("work", None, &crate::ai::fake::signed_in("pat@example.com"));
+        let delta = |t: &str, parent: Value| serde_json::json!({"type": "stream_event", "parent_tool_use_id": parent, "event": {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": t}}});
+        let lines = [
+            delta("Hello ", Value::Null),
+            serde_json::json!({"type": "stream_event", "parent_tool_use_id": null, "event": {"type": "content_block_delta", "index": 1, "delta": {"type": "input_json_delta", "partial_json": "{"}}}),
+            delta("a subagent's", "toolu_1".into()),
+            delta("world", Value::Null),
+            serde_json::json!({"type": "result", "result": "Hello world", "is_error": false}),
+        ];
+        fs::write(crate::ai::fake::file(&p, "p.result"), lines.iter().map(|l| format!("{l}\n")).collect::<String>()).unwrap();
+        let spec = Spec::from_value(&serde_json::json!({"prompt": "Say hello", "tools": "none", "profile": "work", "dir": "runs/s1"}), &root.join("store")).unwrap();
+        let mut got = vec![];
+        let (answer, _, _) = run_with(&spec, Some(&mut |t: &str| got.push(t.to_string()))).unwrap();
+        assert_eq!((answer.as_str(), got), ("Hello world", vec!["Hello ".to_string(), "world".to_string()]));
+        assert!(fs::read_to_string(crate::ai::fake::file(&p, "p.args")).unwrap().split('\0').any(|a| a == "--include-partial-messages"));
+        // Not streamed: no partial messages asked.
+        let _ = run(&spec);
+        assert!(!fs::read_to_string(crate::ai::fake::file(&p, "p.args")).unwrap().split('\0').any(|a| a == "--include-partial-messages"));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn a_conversation_continues_its_session_on_its_own_profile_one_run_at_a_time_until_forgotten() {
+        let (_env, root) = crate::paths::testenv::folders("claudejob-resume");
+        let _fake = crate::ai::fake::install(&root);
+        let p = crate::ai::fake::profile("work", None, &crate::ai::fake::signed_in("pat@example.com"));
+        let home = crate::ai::fake::profile("home", None, &crate::ai::fake::signed_in("pat@example.com"));
+        let session = "5fa9ec63-6e9d-48b0-ba0f-8ddd18c3b0b9";
+        for q in [&p, &home] {
+            fs::write(crate::ai::fake::file(q, "p.result"), format!("{}\n", serde_json::json!({"type": "result", "result": "ok", "is_error": false, "session_id": session}))).unwrap();
+        }
+        let args = || fs::read_to_string(crate::ai::fake::file(&p, "p.args")).unwrap().split('\0').map(str::to_owned).collect::<Vec<String>>();
+        let turn = |plugin: &str, profile: &str| {
+            let t = Talk::take(plugin, "Practice")?;
+            let mut s = Spec::from_value(&serde_json::json!({"prompt": "Next turn", "tools": "none", "profile": profile}), &root.join("store"))?;
+            s.resume = Some(t.file.clone());
+            run(&s)
+        };
+        // The first run begins it: kept by Claude Code (no --no-session-persistence), nothing to resume yet.
+        turn("speaker", "work").unwrap();
+        let a = args();
+        assert!(!a.iter().any(|x| x == "--resume" || x == "--no-session-persistence"), "{a:?}");
+        // The next continues the session Claude Code answered in; the key's case doesn't matter.
+        turn("speaker", "work").unwrap();
+        assert!(args().windows(2).any(|w| w[0] == "--resume" && w[1] == session), "{:?}", args());
+        assert!(Talk::take("speaker", "practice").is_ok());
+        // Never on another profile.
+        let e = turn("speaker", "home").unwrap_err().to_string();
+        assert!(e.contains("this conversation is on the AI profile “work”") && e.contains("ctx.claude.forget"), "{e}");
+        // Another plugin's conversation of the same name is its own: it begins anew.
+        turn("other", "home").unwrap();
+        // One run at a time in a conversation.
+        let held = Talk::take("speaker", "practice").unwrap();
+        assert!(Talk::take("speaker", "Practice").err().unwrap().to_string().contains("is going on already"));
+        assert!(forget_talk("speaker", "practice").is_err(), "not forgotten while a run goes on");
+        drop(held);
+        // Forgotten: the next run begins a new one, on any profile.
+        assert!(forget_talk("speaker", "practice").unwrap());
+        assert!(!forget_talk("speaker", "practice").unwrap(), "none left");
+        turn("speaker", "work").unwrap();
+        assert!(!args().iter().any(|x| x == "--resume"));
+        // A key Echo can't take; a session id that isn't one is never passed on.
+        assert!(Talk::take("speaker", "../x").err().unwrap().to_string().contains("a conversation (resume) is 1 to 64"));
+        let t = Talk::take("speaker", "practice").unwrap();
+        fs::write(&t.file, r#"{"session": "--dangerously-skip-permissions", "profile": "work"}"#).unwrap();
+        drop(t);
+        turn("speaker", "work").unwrap();
+        assert!(!args().iter().any(|x| x == "--resume" || x == "--dangerously-skip-permissions"), "{:?}", args());
     }
 }

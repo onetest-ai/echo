@@ -280,7 +280,17 @@ const PRELUDE: &str = r#"
       run: (skill, script, args, opts) => later('scripts.run', [String(skill), String(script), (args || []).map(String), opts || {}]),
     },
     claude: {
-      run: (opts) => later('claude.run', opts),
+      /** opts.onText(chunk): Claude's answer piece by piece as it comes; the result is the same. */
+      run: (opts) => {
+        const o = Object.assign({}, opts || {}), onText = o.onText
+        delete o.onText
+        if (typeof onText !== 'function') return later('claude.run', o)
+        const n = o.stream = call('claude.stream')
+        conns[n] = (ev) => Promise.resolve().then(() => onText(ev.text)).catch((e) => call('log', ['error', `claude.run onText: ${(e && e.message) || e}`]))
+        return later('claude.run', o).finally(() => { delete conns[n] })
+      },
+      /** Its conversation `resume` forgotten: its next run begins a new one; true, or false when there was none. */
+      forget: (resume) => later('claude.forget', String(resume)),
       /** Its run under `key` (run's `key`) stopped: true, or false when none was running; that run fails "stopped". */
       stop: (key) => later('claude.stop', String(key)),
       /** Is a Claude Code plugin ("name@marketplace") installed for an AI profile ('' = the default)? Only its channel's. */
@@ -1248,6 +1258,8 @@ fn service(id: &str, op: &str, arg: &Value) -> Result<Value> {
             let set = crate::ai::Settings::load()?;
             json!({"default": set.default_id(), "profiles": set.all().into_iter().map(|p| json!({"id": p.id, "name": p.name})).collect::<Vec<_>>()})
         }
+        // A number for a run's streamed answer (`ctx.claude.run({onText})`), its pieces delivered as a connection's events.
+        "claude.stream" => json!(NEXT.fetch_add(1, Ordering::Relaxed)),
         "deliver.status" => crate::deliver::status(),
         "deliver.provide" => {
             let kind = s(&arg["kind"]);

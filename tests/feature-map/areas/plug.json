@@ -942,6 +942,15 @@
    "priority": "high",
    "check": "agent",
    "axes": []
+  },
+  {
+   "id": "F-PLUG-139",
+   "feature": "A plugin's Claude run (`ctx.claude.run`) takes pictures it holds (`images: [handle]`: PNG, JPEG, GIF or WebP by their bytes, 10 at most, 5 MB each, each the plugin's own handle) with its prompt as one stream-json message on stdin, with `tools: 'none'` too; streams Claude's answer as it comes (`onText(chunk)`, the result the same); and continues a conversation (`resume`, a run key's characters): its next run resumes the Claude Code session Echo keeps for that plugin and conversation, refused on another AI profile or folder than it began on, one run at a time; `await ctx.claude.forget(resume)` → true (false when there was none) and the next run begins a new one. A file that isn't such a picture, one over 5 MB, more than 10, or another plugin's handle is refused before Claude Code starts",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "plugin.uses"
+   ]
   }
  ]
 }

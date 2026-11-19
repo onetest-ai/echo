@@ -37,6 +37,10 @@ as the code it describes. The rules are in `.ai-run/guides/plugins/echo-plugins.
   "the run's key is busy: try again". Removing the plugin stops its runs under a key (waiting 10 s at most for each
   to end; a gate still busy counts as running); the locks go with its data. Evidence: `claudejob::Keyed`,
   `claudejob::stop_keyed`, `claudejob::stop_keyed_runs`, `claudejob::forget_keys`
+- A plugin's conversation (`ctx.claude.run({resume})`) keeps `.runs/<id>/c-<resume in lower case>.json` — `{session,
+  profile, cwd}`, written (atomically) after each run that ends with a session id — and holds `c-<resume>.busy` while
+  a run of it goes on or `ctx.claude.forget` removes the record (taken without waiting: refused while held). Both go
+  with its data. Evidence: `claudejob::Talk`, `claudejob::forget_talk`
 - Echo keeps the plugin's `settings.json`, `inbox.json`, `widgets.json`, `threads.json`, `client-values.json` and
   `work.json` there; `threads.json`, `client-values.json` and `work.json` each change under its own lock across
   processes (`.locks/<id>.threads.lock`, `.locks/<id>.clients.lock`, `.locks/<id>.work.lock`); a `threads.json` or

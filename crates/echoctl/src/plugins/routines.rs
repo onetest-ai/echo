@@ -419,6 +419,8 @@ pub fn run(id: &str) -> Result<Value> {
         yolo: false,
         folder: None,
         key: None,
+        images: vec![],
+        resume: None,
     };
     let out = crate::claudejob::run(&spec);
     if let Err(e) = &out {

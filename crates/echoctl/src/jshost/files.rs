@@ -75,6 +75,31 @@ pub(super) fn read(plugin: &str, file: &Value, max: Option<u64>) -> Result<Value
     Ok(json!(String::from_utf8_lossy(&buf)))
 }
 
+/// `ctx.claude.run({images})`: the pictures behind its handles, each checked as `read` checks one, as Claude's image
+/// blocks — 10 at most, each a PNG, JPEG, GIF or WebP of 5 MB at most.
+pub(super) fn images(plugin: &str, list: &Value) -> Result<Vec<Value>> {
+    let list = match list {
+        Value::Null => return Ok(vec![]),
+        Value::Array(l) => l,
+        _ => bail!("a run's images are a list of file handles"),
+    };
+    if list.len() > crate::claudejob::IMAGES_MAX {
+        bail!("a run takes {} pictures at most, not {}", crate::claudejob::IMAGES_MAX, list.len());
+    }
+    list.iter()
+        .map(|f| {
+            let (path, h) = own(plugin, f)?;
+            let name = h["name"].as_str().unwrap_or("").to_string();
+            let mut buf = vec![];
+            crate::grants::open_regular(&path)?.take(crate::claudejob::IMAGE_BYTES + 1).read_to_end(&mut buf)?;
+            if buf.len() as u64 > crate::claudejob::IMAGE_BYTES {
+                bail!("“{name}” is over 5 MB: a run takes pictures up to 5 MB");
+            }
+            crate::claudejob::image_block(&buf, &name)
+        })
+        .collect()
+}
+
 /// `ctx.fs.copyIn(file, root, rel, {createNew})`: the file's bytes, as they are, into `rel` of a folder the plugin was
 /// given (`uses.folders.write`, `grants::writable`: never through a link). Never over a file there unless
 /// `createNew: false` asked for it. Written whole into a hidden file of its own beside it first (made new: a link
@@ -174,6 +199,12 @@ mod tests {
               ctx.system.pickFiles('x').then(() => { atStart = 'picked' }, (e) => { atStart = e.message })
               ctx.widgets.provide('w', () => { ctx.system.pickFiles('x').then(() => { inWidget = 'picked' }, (e) => { inWidget = e.message }); return { value: 1 } })
               ctx.command('unasked', () => ({ atStart, inWidget }))
+              ctx.command('talk', async (a, { files }) => {
+                const got = []
+                const r = await ctx.claude.run({ prompt: a.prompt, tools: 'none', profile: 'work', images: files, resume: a.resume, onText: (t) => got.push(t), dir: 'runs/talk' })
+                return { answer: r.answer, got }
+              })
+              ctx.command('forget', (a) => ctx.claude.forget(a.resume))
             }
         "#;
         std::fs::write(d.join("echo-plugin.json"), json!({"id": id, "name": id, "version": "0.1.0", "main": "main.js", "uses": uses}).to_string()).unwrap();
@@ -193,6 +224,63 @@ mod tests {
             }
         }
         Err("never loaded".into())
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn a_plugins_run_gets_the_pictures_it_holds_streams_its_answer_and_continues_its_conversation() {
+        let (_env, root) = paths::testenv::folders("jshost-claude-images");
+        let _fake = crate::ai::fake::install(&root);
+        let p = crate::ai::fake::profile("work", None, &crate::ai::fake::signed_in("pat@example.com"));
+        install(&root, "talker", json!({"claude": {}}));
+        install(&root, "other", json!({}));
+        sync();
+        let session = "5fa9ec63-6e9d-48b0-ba0f-8ddd18c3b0b9";
+        let delta = |t: &str| json!({"type": "stream_event", "parent_tool_use_id": null, "session_id": session, "event": {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": t}}});
+        let reply = [delta("A red "), delta("square."), json!({"type": "result", "result": "A red square.", "is_error": false, "session_id": session})];
+        // Its lines after its message on stdin (no reply of its own to it), or at once without pictures.
+        std::fs::write(crate::ai::fake::file(&p, "p.reply"), "").unwrap();
+        std::fs::write(crate::ai::fake::file(&p, "p.result"), format!("{}\n", reply.iter().map(|l| l.to_string()).collect::<Vec<_>>().join("\n"))).unwrap();
+        let pic = |name: &str, bytes: &[u8]| {
+            std::fs::write(root.join(name), bytes).unwrap();
+            make("talker", &root.join(name)).unwrap()
+        };
+        let png = pic("red.png", b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR");
+        let gif = pic("dot.gif", b"GIF89a\x01\0\x01\0");
+        // Its pictures with the prompt, its answer piece by piece and whole, its conversation begun.
+        let out = run("talker", "talk", json!({"prompt": "What is it?", "resume": "lesson-1"}), &[png.clone(), gif.clone()]).unwrap();
+        assert_eq!(out, json!({"answer": "A red square.", "got": ["A red ", "square."]}));
+        let turn: Value = serde_json::from_str(std::fs::read_to_string(crate::ai::fake::file(&p, "p.turns")).unwrap().lines().last().unwrap()).unwrap();
+        let kinds: Vec<&str> = turn["message"]["content"].as_array().unwrap().iter().map(|c| c["source"]["media_type"].as_str().unwrap_or("text")).collect();
+        assert_eq!(kinds, ["image/png", "image/gif", "text"]);
+        let args = || std::fs::read_to_string(crate::ai::fake::file(&p, "p.args")).unwrap().split('\0').map(str::to_owned).collect::<Vec<String>>();
+        assert!(!args().contains(&"--resume".to_string()) && args().contains(&"--include-partial-messages".to_string()));
+        // Its next turn continues that session; with no pictures, the prompt after `-p` as before.
+        run("talker", "talk", json!({"prompt": "And now?", "resume": "lesson-1"}), &[]).unwrap();
+        let a = args();
+        assert!(a.windows(2).any(|w| w[0] == "--resume" && w[1] == session) && a[1] != "--input-format", "{a:?}");
+        // Forgotten: true once, then false; the next turn begins anew.
+        assert_eq!(run("talker", "forget", json!({"resume": "lesson-1"}), &[]).unwrap(), json!(true));
+        assert_eq!(run("talker", "forget", json!({"resume": "lesson-1"}), &[]).unwrap(), json!(false));
+        run("talker", "talk", json!({"prompt": "Again", "resume": "lesson-1"}), &[]).unwrap();
+        assert!(!args().contains(&"--resume".to_string()));
+        assert!(run("talker", "talk", json!({"prompt": "x", "resume": "a b"}), &[]).unwrap_err().contains("a conversation (resume) is 1 to 64"));
+        // Refused before Claude Code starts: over 10 pictures, one over 5 MB, one that isn't a picture, another's handle.
+        let runs = || std::fs::read_to_string(crate::ai::fake::file(&p, "p.turns")).unwrap().lines().count();
+        let before = runs();
+        let eleven = vec![png.clone(); 11];
+        assert!(run("talker", "talk", json!({"prompt": "x"}), &eleven).unwrap_err().contains("10 pictures at most, not 11"));
+        let mut big = b"\x89PNG\r\n\x1a\n".to_vec();
+        big.resize((5 << 20) + 1, 0);
+        let big = pic("big.png", &big);
+        assert!(run("talker", "talk", json!({"prompt": "x"}), &[big]).unwrap_err().contains("“big.png” is over 5 MB"));
+        let text = pic("notes.txt", b"plain words");
+        assert!(run("talker", "talk", json!({"prompt": "x"}), &[text]).unwrap_err().contains("“notes.txt” isn't a PNG, JPEG, GIF or WebP"));
+        let theirs = make("other", &root.join("red.png")).unwrap();
+        assert!(service_async("talker", "claude.run", &json!({"prompt": "x", "tools": "none", "images": [theirs]})).unwrap_err().to_string().contains("isn't a file handed to talker"));
+        assert_eq!(runs(), before, "no run started");
+        // Forgetting needs `claude`.
+        assert!(service_async("other", "claude.forget", &json!("lesson-1")).unwrap_err().to_string().contains("“claude”"));
     }
 
     #[test]

@@ -16,6 +16,13 @@ How Echo starts Claude Code on AI profiles. It changes with the code, in the sam
 - A thread's sync gives its runs their text only on stdin, one stream-json message (`--input-format stream-json`), and
   their fixed instructions in a file (`--append-system-prompt-file`, removed after the run); no skill
   (`--disable-slash-commands`) (`projectsync::args`).
+- A plugin's run (`claudejob::run_with`) with pictures sends them and its prompt as one stream-json message on stdin
+  (`-p --input-format stream-json`), else its prompt after `-p`; streamed (`onText`) it adds
+  `--include-partial-messages`; in a conversation (`resume`) it drops `--no-session-persistence` and continues the
+  session it keeps with `--resume <session>`. Every event of a run reaches `projectsync::finish_run_watched`'s callback.
+  Measured on Claude Code 2.1.328: base64 image blocks in a stream-json message are read in `-p`; text arrives as
+  `stream_event` `content_block_delta` / `text_delta` events (`parent_tool_use_id` null for Claude's own); `--resume
+  <id>` in `-p` answers in the same session id.
 - The folder session, a plugin's session (on the folder session's setting), a routine, Yolo and a plugin's folder run (on the
   routines' setting) get their permission flags
   from one helper, `folder_args::permission_args(setting, profile, model, may_edit)` → (flags, words for the run's

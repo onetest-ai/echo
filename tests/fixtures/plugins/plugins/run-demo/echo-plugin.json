@@ -2,7 +2,7 @@
   "id": "run-demo",
   "name": "Run demo",
   "version": "0.1.0",
-  "summary": "A test plugin: a Claude run under a key it stops, and what Echo records now (tests/cases/plugins/TC-216, TC-217).",
+  "summary": "A test plugin: a Claude run under a key it stops, what Echo records now, and a run with pictures streamed in a conversation (tests/cases/plugins/TC-216, TC-217, TC-232).",
   "main": "main.js",
   "uses": { "claude": {}, "echo": { "read": ["recording"] } }
 }

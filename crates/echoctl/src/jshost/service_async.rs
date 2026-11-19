@@ -26,9 +26,21 @@ pub(super) fn service_async(id: &str, op: &str, arg: &Value) -> Result<Value> {
                 _ => bail!("a run's key is a string"),
             };
             spec.key = keyed.as_ref().map(|k| k.base.clone());
+            // Pictures it holds (`images`), a conversation it continues (`resume`, held while the run goes on).
+            spec.images = files::images(id, &arg["images"])?;
+            let talk = match &arg["resume"] {
+                Value::Null => None,
+                Value::String(k) => Some(crate::claudejob::Talk::take(id, k)?),
+                _ => bail!("a run's resume is a string"),
+            };
+            spec.resume = talk.as_ref().map(|t| t.file.clone());
             // In a folder it was given (`folder`, `path`, `mode`): there, or in a snapshot of it (`copy`).
             let snapshot = folders::claude_folder(id, &arg, &mut spec)?;
-            let ran = crate::claudejob::run(&spec);
+            // Its answer as it comes (`onText`): each piece to its handler, as a connection's event (`stream`).
+            let ran = match arg["stream"].as_u64() {
+                Some(n) => crate::claudejob::run_with(&spec, Some(&mut |t: &str| net::emit(id, n, json!({"text": t})))),
+                None => crate::claudejob::run(&spec),
+            };
             // A failed run's snapshot goes: the plugin never got its name.
             if let (Err(_), Some(s)) = (&ran, &snapshot) {
                 if let Ok(d) = store_path(id, s["path"].as_str().unwrap_or("")) {
@@ -48,6 +60,11 @@ pub(super) fn service_async(id: &str, op: &str, arg: &Value) -> Result<Value> {
         "claude.stop" => {
             uses(id, "claude")?;
             Ok(json!(crate::claudejob::stop_keyed(id, arg.as_str().unwrap_or(""))?))
+        }
+        // Its conversation forgotten (`claudejob::forget_talk`): true, or false when there was none.
+        "claude.forget" => {
+            uses(id, "claude")?;
+            Ok(json!(crate::claudejob::forget_talk(id, arg.as_str().unwrap_or(""))?))
         }
         // The user's sign-in to a host its sheet named (`plugins::signin`), to the host half only.
         "signin.get" => {
