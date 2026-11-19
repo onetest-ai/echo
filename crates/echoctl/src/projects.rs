@@ -1417,9 +1417,9 @@ pub fn terms_for_meeting(m: &MeetingContext) -> Vec<String> {
     let mut out: Vec<String> = vec![];
     // The dictionary (it supersedes the glossaries), whether Intake is on or off: terms pinned to or mentioned in
     // these threads, and the always-on ones; then any glossary term not moved in yet.
-    #[cfg(feature = "brain")]
+    #[cfg(feature = "intake")]
     let from_brain = crate::intake::taxonomy::terms_for_threads(&ps.iter().map(|p| p.id.clone()).collect::<Vec<_>>());
-    #[cfg(not(feature = "brain"))]
+    #[cfg(not(feature = "intake"))]
     let from_brain: Vec<String> = vec![];
     for t in from_brain.into_iter().chain(ps.into_iter().flat_map(|p| p.terms).map(|t| t.term)) {
         if !out.iter().any(|x| x.eq_ignore_ascii_case(&t)) {
@@ -1684,7 +1684,7 @@ mod tests {
         assert_eq!(terms_for_meeting(&meeting("Aurora weekly", &[dana])), vec!["Stargate"]);
     }
 
-    #[cfg(feature = "brain")]
+    #[cfg(feature = "intake")]
     #[test]
     fn the_dictionary_hints_a_meeting_with_intake_off() {
         let (_env, _root) = paths::testenv::folders("projects-dictionary-hint");

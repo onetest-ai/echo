@@ -34,9 +34,9 @@ mod threads;
 mod today;
 mod plugins;
 pub(crate) mod terminals;
-#[cfg(feature = "brain")]
+#[cfg(feature = "intake")]
 mod intake;
-#[cfg(feature = "brain")]
+#[cfg(feature = "intake")]
 mod search;
 
 use self::call::act;
@@ -502,11 +502,11 @@ fn respond(req: &Request<Vec<u8>>) -> Response<Cow<'static, [u8]>> {
     if let Some(r) = terminals::route(&path, req) {
         return r;
     }
-    #[cfg(feature = "brain")]
+    #[cfg(feature = "intake")]
     if let Some(r) = intake::route(&path, req) {
         return r;
     }
-    #[cfg(feature = "brain")]
+    #[cfg(feature = "intake")]
     if let Some(r) = search::route(&path, req) {
         return r;
     }
@@ -608,7 +608,7 @@ fn state() -> Value {
         "whats_new": crate::whats_new::pending(),
         "ai": crate::ai::summary(),
         // The Brain: built in and switched on (off hides it everywhere in the window).
-        "brain": cfg!(feature = "brain") && { #[cfg(feature = "brain")] { crate::intake::enabled() } #[cfg(not(feature = "brain"))] { false } },
+        "brain": cfg!(feature = "intake") && { #[cfg(feature = "intake")] { crate::intake::enabled() } #[cfg(not(feature = "intake"))] { false } },
     })
 }
 
@@ -741,7 +741,7 @@ pub fn handle(msg: &str) -> Handled {
     if let Some(r) = export::handle(&v) {
         return r;
     }
-    #[cfg(feature = "brain")]
+    #[cfg(feature = "intake")]
     if let Some(r) = intake::handle(&v) {
         return r;
     }
@@ -889,7 +889,7 @@ pub fn export(dir: &Path) -> anyhow::Result<()> {
     write("/api/found", get("/api/found"))?;
     write("/api/attention", get("/api/attention"))?;
     write("/api/tasks", get("/api/tasks"))?;
-    #[cfg(feature = "brain")]
+    #[cfg(feature = "intake")]
     {
         write("/api/brain/dictionary", get("/api/brain/dictionary"))?;
         write("/api/brain/browse/terms", get("/api/brain/browse/terms"))?;

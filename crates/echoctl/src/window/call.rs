@@ -2,7 +2,7 @@
 
 use super::*;
 use super::calendar::{import_transcript, RAW_EVENTS};
-#[cfg(feature = "brain")]
+#[cfg(feature = "intake")]
 use super::intake::{brain_sync_now, open_in_app};
 
 pub(super) fn minutes(meta: &Value) -> Option<i64> {
@@ -524,7 +524,7 @@ pub(super) fn act(v: &Value) -> bool {
         }
         // A Brain section's file (a thread folder's), opened in its own app: only a file the registry
         // holds, never a path the page names.
-        #[cfg(feature = "brain")]
+        #[cfg(feature = "intake")]
         "open_brain_file" => {
             if let Some(p) = v["id"].as_str().and_then(crate::intake::files::folder::path_of) {
                 open_in_app(&p);
@@ -532,7 +532,7 @@ pub(super) fn act(v: &Value) -> bool {
             false
         }
         // A folder for a thread's sources, chosen in the system's own dialog (never typed by the page).
-        #[cfg(feature = "brain")]
+        #[cfg(feature = "intake")]
         "source_folder_pick" => {
             let id = v["id"].as_str().unwrap_or("").to_string();
             std::thread::spawn(move || {

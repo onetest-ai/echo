@@ -76,12 +76,12 @@ fn trusted(addr: &str) -> bool {
     if crate::people::colleagues().address(&a) {
         return true;
     }
-    #[cfg(feature = "brain")]
+    #[cfg(feature = "intake")]
     {
         let s = crate::intake::senders::load();
         s.clients.values().any(|l| l.trusted.iter().any(|e| e.key == a))
     }
-    #[cfg(not(feature = "brain"))]
+    #[cfg(not(feature = "intake"))]
     false
 }
 

@@ -651,10 +651,10 @@ pub fn run_with(spec: &Spec, mut on_text: Option<&mut dyn FnMut(&str)>) -> Resul
     // A plugin's run in a folder: as the user set routines, never as the plugin asked; `read` may change nothing.
     let in_dir = spec.folder.as_ref().map(|f| (f, crate::folder_args::run_permissions(false), f.mode != FolderMode::Read));
     // What the Brain holds and when to go there (#34): only when it is on and the run has tools to ask it.
-    #[cfg(feature = "brain")]
+    #[cfg(feature = "intake")]
     // Only where the run gets the echo server (the window's builds; a run with tools).
     let brain_text = (cfg!(feature = "tray") && spec.session).then(|| crate::intake::advert::block(&crate::intake::access::Access { profile: profile.id.clone(), ..Default::default() })).flatten();
-    #[cfg(not(feature = "brain"))]
+    #[cfg(not(feature = "intake"))]
     let brain_text: Option<String> = None;
     let prompt = format!(
         "{}{}\n\n{}",

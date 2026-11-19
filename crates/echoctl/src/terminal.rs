@@ -794,12 +794,12 @@ fn type_in_when_marked(id: u64, value: &str, text: &str) {
 /// Brain is): a config file of its own, with what
 /// the session may read — its AI profile's sources only (strict routing), and for a call's session
 /// that call's client, else its threads, else the call itself.
-#[cfg(not(feature = "brain"))]
+#[cfg(not(feature = "intake"))]
 pub(crate) fn brain_mcp_config(_exe: &Path, _access: &[String]) -> Option<String> {
     None
 }
 
-#[cfg(feature = "brain")]
+#[cfg(feature = "intake")]
 pub(crate) fn brain_mcp_config(exe: &Path, access: &[String]) -> Option<String> {
     use sha2::{Digest, Sha256};
     let tag: String = Sha256::digest(access.join("\0").as_bytes()).iter().take(6).map(|b| format!("{b:02x}")).collect();

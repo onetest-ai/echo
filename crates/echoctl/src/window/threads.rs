@@ -2,7 +2,7 @@
 
 use super::*;
 use super::calendar::{CALENDAR_CACHE, RAW_EVENTS};
-#[cfg(feature = "brain")]
+#[cfg(feature = "intake")]
 use super::intake::brain_sync_now;
 
 /// The Tasks activity: the piles and asks, with the next 7 days of the calendar for "next time you
@@ -100,7 +100,7 @@ pub(super) fn project_op(v: &Value) -> anyhow::Result<Option<String>> {
                 Ok(())
             })?;
             // A history date changes what the Brain searches: apply it now.
-            #[cfg(feature = "brain")]
+            #[cfg(feature = "intake")]
             if v["field"] == "history_before" {
                 brain_sync_now();
             }
@@ -152,7 +152,7 @@ pub(super) fn project_op(v: &Value) -> anyhow::Result<Option<String>> {
                 "teams_channel" if sid.split_once('|').is_some_and(|(a, b)| !a.is_empty() && !b.is_empty()) => sid,
                 // A meeting chat its work reads between calls (`ledger::chat_sync`).
                 "teams_chat" if sid.starts_with("19:") && !sid.contains(char::is_whitespace) => sid,
-                #[cfg(feature = "brain")]
+                #[cfg(feature = "intake")]
                 "mail" => crate::intake::sources::mail_source(&sid)?,
                 _ => anyhow::bail!("not a source: {kind}"),
             };
@@ -175,7 +175,7 @@ pub(super) fn project_op(v: &Value) -> anyhow::Result<Option<String>> {
             if changed {
                 crate::ledger::read_mail_again(&id, &sid)?;
             }
-            #[cfg(feature = "brain")]
+            #[cfg(feature = "intake")]
             brain_sync_now();
         }
         // A folder's globs of what not to read.
@@ -188,7 +188,7 @@ pub(super) fn project_op(v: &Value) -> anyhow::Result<Option<String>> {
                 }
                 Ok(())
             })?;
-            #[cfg(feature = "brain")]
+            #[cfg(feature = "intake")]
             brain_sync_now();
         }
         "source_remove" => {
@@ -198,7 +198,7 @@ pub(super) fn project_op(v: &Value) -> anyhow::Result<Option<String>> {
                 p.sources.retain(|x| !(x.kind == kind && x.id == sid));
                 Ok(())
             })?;
-            #[cfg(feature = "brain")]
+            #[cfg(feature = "intake")]
             brain_sync_now();
         }
         "rule_add" => {

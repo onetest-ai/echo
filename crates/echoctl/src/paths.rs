@@ -163,7 +163,7 @@ pub fn legacy_models_dir() -> PathBuf {
 
 /// The folder of the running program, links followed: `/usr/local/bin/echoctl` (`app install-cli`)
 /// is a link to `Echo.app/Contents/MacOS/echoctl`, and what ships beside it is found from there.
-#[cfg(any(feature = "transcribe", feature = "brain"))]
+#[cfg(any(feature = "transcribe", feature = "intake"))]
 pub fn exe_dir() -> Option<PathBuf> {
     let exe = std::env::current_exe().ok()?;
     dunce::canonicalize(&exe).unwrap_or(exe).parent().map(Path::to_path_buf)

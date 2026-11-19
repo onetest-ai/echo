@@ -159,7 +159,7 @@ fn view_lines(v: &Value, now: chrono::DateTime<chrono::Utc>, calls: &Path) -> Op
         l.push(format!("Calendar event: {s}{}", clean(&e["when"]).map(|w| format!(" · {w}")).unwrap_or_default()));
     }
     // Where the Brain helps with what is open (#34), when it is on: one line, the tool and its scope.
-    #[cfg(feature = "brain")]
+    #[cfg(feature = "intake")]
     if crate::intake::enabled() {
         let scope = match (&client_id, &thread_id) {
             (Some(c), _) => format!(" with client={c}"),
@@ -241,7 +241,7 @@ pub fn hook() -> i32 {
             blocks.push(how);
         }
         // What the Brain holds for this session and when to go there (#34): only when it is on.
-        #[cfg(feature = "brain")]
+        #[cfg(feature = "intake")]
         if let Some(b) = session_access().and_then(|a| crate::intake::advert::session_block(&a)) {
             // Its "Last updated" line changes with every sync: a resumed session isn't sent the block for that alone.
             let stable: String = b.lines().filter(|l| !l.starts_with("Last updated")).collect::<Vec<_>>().join("\n");
@@ -266,7 +266,7 @@ pub fn hook() -> i32 {
 
 /// What this session may see of the Brain: its AI profile, and for a call's session that call's client, else its
 /// threads, else the call itself — as its echo server is narrowed (`terminal::start_call`).
-#[cfg(feature = "brain")]
+#[cfg(feature = "intake")]
 fn session_access() -> Option<crate::intake::access::Access> {
     let profile = std::env::var(PROFILE_VAR).ok().filter(|p| !p.is_empty())?;
     let mut a = crate::intake::access::Access { profile, ..Default::default() };
@@ -507,7 +507,7 @@ mod tests {
         assert_eq!(sent.as_object().unwrap().len(), 1);
     }
 
-    #[cfg(feature = "brain")]
+    #[cfg(feature = "intake")]
     #[test]
     fn with_intake_on_the_hint_names_search_sources_and_leaves_people_to_knowledge() {
         let (_env, root) = crate::paths::testenv::folders("view-hints");

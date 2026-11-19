@@ -1,6 +1,6 @@
 #[cfg(feature = "transcribe")]
 mod aec;
-#[cfg(feature = "brain")]
+#[cfg(feature = "intake")]
 mod intake;
 mod ai;
 mod app;
@@ -260,7 +260,7 @@ enum Cmd {
         write: Option<String>,
     },
     /// The Brain: cross-call intelligence over calls (later channels, mail, folders) (JSON)
-    #[cfg(feature = "brain")]
+    #[cfg(feature = "intake")]
     Brain {
         #[command(subcommand)]
         cmd: cli::intake::BrainCmd,
@@ -349,7 +349,7 @@ enum Cmd {
     },
     /// Echo's MCP server for Claude sessions (stdio): what was said, people, echo:// links — read-only, one AI
     /// profile's sources (narrowed for a call's session)
-    #[cfg(feature = "brain")]
+    #[cfg(feature = "intake")]
     #[command(hide = true)]
     Mcp {
         #[arg(long)]
@@ -502,7 +502,7 @@ enum Cmd {
     GpuCheck,
     /// (internal) The text of a file for a plugin (`ctx.files.text`): the host runs this as a child it can stop
     /// (`jshost::files::text`); one JSON line on stdout
-    #[cfg(all(feature = "js", feature = "brain"))]
+    #[cfg(all(feature = "js", feature = "intake"))]
     #[command(hide = true, name = "files-text")]
     FilesText {
         path: std::path::PathBuf,
@@ -767,7 +767,7 @@ fn main() -> Result<()> {
         Cmd::Doctor { json, request, probe, open, no_ai } => permissions::doctor(json, request, probe, open.as_deref(), no_ai),
         Cmd::Model { cmd } => cli::app::model(cmd),
         Cmd::Config(args) => cli::app::config(args),
-        #[cfg(all(feature = "js", feature = "brain"))]
+        #[cfg(all(feature = "js", feature = "intake"))]
         Cmd::FilesText { path, pages, max } => std::process::exit(jshost::files::child_main(&path, pages.as_deref(), max)),
         Cmd::RunGuard => std::process::exit(guard::command()),
         Cmd::WrapperRun { args } => std::process::exit(ai::wrapper::relay(&args)),
@@ -784,7 +784,7 @@ fn main() -> Result<()> {
         #[cfg(feature = "transcribe")]
         Cmd::Speakers { call, names, relabel } => speakers::command(&call, &names, relabel),
         Cmd::Vocab { cmd } => cli::capture::vocab(cmd),
-        #[cfg(feature = "brain")]
+        #[cfg(feature = "intake")]
         Cmd::Brain { cmd } => cli::intake::brain_command(cmd),
         Cmd::Project { cmd } => cli::project::project_command(cmd),
         Cmd::Client { cmd } => cli::project::client_command(cmd),
@@ -799,7 +799,7 @@ fn main() -> Result<()> {
         Cmd::Plugin { cmd } => cli::plugin::plugin_command(cmd),
         Cmd::Deliver { cmd } => cli::m365::deliver_command(cmd),
         Cmd::M365 { cmd } => cli::m365::run(cmd),
-        #[cfg(feature = "brain")]
+        #[cfg(feature = "intake")]
         Cmd::Mcp { profile, client, thread, call, who } => cli::intake::mcp(profile, client, thread, call, who),
         Cmd::Read { link } => {
             print!("{}", links::read(&link)?);

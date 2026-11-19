@@ -192,7 +192,7 @@ pub fn live(cmd: LiveCmd) -> Result<()> {
 pub fn vocab(cmd: VocabCmd) -> Result<()> {
     let mut cfg = config::Config::load()?;
     // The old learned list moves into the taxonomy once (never from inside a minutes run).
-    #[cfg(feature = "brain")]
+    #[cfg(feature = "intake")]
     if !notes::headless() {
         match vocab::migrate_learned(&mut cfg) {
             Ok(0) => {}

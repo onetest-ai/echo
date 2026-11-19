@@ -4,7 +4,7 @@ use anyhow::Result;
 use clap::Subcommand;
 
 use super::print_json;
-#[cfg(feature = "brain")]
+#[cfg(feature = "intake")]
 use crate::intake;
 use crate::{calls, config, guard, ledger, notes, people, projects, projectsync, tasks, threadlinks, watch};
 
@@ -95,7 +95,7 @@ pub enum ProjectCmd {
     /// subject, or its conversation's, contains one; * needs it), --channel <team id>|<channel id> (--name
     /// to show), --folder <path> (--exclude <glob>…: what in it not to read) into the Brain; --chat <chat
     /// id> (19:…) a meeting chat its work reads between calls; or --remove <kind:id> as `show` lists them
-    #[cfg(feature = "brain")]
+    #[cfg(feature = "intake")]
     Source {
         id: String,
         #[arg(long)]
@@ -446,7 +446,7 @@ pub fn project_command(cmd: ProjectCmd) -> Result<()> {
             })?;
             show(&p)?
         }
-        #[cfg(feature = "brain")]
+        #[cfg(feature = "intake")]
         ProjectCmd::Source { id, mail, subject, channel, folder, chat, exclude, name, remove } => {
             anyhow::ensure!(subject.is_none() || mail.is_some(), "--subject goes with --mail");
             let subject = subject.as_deref().map(projects::subject_words);

@@ -51,9 +51,9 @@ pub(super) fn answering(mut item: Value, node: &str, title: &str) -> Value {
 /// account's local part at any of their domains.
 pub fn mail_me() -> impl Fn(&str) -> bool {
     let mine = crate::config::Config::load().ok().and_then(|c| c.me).and_then(|m| m.email).map(|e| e.to_lowercase());
-    #[cfg(feature = "brain")]
+    #[cfg(feature = "intake")]
     let local = crate::intake::sources::me_local();
-    #[cfg(not(feature = "brain"))]
+    #[cfg(not(feature = "intake"))]
     let local: Option<String> = None;
     move |e: &str| Some(e) == mine.as_deref() || local.as_deref().is_some_and(|l| e.split('@').next() == Some(l))
 }
@@ -61,7 +61,7 @@ pub fn mail_me() -> impl Fn(&str) -> bool {
 /// Which of a read's mails are about the thread, by its source's subjects: a mail whose subject contains one, and
 /// any other mail of a conversation such a mail is in (a reply that changed the subject), or one the thread already
 /// holds mail of (`known`). A source naming no subjects keeps them all.
-#[cfg_attr(not(feature = "brain"), allow(dead_code))]
+#[cfg_attr(not(feature = "intake"), allow(dead_code))]
 pub(super) fn about_thread(found: &[Value], src: &crate::projects::Source, known: &BTreeSet<String>) -> Vec<bool> {
     if src.subject.is_empty() {
         return vec![true; found.len()];
@@ -72,12 +72,12 @@ pub(super) fn about_thread(found: &[Value], src: &crate::projects::Source, known
 }
 
 /// How far back a mail source's first read goes, and how far each later read looks again.
-#[cfg(feature = "brain")]
+#[cfg(feature = "intake")]
 pub(super) const MAIL_FIRST_DAYS: i64 = 30;
-#[cfg(feature = "brain")]
+#[cfg(feature = "intake")]
 pub(super) const MAIL_AGAIN_DAYS: i64 = 7;
 /// Mails taken at most a read (the newest).
-#[cfg(feature = "brain")]
+#[cfg(feature = "intake")]
 pub(super) const MAIL_MAX: usize = 200;
 
 pub(super) fn mails_file(project: &str) -> PathBuf {
@@ -133,7 +133,7 @@ pub(super) fn followed(project: &str) -> Vec<(String, String, String, String, St
 }
 
 /// The replies in a followed conversation: its mails after the user's went, none of them the user's, no invites.
-#[cfg_attr(not(feature = "brain"), allow(dead_code))]
+#[cfg_attr(not(feature = "intake"), allow(dead_code))]
 pub(super) fn replies<'a>(msgs: &'a [Value], at: &str, mine: &dyn Fn(&str) -> bool) -> Vec<&'a Value> {
     let Ok(sent) = chrono::DateTime::parse_from_rfc3339(at) else { return vec![] };
     msgs.iter()
@@ -146,7 +146,7 @@ pub(super) fn replies<'a>(msgs: &'a [Value], at: &str, mine: &dyn Fn(&str) -> bo
 /// A mail source not checked for the fetch job's `every` minutes (`jobs`; 30 by default), or never.
 pub fn mail_due(p: &crate::projects::Project) -> bool {
     // Without the Brain built in mail isn't read: never due (it would be every tick).
-    if !cfg!(feature = "brain") {
+    if !cfg!(feature = "intake") {
         return false;
     }
     let st = mail_state(&p.id);
@@ -160,7 +160,7 @@ pub fn mail_due(p: &crate::projects::Project) -> bool {
 /// others wait in the Brain's senders list (Needs you), never read meanwhile. The sync runs Claude
 /// Code with tools on what it reads, hence the same rules as the Brain's quarantine. Returns the ids
 /// written; a source that can't be read keeps its error in `mails.json`.
-#[cfg(feature = "brain")]
+#[cfg(feature = "intake")]
 pub fn mail_sync(project: &str) -> Result<Vec<String>> {
     use crate::intake::senders::{self, Verdict};
     use crate::intake::sources::{me_local, not_me, MailRule, MAX_PEOPLE};
@@ -283,7 +283,7 @@ pub fn mail_sync(project: &str) -> Result<Vec<String>> {
 
 /// A reply in a followed conversation into a read's items: the copy a mail source already took (the same mail) says
 /// which item it answers, else it goes in as its own.
-#[cfg_attr(not(feature = "brain"), allow(dead_code))]
+#[cfg_attr(not(feature = "intake"), allow(dead_code))]
 pub(super) fn take_reply(items: &mut Vec<Value>, item: Value, node: &str, title: &str) {
     match items.iter_mut().find(|x| x["id"] == item["id"]) {
         Some(x) => *x = answering(x.take(), node, title),
@@ -293,7 +293,7 @@ pub(super) fn take_reply(items: &mut Vec<Value>, item: Value, node: &str, title:
 
 /// A read's mails as evidence, each once: a mail doesn't change, so one already there stays — but learns which item
 /// it answers when it is a followed reply and doesn't say so yet (read before by a source, or added by hand).
-#[cfg_attr(not(feature = "brain"), allow(dead_code))]
+#[cfg_attr(not(feature = "intake"), allow(dead_code))]
 pub(super) fn write_mail_items(l: &Ledger, items: &[Value]) -> Result<Vec<String>> {
     let _lock = l.lock()?;
     ensure_first_epic(l)?;
@@ -323,7 +323,7 @@ pub(super) fn write_mail_items(l: &Ledger, items: &[Value]) -> Result<Vec<String
 /// A sender the user trusted for `client` (or whose mail they read anyway): that client's open threads
 /// read their mail and meeting chats from the start again at the next sync (due at once) — what was
 /// held back comes in; items already there stay as they are.
-#[cfg(feature = "brain")]
+#[cfg(feature = "intake")]
 pub fn reread_sources(client: &str) -> Result<()> {
     for p in crate::projects::list().into_iter().filter(|p| !p.stage.closed() && p.client.as_deref().unwrap_or("-") == client) {
         for f in [mails_file(&p.id), chats_file(&p.id)] {
@@ -349,13 +349,13 @@ pub fn read_mail_again(project: &str, rule: &str) -> Result<()> {
         o.remove("checked_at");
         crate::paths::write_atomic(&f, serde_json::to_string_pretty(&st)?.as_bytes())?;
     }
-    #[cfg(feature = "brain")]
+    #[cfg(feature = "intake")]
     crate::intake::sources::read_again("mail", rule)?;
     Ok(())
 }
 
 /// Without the Brain built in there is no senders list to trust anyone by: mail isn't read.
-#[cfg(not(feature = "brain"))]
+#[cfg(not(feature = "intake"))]
 pub fn mail_sync(_project: &str) -> Result<Vec<String>> {
     Ok(vec![])
 }

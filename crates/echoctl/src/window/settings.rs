@@ -1,7 +1,7 @@
 //! Settings: the page's snapshot and its writes, skills, meeting types, templates, the window's layout.
 
 use super::*;
-#[cfg(feature = "brain")]
+#[cfg(feature = "intake")]
 use super::intake::{BRAIN_LAST, BRAIN_SYNC};
 
 /// What Settings shows: each setting's value and what is installed, signed in or granted. Flows
@@ -83,7 +83,7 @@ pub(super) fn settings_snapshot() -> Value {
                               "connecting": SERVER_CONNECT.lock().map(|s| s.clone()).unwrap_or(Value::Null), "serving": serve.on,
                               "url": serve.on.then(|| crate::remote::serve_url(&serve)), "key": serve.on.then(|| serve.key.clone()) });
     }
-    #[cfg(feature = "brain")]
+    #[cfg(feature = "intake")]
     {
         let mut b = crate::intake::status().unwrap_or_else(|e| json!({ "error": format!("{e:#}") }));
         b["auto"] = json!(crate::intake::settings().auto());
@@ -164,7 +164,7 @@ pub(super) fn settings_set(key: &str, value: &Value) -> anyhow::Result<()> {
         }
         "autostart" => return crate::app::set_autostart(value.as_bool().unwrap_or(false)),
         // Settings → Brain: the embedding server, in <config dir>/brain.json.
-        #[cfg(feature = "brain")]
+        #[cfg(feature = "intake")]
         k if k.starts_with("brain_") => {
             let mut s = crate::intake::settings();
             let text = value.as_str().unwrap_or("").trim().to_string();

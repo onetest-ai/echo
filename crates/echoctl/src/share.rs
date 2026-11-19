@@ -16,7 +16,7 @@ fn call_id(dir: &Path) -> (String, String) {
 }
 
 /// A thread in a Recall document's refs: `{id, …}` (or a bare id, older).
-#[cfg(feature = "brain")]
+#[cfg(feature = "intake")]
 fn ref_thread(t: &Value) -> Option<&str> {
     t["id"].as_str().or(t.as_str())
 }
@@ -201,7 +201,7 @@ pub fn source(id: &str, opts: &Value) -> Result<Value> {
 
 /// A mail conversation or channel post as Recall indexed it, by its section (one a message): `{from, at, text, link}` —
 /// `at` the message's day and time, `text` the facts Recall's reader kept of it (never the message's own words), in order.
-#[cfg(feature = "brain")]
+#[cfg(feature = "intake")]
 fn mail_messages(f: &crate::intake::facts::Facts) -> Vec<Value> {
     let mut out: Vec<(String, Value)> = vec![];
     for crate::intake::facts::Piece { title, text, speaker, link } in f.pieces() {
@@ -218,14 +218,14 @@ fn mail_messages(f: &crate::intake::facts::Facts) -> Vec<Value> {
 }
 
 /// What `mail_item` routes a mail by, read once for a list or an event: the threads, the clients, the default AI profile.
-#[cfg(feature = "brain")]
+#[cfg(feature = "intake")]
 struct Routing {
     threads: Vec<crate::projects::Project>,
     clients: Vec<crate::projects::Client>,
     default: String,
 }
 
-#[cfg(feature = "brain")]
+#[cfg(feature = "intake")]
 impl Routing {
     fn load() -> Self {
         Routing { threads: crate::projects::list(), clients: crate::projects::clients().unwrap_or_default(), default: crate::ai::default_id() }
@@ -239,7 +239,7 @@ impl Routing {
 /// messages of senders the user trusts (a sender waiting for the user's decision, ignored, or unauthenticated stays
 /// out of it); `at` its last message's day; a mail's Microsoft 365 ids as Recall keeps them, `m365_id` (its last
 /// message's Graph id, as `ctx.m365.mailThread` takes it) and `conversation_id`, null for a post or what Recall didn't keep.
-#[cfg(feature = "brain")]
+#[cfg(feature = "intake")]
 fn mail_item(f: &crate::intake::facts::Facts, routing: &Routing) -> Value {
     let (src, kind, title, date, refs) = (&f.source, &f.kind, Some(&f.title), &f.event_date, &f.refs);
     let Routing { threads: all, clients, default } = routing;
@@ -266,7 +266,7 @@ fn mail_item(f: &crate::intake::facts::Facts, routing: &Routing) -> Value {
 /// A mail conversation's or channel post's source: `mail_item`, plus `date` (= `at`), `text` (the facts Recall keeps
 /// of it, section by section — Recall keeps no message's own words; those are read from Microsoft 365, `ctx.m365`) and
 /// `messages` (`mail_messages`).
-#[cfg(feature = "brain")]
+#[cfg(feature = "intake")]
 fn mail_source(src: &str) -> Result<Value> {
     anyhow::ensure!(matches!(crate::links::Link::parse(&format!("echo://mail/{src}")), Some(crate::links::Link::Mail(_))), "not a mail or post: {src}");
     let f = crate::intake::facts::read(src).ok_or_else(|| anyhow!("no {src:?} in Intake"))?;
@@ -278,7 +278,7 @@ fn mail_source(src: &str) -> Result<Value> {
     Ok(out)
 }
 
-#[cfg(not(feature = "brain"))]
+#[cfg(not(feature = "intake"))]
 fn mail_source(src: &str) -> Result<Value> {
     bail!("{src}: this build has no Recall")
 }
@@ -325,7 +325,7 @@ pub fn sources(opts: &Value) -> Result<Value> {
             out.push(json!({"id": call_id(&dir).0, "stamp": crate::calls::stamp_of(&dir), "kind": "call", "title": meta["title"], "date": date, "threads": threads.iter().map(|t| t["id"].clone()).collect::<Vec<_>>(), "client": client_v}));
         }
     }
-    #[cfg(feature = "brain")]
+    #[cfg(feature = "intake")]
     if kind.is_empty() || kind == "mail" || kind == "channel" {
         {
             let routing = Routing::load();
@@ -547,7 +547,7 @@ pub fn people() -> Result<Value> {
 }
 
 /// The dictionary: `{terms: [{name, synonyms, spellings, kind, group, client}]}` — `client` none = the practice's.
-#[cfg(feature = "brain")]
+#[cfg(feature = "intake")]
 pub fn dictionary() -> Result<Value> {
     let t = crate::intake::taxonomy::current().unwrap_or_default();
     Ok(json!({"terms": t.terms.iter().map(|x| json!({
@@ -557,7 +557,7 @@ pub fn dictionary() -> Result<Value> {
     })).collect::<Vec<_>>()}))
 }
 
-#[cfg(not(feature = "brain"))]
+#[cfg(not(feature = "intake"))]
 pub fn dictionary() -> Result<Value> {
     Ok(json!({"terms": []}))
 }
@@ -565,7 +565,7 @@ pub fn dictionary() -> Result<Value> {
 /// Names a plugin adds to the dictionary: `{name, synonyms?, spellings?, kind?, client?}`. Merged into the term any
 /// of its names already is (its other names added; nothing renamed or removed), else a new term in the client's
 /// layer (or the practice's). Answers `{term, added: [names new to it], new}`.
-#[cfg(feature = "brain")]
+#[cfg(feature = "intake")]
 pub fn dictionary_add(plugin: &str, v: &Value) -> Result<Value> {
     let name = v["name"].as_str().map(str::trim).filter(|n| !n.is_empty() && n.chars().count() <= 80).ok_or_else(|| anyhow!("a term needs a name (≤ 80 characters)"))?;
     let words = |k: &str| -> Vec<String> {
@@ -575,7 +575,7 @@ pub fn dictionary_add(plugin: &str, v: &Value) -> Result<Value> {
     crate::intake::taxonomy::dictionary_add(name, &words("synonyms"), &words("spellings"), v["kind"].as_str(), client, &format!("plugin:{plugin}"))
 }
 
-#[cfg(not(feature = "brain"))]
+#[cfg(not(feature = "intake"))]
 pub fn dictionary_add(_plugin: &str, _v: &Value) -> Result<Value> {
     bail!("this build has no dictionary")
 }
@@ -615,7 +615,7 @@ pub(crate) fn minutes_payload(dir: &Path) -> Value {
 }
 
 /// At most this many `items` in a `sources_changed` (the rest by their ids in `changed`, read with `echo.read('source')`).
-#[cfg_attr(not(feature = "brain"), allow(dead_code))]
+#[cfg_attr(not(feature = "intake"), allow(dead_code))]
 const ITEMS_MAX: usize = 100;
 
 /// Tell the plugins which of Recall's mail and channel posts are new, changed or gone after a sync.
@@ -634,12 +634,12 @@ pub(crate) fn sources_payload(touched: &[String], gone: &[String]) -> Option<Val
     if changed.is_empty() && removed.is_empty() {
         return None;
     }
-    #[cfg(feature = "brain")]
+    #[cfg(feature = "intake")]
     let items: Vec<Value> = {
         let routing = Routing::load();
         changed.iter().take(ITEMS_MAX).filter_map(|s| crate::intake::facts::read(s)).map(|f| mail_item(&f, &routing)).collect()
     };
-    #[cfg(not(feature = "brain"))]
+    #[cfg(not(feature = "intake"))]
     let items: Vec<Value> = vec![];
     let ids = |v: Vec<String>| v.into_iter().map(|s| format!("mail:{s}")).collect::<Vec<_>>();
     Some(json!({"changed": ids(changed), "removed": ids(removed), "items": items}))
@@ -927,7 +927,7 @@ mod tests {
         assert_eq!(other, json!({"call": "x", "title": "t"}));
     }
 
-    #[cfg(feature = "brain")]
+    #[cfg(feature = "intake")]
     #[test]
     fn the_sources_list_and_event_give_each_mail_as_recall_decided_it() {
         let (_env, _root) = crate::paths::testenv::folders("share-sources-golden");
@@ -976,7 +976,7 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "brain")]
+    #[cfg(feature = "intake")]
     #[test]
     fn sources_changed_carries_what_recall_decided_and_the_read_says_the_same() {
         let (_env, _root) = crate::paths::testenv::folders("share-sources-event");
@@ -1066,7 +1066,7 @@ mod tests {
 
     /// A made-up index's mail, read the way the index was read before Intake's files (its own SQL, as `share` did): the
     /// same source moved into a fact file reads the same through `echo.read('source')`, link for link.
-    #[cfg(feature = "brain")]
+    #[cfg(feature = "intake")]
     #[test]
     fn a_mail_moved_from_the_index_reads_as_the_index_gave_it() {
         let (_env, _root) = crate::paths::testenv::folders("share-sources-moved");
@@ -1105,7 +1105,7 @@ mod tests {
         assert_eq!(crate::links::mail_url("mail/abc").as_deref(), Some("https://outlook.example/1"));
     }
 
-    #[cfg(feature = "brain")]
+    #[cfg(feature = "intake")]
     #[test]
     fn plugins_add_names_never_take_them() {
         let (_env, _root) = crate::paths::testenv::folders("share-dict");

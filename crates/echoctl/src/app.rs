@@ -119,7 +119,7 @@ pub fn run(app: TargetApp, tray: bool, background: bool) -> Result<()> {
         #[cfg(feature = "tray")]
         crate::plugins::routines::start_scheduler();
     }
-    #[cfg(feature = "brain")]
+    #[cfg(feature = "intake")]
     crate::intake::start_scheduler();
     // Who each Claude profile is signed in to, for the window (`signin.rs`; in the background).
     crate::signin::refresh_all();

@@ -88,7 +88,7 @@ fn applies(l: &Learned, m: &MeetingContext, me: Option<&Person>) -> bool {
 /// Every learned term: the old list's, then the taxonomy's.
 pub fn learned_all(cfg: &Config) -> Vec<Learned> {
     let out: Vec<Learned> = cfg.learned.clone().unwrap_or_default();
-    #[cfg(feature = "brain")]
+    #[cfg(feature = "intake")]
     let out = {
         let mut out = out;
         for t in crate::intake::taxonomy::learned() {
@@ -133,7 +133,7 @@ pub fn for_call(cfg: &Config, meeting: Option<&MeetingContext>) -> Vec<String> {
 /// them and makes the term the newest). Returns the terms new to the list.
 pub fn learn(cfg: &mut Config, dir: &Path, terms: &[String]) -> Vec<String> {
     let (subject, people, call) = scope_of(cfg, dir);
-    #[cfg(feature = "brain")]
+    #[cfg(feature = "intake")]
     {
         let (layer, threads) = place_of(dir);
         let items: Vec<crate::intake::taxonomy::Learn> = terms
@@ -207,7 +207,7 @@ fn learn_into_list(cfg: &mut Config, terms: &[String], subject: Option<String>, 
 
 /// Where a call's learned terms go: its client's layer (the first of its threads with a client),
 /// else the shared one; pinned to its threads.
-#[cfg(feature = "brain")]
+#[cfg(feature = "intake")]
 fn place_of(dir: &Path) -> (String, Vec<String>) {
     let ps = crate::projects::of_call(dir).unwrap_or_default();
     let layer = ps.iter().find_map(|(p, _)| p.client.clone()).unwrap_or_else(|| crate::intake::taxonomy::SHARED.to_string());
@@ -217,7 +217,7 @@ fn place_of(dir: &Path) -> (String, Vec<String>) {
 /// Move the old `learned` list into the taxonomy, once: each term in the layer of the calls it came
 /// from (their client), pinned to their threads, its scope kept; the list saved beside the config,
 /// then emptied. Returns how many terms moved.
-#[cfg(feature = "brain")]
+#[cfg(feature = "intake")]
 pub fn migrate_learned(cfg: &mut Config) -> Result<usize> {
     let Some(list) = cfg.learned.clone().filter(|l| !l.is_empty()) else { return Ok(0) };
     let items: Vec<crate::intake::taxonomy::Learn> = list
@@ -272,7 +272,7 @@ pub fn migrate(cfg: &mut Config) -> bool {
     }
     // Learned terms already moved to the taxonomy (a config saved with `learned: None` by an earlier
     // build): this config is not from before learned terms, and its always-on list stays as it is.
-    #[cfg(feature = "brain")]
+    #[cfg(feature = "intake")]
     if !crate::intake::taxonomy::learned().is_empty() {
         cfg.learned = Some(vec![]);
         return false;
@@ -320,9 +320,9 @@ pub fn add(cfg: &mut Config, terms: &[String], call: Option<&str>, always: bool)
     let added = learn(cfg, &dir, terms);
     // A project's call: its glossary learns them too — unless the taxonomy did (it pins them to the
     // call's threads, and it superseded the glossaries).
-    #[cfg(feature = "brain")]
+    #[cfg(feature = "intake")]
     let glossary = false;
-    #[cfg(not(feature = "brain"))]
+    #[cfg(not(feature = "intake"))]
     let glossary = true;
     match crate::projects::of_call(&dir).map(|p| if glossary { p } else { vec![] }) {
         Ok(projects) => {
@@ -355,7 +355,7 @@ pub fn forget_learned(cfg: &mut Config, term: &str) {
     if let Some(l) = cfg.learned.as_mut() {
         l.retain(|x| !x.term.eq_ignore_ascii_case(term));
     }
-    #[cfg(feature = "brain")]
+    #[cfg(feature = "intake")]
     if let Err(e) = crate::intake::taxonomy::forget_learned(term) {
         eprintln!("warning: the taxonomy: {e:#}");
     }
@@ -367,7 +367,7 @@ pub fn remove(cfg: &mut Config, terms: &[String]) {
     if let Some(l) = cfg.learned.as_mut() {
         l.retain(|x| !gone(&x.term));
     }
-    #[cfg(feature = "brain")]
+    #[cfg(feature = "intake")]
     for t in terms {
         if let Err(e) = crate::intake::taxonomy::forget_learned(t.trim()) {
             eprintln!("warning: the taxonomy: {e:#}");
@@ -420,7 +420,7 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
     }
 
-    #[cfg(feature = "brain")]
+    #[cfg(feature = "intake")]
     #[test]
     fn the_old_learned_list_moves_into_the_taxonomy() {
         let (_env, _root) = crate::paths::testenv::folders("vocab-migrate");
