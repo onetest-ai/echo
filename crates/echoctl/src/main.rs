@@ -46,6 +46,7 @@ mod minutes;
 mod notes;
 mod ollama;
 mod models;
+mod netif;
 mod paths;
 mod plugins;
 mod projects;

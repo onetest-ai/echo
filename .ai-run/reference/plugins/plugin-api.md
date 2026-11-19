@@ -382,7 +382,7 @@ prompt, no click needed — queued and background work reads as a command does).
     only these pictures, GET only, https (http only for an http page), port 80 or 443 (or the page's own port on the
     page's own host), a host name or an IPv4 address (an IPv6 address written as one refused), and only from a public
     address: Echo looks the host up (10 s at most, within the 2 minutes), refuses it when any of its addresses is this
-    computer or a private, link-local, shared, unique-local, site-local or reserved range, or an IPv6 form that carries
+    computer (loopback, any address of its own interfaces, and the /64 of its own global IPv6 ones) or a private, link-local, shared, unique-local, site-local or reserved range, or an IPv6 form that carries
     or tunnels to an IPv4 address (IPv4-compatible and -translated, 6to4, Teredo, local-use NAT64; v4-mapped and NAT64
     only to a public IPv4), an address written as a number other than plain IPv4 or IPv6 refused too, and connects to
     the address it checked, never through a proxy. A page on the user's own network or this computer gets only pictures the plugin

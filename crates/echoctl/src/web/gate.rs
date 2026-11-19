@@ -2,12 +2,13 @@
 //! (`ctx.web.read({render: true})`, #835). It lives only as long as the render, on a port the system picks, and answers
 //! only a client that sends the render's own token (`Proxy-Authorization: Basic`, else 407).
 //!
-//! For each `CONNECT host:port`: port 443 or 80 only; an IPv6 address written as one is refused; the name is looked up
-//! again on every connection and every address it has must be public (`public::public_address_by`); Echo then connects
+//! For each `CONNECT host:port`: port 443 only (a rendered page is https); an IPv6 address written as one is refused;
+//! the name is looked up again on every connection and every address it has must be public and none of this
+//! computer's own (`public::public_address_by`, `netif::addresses`); Echo then connects
 //! to the address it checked, never the name, and passes the bytes through unread (TLS stays end to end, the page's
 //! certificate checked by the webview against the name). Anything else — an origin-form request (something calling the
-//! port directly), an absolute-form `http://` request, another method — is refused with 403. A rendered page is always
-//! an https one (`web_reach`), so plain http is never proxied.
+//! port directly), an absolute-form `http://` request, another method — is refused with 403. A request's head must come
+//! whole within 10 s, and at most `HANDSHAKES` clients are heard at once before they show the token.
 //!
 //! Within `Caps`: connections in all and at once, distinct hosts, bytes both ways; and its time (`until`), when every
 //! tunnel is cut and nothing more is accepted.
@@ -54,6 +55,8 @@ const CONNECT_SECS: u64 = 10;
 const STEP: Duration = Duration::from_millis(200);
 /// Refusals kept for the render's stats.
 const REFUSALS_KEPT: usize = 32;
+/// Clients heard at once before they have shown the token (others are closed unanswered).
+const HANDSHAKES: usize = 32;
 
 /// How the gate connects to an address it checked: a plain TCP connection, or a test's.
 pub type Connect = dyn Fn(SocketAddr, Duration) -> std::io::Result<TcpStream> + Send + Sync;
@@ -62,11 +65,15 @@ pub type Connect = dyn Fn(SocketAddr, Duration) -> std::io::Result<TcpStream> + 
 pub struct Net {
     pub lookup: Arc<Lookup>,
     pub connect: Arc<Connect>,
+    /// This computer's own addresses, read for each connection (`netif::addresses`).
+    pub own: Arc<dyn Fn() -> Vec<IpAddr> + Send + Sync>,
+    /// The ports a page's hosts are reached on: 443 (a development build's tests add their plain-http fakes' 80).
+    pub ports: &'static [u16],
 }
 
 impl Net {
     pub fn system() -> Net {
-        Net { lookup: Arc::new(system_lookup), connect: Arc::new(|at, wait| TcpStream::connect_timeout(&at, wait)) }
+        Net { lookup: Arc::new(system_lookup), connect: Arc::new(|at, wait| TcpStream::connect_timeout(&at, wait)), own: Arc::new(crate::netif::addresses), ports: &[443] }
     }
 }
 
@@ -79,6 +86,7 @@ struct Shared {
     stop: AtomicBool,
     conns: AtomicUsize,
     open: AtomicUsize,
+    handshakes: AtomicUsize,
     bytes: AtomicU64,
     hosts: Mutex<HashSet<String>>,
     last: Mutex<Instant>,
@@ -123,6 +131,7 @@ impl Gate {
             stop: AtomicBool::new(false),
             conns: AtomicUsize::new(0),
             open: AtomicUsize::new(0),
+            handshakes: AtomicUsize::new(0),
             bytes: AtomicU64::new(0),
             hosts: Mutex::new(HashSet::new()),
             last: Mutex::new(Instant::now()),
@@ -169,15 +178,20 @@ fn accept(listener: TcpListener, s: Arc<Shared>) {
     }
 }
 
-/// A request's head (up to its blank line), or `None`: too long, too slow or not text.
+/// A request's head (up to its blank line), or `None`: too long, not whole within `HEAD_SECS` in all (nor the
+/// gate's time), or not text.
 fn read_head(c: &mut TcpStream, s: &Shared) -> Option<String> {
-    let wait = s.until.saturating_duration_since(Instant::now()).min(Duration::from_secs(HEAD_SECS));
-    c.set_read_timeout(Some(wait.max(Duration::from_millis(1)))).ok()?;
+    let by = (Instant::now() + Duration::from_secs(HEAD_SECS)).min(s.until);
     let mut head = Vec::with_capacity(512);
     let mut b = [0u8; 1];
     // A byte at a time: nothing past the head is taken (the client's first bytes of TLS belong to the tunnel).
     while !head.ends_with(b"\r\n\r\n") {
-        if head.len() >= HEAD_MAX || c.read(&mut b).ok()? == 0 {
+        let left = by.saturating_duration_since(Instant::now());
+        if s.over() || left.is_zero() || head.len() >= HEAD_MAX {
+            return None;
+        }
+        c.set_read_timeout(Some(left)).ok()?;
+        if c.read(&mut b).ok()? == 0 {
             return None;
         }
         head.push(b[0]);
@@ -185,24 +199,45 @@ fn read_head(c: &mut TcpStream, s: &Shared) -> Option<String> {
     String::from_utf8(head).ok()
 }
 
+/// A client heard before it has shown the token: counted until dropped.
+struct Handshake<'a>(&'a Shared);
+
+impl Drop for Handshake<'_> {
+    fn drop(&mut self) {
+        self.0.handshakes.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+/// What a refusal keeps of what a client asked for: printable ASCII, 200 characters at most.
+fn plain(text: &str) -> String {
+    text.chars().filter(|c| c.is_ascii_graphic()).take(200).collect()
+}
+
 fn reply(c: &mut TcpStream, status: &str, extra: &str) {
     let _ = write!(c, "HTTP/1.1 {status}\r\n{extra}Content-Length: 0\r\nConnection: close\r\n\r\n");
 }
 
 fn serve(mut c: TcpStream, s: &Shared) {
+    if s.handshakes.fetch_add(1, Ordering::SeqCst) >= HANDSHAKES {
+        s.handshakes.fetch_sub(1, Ordering::SeqCst);
+        return;
+    }
+    let shaking = Handshake(s);
     let _ = c.set_nonblocking(false);
     let Some(head) = read_head(&mut c, s) else { return };
     let mut lines = head.split("\r\n");
     let mut first = lines.next().unwrap_or("").split(' ');
     let (method, target) = (first.next().unwrap_or(""), first.next().unwrap_or(""));
     if method != "CONNECT" {
-        s.refuse(format!("{} {}: only CONNECT", method.chars().take(16).collect::<String>(), target.chars().take(200).collect::<String>()));
+        // Nothing of what an unknown client sent is kept.
+        s.refuse("a request other than CONNECT".into());
         return reply(&mut c, "403 Forbidden", "");
     }
     let authorized = lines.any(|l| l.split_once(':').is_some_and(|(k, v)| k.trim().eq_ignore_ascii_case("proxy-authorization") && v.trim() == s.auth));
     if !authorized {
         return reply(&mut c, "407 Proxy Authentication Required", "Proxy-Authenticate: Basic realm=\"echo\"\r\n");
     }
+    drop(shaking);
     let opened = open(target, s);
     match opened {
         Ok((up, _slot)) => {
@@ -211,7 +246,7 @@ fn serve(mut c: TcpStream, s: &Shared) {
             }
         }
         Err(e) => {
-            s.refuse(format!("{}: {e:#}", target.chars().take(200).collect::<String>()));
+            s.refuse(plain(&format!("{target}: {e:#}")));
             reply(&mut c, "403 Forbidden", "");
         }
     }
@@ -232,7 +267,7 @@ fn open<'a>(target: &str, s: &'a Shared) -> Result<(TcpStream, Slot<'a>)> {
     if host.starts_with('[') || host.parse::<Ipv6Addr>().is_ok() {
         bail!("an IPv6 address written as one: a page's hosts are reached by name or IPv4 address");
     }
-    let port: u16 = port.parse().ok().filter(|p| [80, 443].contains(p)).ok_or_else(|| anyhow!("port {port}: only 80 and 443"))?;
+    let port: u16 = port.parse().ok().filter(|p| s.net.ports.contains(p)).ok_or_else(|| anyhow!("port {port}: only {:?}", s.net.ports))?;
     let host = host.to_ascii_lowercase();
     {
         let mut hosts = s.hosts.lock().unwrap_or_else(|e| e.into_inner());
@@ -255,7 +290,7 @@ fn open<'a>(target: &str, s: &'a Shared) -> Result<(TcpStream, Slot<'a>)> {
         bail!("past the {} MB a render moves", s.caps.bytes >> 20);
     }
     // Looked up again for every connection: a name that now points into the user's network is refused.
-    let ip: IpAddr = public_address_by(&host, port, s.until, s.net.lookup.clone())?;
+    let ip: IpAddr = public_address_by(&host, port, s.until, s.net.lookup.clone(), &(s.net.own)())?;
     let wait = s.until.saturating_duration_since(Instant::now()).min(Duration::from_secs(CONNECT_SECS));
     if wait.is_zero() {
         bail!("the render's time is up");
@@ -267,6 +302,8 @@ fn open<'a>(target: &str, s: &'a Shared) -> Result<(TcpStream, Slot<'a>)> {
 
 /// The bytes both ways until either side ends, the bytes are spent or the time is up.
 fn tunnel(c: TcpStream, up: TcpStream, s: &Shared) {
+    // A side that stops reading holds a write only a step at a time (`send`), never past the gate's time.
+    let _ = (c.set_write_timeout(Some(STEP)), up.set_write_timeout(Some(STEP)));
     let (Ok(c2), Ok(up2)) = (c.try_clone(), up.try_clone()) else { return };
     std::thread::scope(|scope| {
         scope.spawn(|| pump(c, up2, s));
@@ -288,7 +325,7 @@ fn pump(mut from: TcpStream, mut to: TcpStream, s: &Shared) {
                 return;
             }
             Ok(n) => {
-                if s.bytes.fetch_add(n as u64, Ordering::SeqCst) + n as u64 > s.caps.bytes || to.write_all(&buf[..n]).is_err() {
+                if s.bytes.fetch_add(n as u64, Ordering::SeqCst) + n as u64 > s.caps.bytes || !send(&mut to, &buf[..n], s) {
                     break;
                 }
             }
@@ -298,6 +335,22 @@ fn pump(mut from: TcpStream, mut to: TcpStream, s: &Shared) {
     }
     let _ = from.shutdown(Shutdown::Both);
     let _ = to.shutdown(Shutdown::Both);
+}
+
+/// All of `bytes` to `to`, waiting a step at a time while the gate's time and bytes allow; whether they went.
+fn send(to: &mut TcpStream, mut bytes: &[u8], s: &Shared) -> bool {
+    while !bytes.is_empty() {
+        if s.over() || s.bytes.load(Ordering::SeqCst) > s.caps.bytes {
+            return false;
+        }
+        match to.write(bytes) {
+            Ok(0) => return false,
+            Ok(n) => bytes = &bytes[n..],
+            Err(e) if matches!(e.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut | ErrorKind::Interrupted) => {}
+            Err(_) => return false,
+        }
+    }
+    true
 }
 
 #[cfg(test)]
@@ -320,6 +373,8 @@ mod tests {
         let (l, c) = (lookups.clone(), connected.clone());
         let m = map.clone();
         let net = Net {
+            own: Arc::new(|| vec!["127.0.0.1".parse().unwrap(), "93.184.215.99".parse().unwrap(), "2a00:1450:4001:80b::5".parse().unwrap()]),
+            ports: &[443],
             lookup: Arc::new(move |host, _| {
                 l.fetch_add(1, Ordering::SeqCst);
                 m.lock().unwrap().get(host).cloned().ok_or_else(|| std::io::Error::new(ErrorKind::NotFound, "no such name"))
@@ -399,6 +454,9 @@ mod tests {
             ("mixed.acme.example", &["93.184.215.14", "192.168.1.10"]),
             ("mixed6.acme.example", &["2606:2800:21f:cb07:6820:80da:af6b:8b2c", "fd00::1"]),
             ("localhost", &["127.0.0.1"]),
+            // This computer's own public addresses (injected above): its IPv4, and its IPv6 /64.
+            ("self.acme.example", &["93.184.215.99"]),
+            ("self6.acme.example", &["2a00:1450:4001:80b::abcd"]),
         ];
         let (net, seen) = fake(names, upstream(0));
         let g = Gate::start(net, CAPS, soon()).unwrap();
@@ -406,7 +464,7 @@ mod tests {
         let mut refused: Vec<String> = [
             "127.0.0.1:443", "10.1.2.3:443", "192.168.68.1:443", "172.16.0.1:443", "169.254.169.254:80", "100.64.0.1:443", "0.0.0.0:443",
             "[::1]:443", "[fd00::1]:443", "[::ffff:127.0.0.1]:443", "[::ffff:10.0.0.1]:443", "::1:443",
-            "2130706433:443", "0x7f.1:443", "127.1:443", "nobody.acme.example:443",
+            "2130706433:443", "0x7f.1:443", "127.1:443", "nobody.acme.example:443", "93.184.215.99:443",
         ]
         .map(String::from)
         .to_vec();
@@ -419,14 +477,56 @@ mod tests {
     }
 
     #[test]
-    fn only_ports_80_and_443_are_reached() {
+    fn only_port_443_is_reached() {
         let (net, seen) = fake(&[("news.acme.example", &["93.184.215.14"])], upstream(0));
         let g = Gate::start(net, CAPS, soon()).unwrap();
-        for target in ["news.acme.example:22", "news.acme.example:8443", "news.acme.example:0", "news.acme.example:x", "news.acme.example"] {
+        for target in ["news.acme.example:80", "news.acme.example:22", "news.acme.example:8443", "news.acme.example:0", "news.acme.example:x", "news.acme.example"] {
             assert_eq!(ask(&g, target, Some(&g.token.clone())).0, 403, "{target}");
         }
         assert_eq!(seen.lookups.load(Ordering::SeqCst), 0, "refused before any lookup");
-        assert_eq!(ask(&g, "news.acme.example:80", Some(&g.token.clone())).0, 200);
+        assert_eq!(ask(&g, "news.acme.example:443", Some(&g.token.clone())).0, 200);
+    }
+
+    #[test]
+    fn a_slow_or_crowding_client_gets_nothing_before_the_token() {
+        let (net, seen) = fake(&[("news.acme.example", &["93.184.215.14"])], upstream(0));
+        let g = Gate::start(net, CAPS, soon()).unwrap();
+        // HANDSHAKES clients that never finish their head hold every place; the next is closed unanswered.
+        let mut idle: Vec<TcpStream> = (0..HANDSHAKES).map(|_| TcpStream::connect(("127.0.0.1", g.port)).unwrap()).collect();
+        for c in &mut idle {
+            c.write_all(b"CONNECT news.acme.example:443 HTTP/1.1\r\n").unwrap();
+        }
+        let held = Instant::now();
+        while g.shared.handshakes.load(Ordering::SeqCst) < HANDSHAKES && held.elapsed() < Duration::from_secs(10) {
+            std::thread::yield_now();
+        }
+        let mut late = TcpStream::connect(("127.0.0.1", g.port)).unwrap();
+        late.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+        let _ = write!(late, "CONNECT news.acme.example:443 HTTP/1.1\r\n\r\n");
+        assert_eq!(status(&mut late), 0, "closed with no answer");
+        drop(idle);
+        // A head that trickles in a byte at a time still ends at its 10 s in all, unanswered.
+        let mut slow = TcpStream::connect(("127.0.0.1", g.port)).unwrap();
+        let at = Instant::now();
+        for b in b"CONNECT news.acme.example:443 HTTP/1.1\r\nX-Pad: ".iter().chain([b'a'; 64].iter()) {
+            if slow.write_all(&[*b]).is_err() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(250));
+            if at.elapsed() > Duration::from_secs(13) {
+                break;
+            }
+        }
+        let _ = slow.set_read_timeout(Some(Duration::from_secs(2)));
+        assert_eq!(status(&mut slow), 0);
+        assert!(at.elapsed() < Duration::from_secs(14), "{:?}", at.elapsed());
+        assert!(seen.connected.lock().unwrap().is_empty());
+        // What an unknown client sent is never kept.
+        let mut c = TcpStream::connect(("127.0.0.1", g.port)).unwrap();
+        c.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+        c.write_all(b"GET /<script>alert(1)</script> HTTP/1.1\r\n\r\n").unwrap();
+        assert_eq!(status(&mut c), 403);
+        assert!(!g.stats().to_string().contains("script"), "{}", g.stats());
     }
 
     #[test]
@@ -458,6 +558,7 @@ mod tests {
         let stats = g.stats();
         assert_eq!((stats["connections"].as_u64(), stats["hosts"].as_u64()), (Some(2), Some(2)));
         assert!(stats["bytes"].as_u64().unwrap() >= 8);
+        assert_eq!(ask(&g, "93.184.215.99:443", Some(&g.token.clone())).0, 403, "this computer's own public address");
     }
 
     #[test]
@@ -469,7 +570,7 @@ mod tests {
         let n = Arc::new(AtomicUsize::new(0));
         let net = Net {
             lookup: Arc::new(move |h, p| if n.fetch_add(1, Ordering::SeqCst) == 0 { lookup(h, p) } else { Ok(vec!["127.0.0.1".parse().unwrap()]) }),
-            connect: net.connect,
+            ..net
         };
         let g = Gate::start(net, CAPS, soon()).unwrap();
         assert_eq!(ask(&g, "news.acme.example:443", Some(&g.token.clone())).0, 200);
