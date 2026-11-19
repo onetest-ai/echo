@@ -472,7 +472,9 @@ pictures, escaping and limits; `rendered: true`; `bytes` the DOM's HTML; `images
     `ProgramData`), `TEMP`/`TMP`, `USERPROFILE`, `LOCALAPPDATA`, `APPDATA` and a `PATH` of the system folders only;
     it is started in a job (suspended until it is in) and joins a job of its own, so every process WebView2 starts
     is ended with the render, at its time or when it is killed;
-  - the browser's switches: the gate as its only proxy, loopback included (`--proxy-bypass-list=<-loopback>`); WebRTC
+  - the browser's switches: the gate as its only proxy, loopback included (`--proxy-bypass-list=<-loopback>`); no name
+    looked up by the browser itself, prefetched or not (`--host-resolver-rules="MAP * ~NOTFOUND , EXCLUDE 127.0.0.1"`:
+    the gate looks names up); WebRTC
     sends no UDP it doesn't proxy (`--force-webrtc-ip-handling-policy=disable_non_proxied_udp`); no QUIC; no
     background traffic, component updates, pings or SmartScreen;
   - the token answers the gate's 407 (`BasicAuthenticationRequested`) only when the challenge names that render's

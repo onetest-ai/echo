@@ -125,7 +125,7 @@ fn json(out: &Output) -> serde_json::Value {
 
 /// A page that writes its text with JavaScript and, from every frame it can make, tries every way to this computer and
 /// the user's network.
-const HOSTILE: &str = r#"<!doctype html><html><head><title>Pilot notes</title></head><body><main><p id="out">loading</p></main><script>
+const HOSTILE: &str = r#"<!doctype html><html><head><title>Pilot notes</title><link rel="dns-prefetch" href="//{DNS}.example.org"><link rel="preconnect" href="https://{DNS}-p.example.org"></head><body><main><p id="out">loading</p></main><script>
 const C = ['http://127.0.0.1:{TCP}/c', 'http://localhost:{TCP}/c', 'http://[::1]:{TCP}/c', 'http://{LAN}:{TCP}/c', 'http://10.0.0.1:{TCP}/c',
   'http://169.254.169.254/latest/meta-data/', 'http://2130706433:{TCP}/c', 'http://0.0.0.0:{TCP}/c', 'http://u:p@127.0.0.1:{TCP}/c', 'https://127.0.0.1:{TCP}/c',
   'http://news.acme.example:{TCP}/c', 'http://canary:{TCP}/c', 'http://canary.local:{TCP}/c', 'http://foo.localhost:{TCP}/c'];
@@ -188,7 +188,9 @@ setTimeout(() => { location.href = C[0]; }, 100);
 fn a_rendered_page_reaches_nothing_on_this_computer_or_the_users_network() {
     let c = canary();
     let lan = lan_ip().unwrap_or_else(|| "192.168.1.1".into());
-    let page = HOSTILE.replace("{TCP}", &c.tcp.to_string()).replace("{UDP}", &c.udp.to_string()).replace("{LAN}", &lan);
+    // A name of its own for each run, prefetched and preconnected: only this page could have it looked up.
+    let dns = format!("echo-canary-{}-{}", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos());
+    let page = HOSTILE.replace("{TCP}", &c.tcp.to_string()).replace("{UDP}", &c.udp.to_string()).replace("{LAN}", &lan).replace("{DNS}", &dns);
     let (port, seen) = site(vec![("/hostile", page)]);
     let (out, _) = render(port, "/hostile", 20);
     let v = json(&out);

@@ -233,11 +233,12 @@ pub(super) fn run(r: Render) -> Result<()> {
     })
 }
 
-/// The browser's switches: the gate as its only proxy (loopback too), no UDP WebRTC doesn't proxy, no QUIC, no
-/// background traffic of its own.
+/// The browser's switches: the gate as its only proxy (loopback too), no name looked up by the browser itself (the
+/// gate looks names up; even behind a proxy Chromium asked the system for the page's host), no UDP WebRTC doesn't
+/// proxy, no QUIC, no background traffic of its own.
 fn browser_args(gate: &Gate) -> String {
     format!(
-        "--proxy-server=http://127.0.0.1:{} --proxy-bypass-list=<-loopback> --force-webrtc-ip-handling-policy=disable_non_proxied_udp --disable-quic \
+        "--proxy-server=http://127.0.0.1:{} --proxy-bypass-list=<-loopback> --host-resolver-rules=\"MAP * ~NOTFOUND , EXCLUDE 127.0.0.1\" --force-webrtc-ip-handling-policy=disable_non_proxied_udp --disable-quic \
          --disable-background-networking --disable-component-update --no-pings --disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection",
         gate.port
     )
