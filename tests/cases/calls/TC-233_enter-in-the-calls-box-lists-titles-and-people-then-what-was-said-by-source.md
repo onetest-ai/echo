@@ -17,7 +17,7 @@ tags: [calls, search, recall]
 ## Preconditions
 - Test data built by `tests/fixtures/make_data.py <dir> --set standard`, served at `{{base_url}}`
 - Recall on and indexed: after `set -a; . <dir>/env; set +a`, with `ECHOCTL_CONFIG_DIR` checked to be inside `<dir>`
-  (else stop), `target/debug/echoctl brain set --enabled true`, then `target/debug/echoctl brain sync` (exit 0 both);
+  (else stop), `target/debug/echoctl intake set --enabled true`, then `target/debug/echoctl intake sync` (exit 0 both);
   the page loaded again after it (`{{base_url}}/`)
 
 ## Test Data

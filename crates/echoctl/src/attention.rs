@@ -235,15 +235,15 @@ pub fn collect() -> Collected {
     }
 
     // The Brain off (or not built): its items leave quietly.
-    #[cfg(feature = "brain")]
-    let brain_on = crate::brain::enabled();
-    #[cfg(not(feature = "brain"))]
+    #[cfg(feature = "intake")]
+    let brain_on = crate::intake::enabled();
+    #[cfg(not(feature = "intake"))]
     let brain_on = false;
     // A thread's mail and meeting chats are read into its work whether or not the Brain is on, by the
     // same senders list: whom they wait for is asked here either way.
-    #[cfg(feature = "brain")]
+    #[cfg(feature = "intake")]
     let senders_asked = brain_on || crate::projects::list().iter().any(|p| !p.stage.closed() && p.sources.iter().any(|s| s.kind == "mail" || s.kind == "teams_chat"));
-    #[cfg(not(feature = "brain"))]
+    #[cfg(not(feature = "intake"))]
     let senders_asked = false;
     if !brain_on {
         c.quiet_kinds.insert("brain");
@@ -251,11 +251,11 @@ pub fn collect() -> Collected {
     if !senders_asked {
         c.quiet_kinds.insert("sender");
     }
-    #[cfg(feature = "brain")]
+    #[cfg(feature = "intake")]
     if senders_asked {
         // Senders whose mail or posts wait to be read: decided right here, or in Settings → Intake's Who may speak.
         let go = Some("settings/brain".to_string());
-        for (client, l) in crate::brain::senders::load().clients {
+        for (client, l) in crate::intake::senders::load().clients {
             for w in &l.unverified {
                 out.push(item(
                     format!("unverified:{client}:{}", w.key),

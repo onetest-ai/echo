@@ -37,4 +37,4 @@ echo '{}' > "$R/intake/facts/mail/acme1.json"; echo '{}' > "$R/senders.json"; ec
 The two folders are gone; nothing else under `recall/` changed.
 
 ## Notes
-- The same as a Rust test: `brain::tests::the_snapshots_and_page_images_go_and_intakes_files_stay`.
+- The same as a Rust test: `intake::tests::the_snapshots_and_page_images_go_and_intakes_files_stay`.

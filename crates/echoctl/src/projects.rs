@@ -121,7 +121,7 @@ impl Rule {
 }
 
 /// Something a project watches besides its calls: a Teams chat (its calls join), a Teams channel,
-/// mail, a folder (the Brain reads them: `brain::sources`, `brain::files`).
+/// mail, a folder (the Brain reads them: `intake::sources`, `intake::files`).
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Source {
     /// `teams_chat`, `teams_channel`, `mail`, `folder`.
@@ -627,7 +627,7 @@ pub fn list() -> Vec<Project> {
 }
 
 /// Every project, or why not all of them could be read (the folder, or one project's file): what takes data away
-/// trusts only a whole list (`brain::sources`).
+/// trusts only a whole list (`intake::sources`).
 pub fn list_whole() -> Result<Vec<Project>> {
     let mut out = vec![];
     for e in fs::read_dir(dir()).with_context(|| format!("reading {}", dir().display()))? {
@@ -1417,9 +1417,9 @@ pub fn terms_for_meeting(m: &MeetingContext) -> Vec<String> {
     let mut out: Vec<String> = vec![];
     // The dictionary (it supersedes the glossaries), whether Intake is on or off: terms pinned to or mentioned in
     // these threads, and the always-on ones; then any glossary term not moved in yet.
-    #[cfg(feature = "brain")]
-    let from_brain = crate::brain::taxonomy::terms_for_threads(&ps.iter().map(|p| p.id.clone()).collect::<Vec<_>>());
-    #[cfg(not(feature = "brain"))]
+    #[cfg(feature = "intake")]
+    let from_brain = crate::intake::taxonomy::terms_for_threads(&ps.iter().map(|p| p.id.clone()).collect::<Vec<_>>());
+    #[cfg(not(feature = "intake"))]
     let from_brain: Vec<String> = vec![];
     for t in from_brain.into_iter().chain(ps.into_iter().flat_map(|p| p.terms).map(|t| t.term)) {
         if !out.iter().any(|x| x.eq_ignore_ascii_case(&t)) {
@@ -1684,7 +1684,7 @@ mod tests {
         assert_eq!(terms_for_meeting(&meeting("Aurora weekly", &[dana])), vec!["Stargate"]);
     }
 
-    #[cfg(feature = "brain")]
+    #[cfg(feature = "intake")]
     #[test]
     fn the_dictionary_hints_a_meeting_with_intake_off() {
         let (_env, _root) = paths::testenv::folders("projects-dictionary-hint");
@@ -1694,12 +1694,12 @@ mod tests {
             Ok(())
         })
         .unwrap();
-        let scope = crate::brain::taxonomy::LearnedScope { subjects: vec!["aurora weekly".into()], people: vec![], calls: vec![] };
-        crate::brain::taxonomy::learn(&[crate::brain::taxonomy::Learn { term: "Stargate".into(), layer: crate::brain::taxonomy::SHARED.into(), threads: vec![p.id.clone()], scope }], "test").unwrap();
-        assert!(!crate::brain::enabled(), "Intake is off");
-        let _ = fs::remove_file(crate::brain::store_path());
+        let scope = crate::intake::taxonomy::LearnedScope { subjects: vec!["aurora weekly".into()], people: vec![], calls: vec![] };
+        crate::intake::taxonomy::learn(&[crate::intake::taxonomy::Learn { term: "Stargate".into(), layer: crate::intake::taxonomy::SHARED.into(), threads: vec![p.id.clone()], scope }], "test").unwrap();
+        assert!(!crate::intake::enabled(), "Intake is off");
+        let _ = fs::remove_file(crate::intake::store_path());
         assert_eq!(terms_for_meeting(&meeting("Aurora weekly", &[])), vec!["Stargate"]);
-        assert!(!crate::brain::store_path().exists(), "the hint never opens or makes the index with Intake off");
+        assert!(!crate::intake::store_path().exists(), "the hint never opens or makes the index with Intake off");
     }
 
     #[test]

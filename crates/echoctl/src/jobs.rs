@@ -494,9 +494,9 @@ fn enabled(id: &str) -> bool {
         "thread_sync" | "fetch" => cfg.project_sync,
         "minutes" => cfg.auto_minutes,
         "live_notes" => crate::ai::Settings::load().is_ok_and(|s| s.live_notes),
-        #[cfg(feature = "brain")]
-        "brain_reader" => crate::brain::enabled() && crate::brain::settings().auto(),
-        #[cfg(not(feature = "brain"))]
+        #[cfg(feature = "intake")]
+        "brain_reader" => crate::intake::enabled() && crate::intake::settings().auto(),
+        #[cfg(not(feature = "intake"))]
         "brain_reader" => false,
         _ => true,
     }

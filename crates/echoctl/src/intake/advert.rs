@@ -182,7 +182,7 @@ mod tests {
         let (_env, _root) = crate::paths::testenv::folders("brain-advert");
         // A new data folder starts with the Brain off.
         assert!(block(&Access::default_profile()).is_none(), "off: not a word");
-        let c = store::open(&crate::brain::store_path()).unwrap();
+        let c = store::open(&crate::intake::store_path()).unwrap();
         c.execute("INSERT INTO documents(source, kind, title, event_date, refs) VALUES ('call/a', 'call', 'Weekly', '2026-10-01', '{\"client\": \"acme\"}'), ('mail/b', 'mail', 'RFP', '2026-10-20', '{}')", []).unwrap();
         let s = summary(&c, &Access::default_profile()).unwrap();
         // A call whose folder doesn't say its AI profile is nobody's (strict routing): not advertised either.

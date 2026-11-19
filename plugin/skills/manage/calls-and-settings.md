@@ -136,4 +136,4 @@ valid ones that are on as `/my-skills:<id>` when its session starts.
 | `--minutes-page true\|false` | also write each call's minutes as an HTML page |
 
 Elsewhere: `echoctl me` (the path of `me.md`, the profile minutes read); `echoctl server status | use <url> --key … |
-off | share on|off` (transcription on another computer); `echoctl brain set --enabled true|false` (the Brain).
+off | share on|off` (transcription on another computer); `echoctl intake set --enabled true|false` (the Brain).

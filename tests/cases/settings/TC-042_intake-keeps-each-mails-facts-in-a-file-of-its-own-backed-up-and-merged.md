@@ -36,4 +36,4 @@ The facts read are kept in their files and backed up; they left only with their 
 - Remove the scratch data folder.
 
 ## Notes
-- The rules behind each step are Rust tests on made-up data: `brain::facts::tests` (round trip, generations, merge, the move from the index) and `brain::sources::tests` (removals only with every thread read, the mass-removal refusal, Trust and Ignore, a bad id).
+- The rules behind each step are Rust tests on made-up data: `intake::facts::tests` (round trip, generations, merge, the move from the index) and `intake::sources::tests` (removals only with every thread read, the mass-removal refusal, Trust and Ignore, a bad id).

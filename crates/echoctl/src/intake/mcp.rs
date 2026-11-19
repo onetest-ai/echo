@@ -1,4 +1,4 @@
-//! `echoctl brain mcp`: Echo's search as an MCP server over stdio (JSON-RPC, one message per line),
+//! `echoctl intake mcp`: Echo's search as an MCP server over stdio (JSON-RPC, one message per line),
 //! read-only: what was said (search_sources, list_sources, read_source, read_link) and the clients and threads to scope
 //! it by (list_scopes). Who people are, why and how things relate is the Knowledge plugin's.
 
@@ -224,7 +224,7 @@ fn answer(req: &Value) -> Option<Value> {
             }
             Ok(match r {
                 Ok(v) => json!({"content": [{"type": "text", "text": v.to_string()}], "structuredContent": v, "isError": false}),
-                Err(e) => json!({"content": [{"type": "text", "text": json!({"error": format!("{e:#}"), "how_to_fix": "Run `echoctl brain status`."}).to_string()}], "isError": true}),
+                Err(e) => json!({"content": [{"type": "text", "text": json!({"error": format!("{e:#}"), "how_to_fix": "Run `echoctl intake status`."}).to_string()}], "isError": true}),
             })
         }
         m => Err(json!({"code": -32601, "message": format!("no method {m}")})),

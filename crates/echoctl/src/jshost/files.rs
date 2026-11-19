@@ -136,12 +136,12 @@ fn page_range(v: &Value) -> Result<Option<(usize, usize)>> {
     }
 }
 
-/// The text of the file at `path` as Echo's own readers see it (`brain::files`: PDF through pdfium, Word, PowerPoint,
+/// The text of the file at `path` as Echo's own readers see it (`intake::files`: PDF through pdfium, Word, PowerPoint,
 /// spreadsheets, HTML, plain text); a file of another name is text when it has no NUL in its first 8 KB. No model, no
 /// network. → the text and the page count of a paged file. Runs in the child process `echoctl files-text`.
-#[cfg(feature = "brain")]
+#[cfg(feature = "intake")]
 fn text_of(path: &Path, range: Option<(usize, usize)>) -> Result<(String, Option<usize>)> {
-    use crate::brain::files as bf;
+    use crate::intake::files as bf;
     let file = crate::grants::open_regular(path)?;
     if file.metadata()?.len() > TEXT_MAX_FILE {
         bail!("the file is over 50 MB: a plugin reads the text of files up to 50 MB");
@@ -205,7 +205,7 @@ fn text_of(path: &Path, range: Option<(usize, usize)>) -> Result<(String, Option
     Ok((out.join("\n\n"), Some(total)))
 }
 
-#[cfg(not(feature = "brain"))]
+#[cfg(not(feature = "intake"))]
 fn text_of(_: &Path, _: Option<(usize, usize)>) -> Result<(String, Option<usize>)> {
     bail!("this build of Echo has no document readers")
 }
@@ -733,7 +733,7 @@ mod tests {
         sync();
     }
 
-    #[cfg(feature = "brain")]
+    #[cfg(feature = "intake")]
     #[test]
     fn text_of_a_handed_file_comes_from_echos_readers_capped_and_only_for_its_plugin() {
         use std::io::Write as _;

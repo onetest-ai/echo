@@ -5,7 +5,7 @@ are in `.ai-run/guides/development/dev-workflow.md`.
 
 ## Features
 
-- Default features: `transcribe`, `tray`, `brain`, `js` (`crates/echoctl/Cargo.toml::default`).
+- Default features: `transcribe`, `tray`, `intake`, `js` (`crates/echoctl/Cargo.toml::default`).
 - Without the C-heavy parts: `cargo build -p echoctl --no-default-features --features tray` keeps the app and window.
 - `vulkan` adds whisper.cpp on the GPU (Windows/Linux, needs `VULKAN_SDK`).
 

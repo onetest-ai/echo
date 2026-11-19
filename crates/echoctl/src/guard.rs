@@ -273,7 +273,7 @@ impl Scope {
                 }
             }
             "Skill" if self.ask => Err("no skill runs in this session".into()),
-            // The Brain's read-only tools (`echoctl brain mcp`): the window's session may search the
+            // The Brain's read-only tools (`echoctl intake mcp`): the window's session may search the
             // user's other calls; a minutes run may not (it writes from its own call only).
             t if self.ask && t.starts_with(BRAIN_TOOLS) => Ok(()),
             "Skill" => {

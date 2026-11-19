@@ -1,10 +1,10 @@
-//! The Brain: `echoctl brain …` and the top-level `echoctl mcp`.
+//! The Brain: `echoctl intake …` and the top-level `echoctl mcp`.
 
 use anyhow::Result;
 use clap::Subcommand;
 
 use super::print_json;
-use crate::{ai, brain, notes};
+use crate::{ai, intake, notes};
 
 #[derive(Subcommand)]
 pub enum BrainCmd {
@@ -119,15 +119,15 @@ pub enum TaxonomyCmd {
 }
 
 pub fn mcp(profile: Option<String>, client: Option<String>, thread: Vec<String>, call: Option<String>, who: Option<String>) -> Result<()> {
-    let access = brain::access::Access { profile: profile.unwrap_or_else(ai::default_id), client, threads: thread, call };
-    brain::mcp::serve(Some(access), who)
+    let access = intake::access::Access { profile: profile.unwrap_or_else(ai::default_id), client, threads: thread, call };
+    intake::mcp::serve(Some(access), who)
 }
 
 pub fn brain_command(cmd: BrainCmd) -> Result<()> {
     // Reading is allowed anywhere (a session Echo started reads it through MCP); changing it isn't.
     if let BrainCmd::Mcp { profile, client, thread, call, who } = cmd {
-        let access = brain::access::Access { profile: profile.unwrap_or_else(ai::default_id), client, threads: thread, call };
-        return brain::mcp::serve(Some(access), who);
+        let access = intake::access::Access { profile: profile.unwrap_or_else(ai::default_id), client, threads: thread, call };
+        return intake::mcp::serve(Some(access), who);
     }
     if notes::run_limited() {
         anyhow::bail!("the Brain isn't changed from a run Echo started");
@@ -136,41 +136,41 @@ pub fn brain_command(cmd: BrainCmd) -> Result<()> {
         BrainCmd::Mcp { .. } => unreachable!(),
         BrainCmd::Taxonomy { cmd } => {
             match cmd {
-                TaxonomyCmd::Show => print_json(&brain::taxonomy::view()?),
+                TaxonomyCmd::Show => print_json(&intake::taxonomy::view()?),
                 TaxonomyCmd::Edit { json } => {
                     let op: serde_json::Value = serde_json::from_str(&json).map_err(|e| anyhow::anyhow!("not JSON: {e}"))?;
-                    brain::taxonomy::edit(&op)?;
-                    print_json(&brain::taxonomy::view()?)
+                    intake::taxonomy::edit(&op)?;
+                    print_json(&intake::taxonomy::view()?)
                 }
             }
         }
-        BrainCmd::Status => print_json(&brain::status()?),
-        BrainCmd::Sync => print_json(&serde_json::to_value(brain::sync()?)?),
+        BrainCmd::Status => print_json(&intake::status()?),
+        BrainCmd::Sync => print_json(&serde_json::to_value(intake::sync()?)?),
         BrainCmd::Search { query, limit, within, client, thread, kind, section, since, until, person } => {
             let scope = client.as_deref().map(|c| ("client", c)).or(thread.as_deref().map(|t| ("thread", t)));
-            let filters = brain::store::Filters { kinds: kind, sections: section, since, until, person };
-            print_json(&brain::search(&query, limit, within.as_deref(), scope, &filters)?)
+            let filters = intake::store::Filters { kinds: kind, sections: section, since, until, person };
+            print_json(&intake::search(&query, limit, within.as_deref(), scope, &filters)?)
         }
-        BrainCmd::Scopes => print_json(&brain::store::scopes(&brain::store_path())?),
+        BrainCmd::Scopes => print_json(&intake::store::scopes(&intake::store_path())?),
         BrainCmd::Senders { client, trust, ignore, forget } => {
             let pick = trust.map(|k| ("trust", k)).or(ignore.map(|k| ("ignore", k))).or(forget.map(|k| ("forget", k)));
             if let (Some(c), Some((d, k))) = (&client, pick) {
-                brain::senders::decide(c, &k, d)?;
+                intake::senders::decide(c, &k, d)?;
             }
-            let mut v = brain::senders::view();
+            let mut v = intake::senders::view();
             if let Some(c) = &client {
                 v["clients"] = serde_json::json!({c.clone(): v["clients"][c].clone()});
             }
             print_json(&v)
         }
-        BrainCmd::Files => print_json(&brain::files::folder::list_all()?),
+        BrainCmd::Files => print_json(&intake::files::folder::list_all()?),
         BrainCmd::ReadFile { paths, text } => {
             let today = chrono::Local::now().format("%Y-%m-%d").to_string();
             for p in paths {
-                match brain::files::read(&p) {
+                match intake::files::read(&p) {
                     Ok(r) => {
                         let body = r.md.clone().unwrap_or_else(|| r.pages.iter().map(|x| x.text.clone()).collect::<Vec<_>>().join("\n"));
-                        let (date, from) = brain::files::exact_date(&body, &p, &today);
+                        let (date, from) = intake::files::exact_date(&body, &p, &today);
                         let pages: Vec<serde_json::Value> = r
                             .pages
                             .iter()
@@ -192,7 +192,7 @@ pub fn brain_command(cmd: BrainCmd) -> Result<()> {
             }
         }
         BrainCmd::Set { endpoint, api, model, key, enabled } => {
-            let mut s = brain::settings();
+            let mut s = intake::settings();
             if let Some(on) = enabled {
                 s.enabled = Some(on);
             }
@@ -208,8 +208,8 @@ pub fn brain_command(cmd: BrainCmd) -> Result<()> {
             if let Some(k) = key {
                 s.key = (!k.is_empty()).then_some(k);
             }
-            brain::save_settings(&s)?;
-            print_json(&brain::status()?)
+            intake::save_settings(&s)?;
+            print_json(&intake::status()?)
         }
     }
     Ok(())

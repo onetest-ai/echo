@@ -165,7 +165,7 @@ const CARD_HEADINGS: usize = 40;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::brain::{self, facts, store};
+    use crate::intake::{self, facts, store};
     use crate::projects::{self, Stage};
     use serde_json::json;
 
@@ -189,7 +189,7 @@ mod tests {
 
     /// A source's sections in the index: (id, kind), in order.
     fn sections(src: &str) -> Vec<(i64, String)> {
-        let c = store::open(&brain::store_path()).unwrap();
+        let c = store::open(&intake::store_path()).unwrap();
         let mut st = c.prepare("SELECT id, section FROM chunks WHERE source = ?1 ORDER BY ord").unwrap();
         st.query_map([src], |r| Ok((r.get(0)?, r.get(1)?))).unwrap().map(|x| x.unwrap()).collect()
     }
@@ -213,7 +213,7 @@ mod tests {
     }
 
     fn on() {
-        brain::save_settings(&brain::embed::Settings { enabled: Some(true), ..Default::default() }).unwrap();
+        intake::save_settings(&intake::embed::Settings { enabled: Some(true), ..Default::default() }).unwrap();
     }
 
     /// A mail conversation's fact file under `thread`: one message `days` ago per entry.
@@ -221,7 +221,7 @@ mod tests {
         let at = |n: i64| (chrono::Utc::now() - chrono::Duration::days(n)).format("%Y-%m-%d %H:%M").to_string();
         let sections = days
             .iter()
-            .map(|n| facts::Section { head: format!("{} Jane Doe", at(*n)), from: Some("Jane Doe".into()), facts: vec![brain::digest::Fact { text: format!("The gateway plan, {n} days ago."), quote: None }], ..Default::default() })
+            .map(|n| facts::Section { head: format!("{} Jane Doe", at(*n)), from: Some("Jane Doe".into()), facts: vec![intake::digest::Fact { text: format!("The gateway plan, {n} days ago."), quote: None }], ..Default::default() })
             .collect();
         let f = facts::Facts::new(source.into(), "mail", "Gateway".into(), Some(at(0)[..10].to_string()), json!({"kind": "mail", "threads": [{"id": thread, "client": null}]}), sections);
         facts::Writer::default().write(&f).unwrap();
@@ -238,7 +238,7 @@ mod tests {
         let new = call("new", 2, Some(&acme));
         mail("mail/acme-gateway", &acme, &[100, 10]);
         // A dictionary entry and a thread folder outside the data folder: checked byte for byte too.
-        brain::taxonomy::dictionary_add("Hooli", &[], &[], Some("org"), None, "test").unwrap();
+        intake::taxonomy::dictionary_add("Hooli", &[], &[], Some("org"), None, "test").unwrap();
         let outside = root.join("outside-docs");
         std::fs::create_dir_all(&outside).unwrap();
         std::fs::write(outside.join("plan.md"), "# Plan\n\n## Gateway rollout\nThe gateway goes in first.\n").unwrap();
@@ -249,7 +249,7 @@ mod tests {
         .unwrap();
         let (home_before, outside_before) = (files(&crate::paths::home()), files(&outside));
         assert!(home_before.keys().any(|p| p.to_string_lossy().contains("taxonomy")), "{:?}", home_before.keys());
-        let r = brain::sync().unwrap();
+        let r = intake::sync().unwrap();
         assert_eq!(kinds(&source_of(&old)), ["card"], "past 90 days: only its card is written");
         assert_eq!(kinds(&source_of(&mid)), ["summary", "decisions", "card"], "past 45 days: its minutes and card");
         assert_eq!(kinds(&source_of(&new)), ["summary", "decisions", "transcript", "card"]);
@@ -259,18 +259,18 @@ mod tests {
         assert_eq!(files(&crate::paths::home()), home_before);
         assert_eq!(files(&outside), outside_before);
         // The card says what the call was.
-        let c = store::open(&brain::store_path()).unwrap();
+        let c = store::open(&intake::store_path()).unwrap();
         let card: String = c.query_row("SELECT text FROM chunks WHERE source = ?1 AND section = 'card'", [source_of(&old)], |r| r.get(0)).unwrap();
         assert!(card.contains("Call: old weekly") && card.contains("Threads: Acme rollout") && card.contains("People: Dana Ruiz") && card.contains("Summary: The old gateway goes first."), "{card}");
         // Again the same day: nothing is read again and no sweep runs.
         let today = chrono::Local::now().date_naive();
-        assert!(!due(&brain::store_path(), today, &projects::closed_threads()).unwrap());
-        let r = brain::sync().unwrap();
+        assert!(!due(&intake::store_path(), today, &projects::closed_threads()).unwrap());
+        let r = intake::sync().unwrap();
         assert_eq!((r.retired, r.added, r.changed, r.embedded), (0, 0, 0, 0), "{r:?}");
         // 85 days on, the next day's sweep takes what aged since; the cards stay.
         let later = today + chrono::Duration::days(85);
-        assert!(due(&brain::store_path(), later, &projects::closed_threads()).unwrap());
-        assert!(apply(&brain::store_path(), later, &projects::closed_threads()).unwrap() >= 2);
+        assert!(due(&intake::store_path(), later, &projects::closed_threads()).unwrap());
+        assert!(apply(&intake::store_path(), later, &projects::closed_threads()).unwrap() >= 2);
         assert_eq!(kinds(&source_of(&new)), ["summary", "decisions", "card"]);
         assert_eq!(kinds(&source_of(&mid)), ["card"]);
         assert!(sections("mail/acme-gateway").is_empty());
@@ -296,20 +296,20 @@ mod tests {
             Ok(())
         })
         .unwrap();
-        brain::sync().unwrap();
-        let doc: String = store::open(&brain::store_path()).unwrap().query_row("SELECT source FROM documents WHERE source LIKE 'file/%'", [], |r| r.get(0)).unwrap();
+        intake::sync().unwrap();
+        let doc: String = store::open(&intake::store_path()).unwrap().query_row("SELECT source FROM documents WHERE source LIKE 'file/%'", [], |r| r.get(0)).unwrap();
         let (call_ids, doc_ids, mail_ids) = (sections(&source_of(&shut)), sections(&doc), sections("mail/hooli-plan"));
         assert!(!doc_ids.is_empty() && doc_ids.iter().all(|s| s.1 == "document"), "{doc_ids:?}");
         assert_eq!(mail_ids.len(), 1);
 
         projects::set_stage(&hooli, Stage::Done, Some("wrapped up")).unwrap();
-        brain::sync().unwrap();
+        intake::sync().unwrap();
         assert_eq!(kinds(&source_of(&shut)), ["card"], "a closed thread's call: its card only");
         assert_eq!(sections(&source_of(&shut))[0], *call_ids.last().unwrap(), "the card keeps its id");
         assert_eq!(kinds(&source_of(&kept)).len(), 4, "an open thread's call is whole");
         assert!(sections("mail/hooli-plan").is_empty(), "a closed thread's mail leaves");
-        assert_eq!(sections(&doc), [(crate::brain::chunk::chunk_id(&doc, store::CARD_ORD), "card".to_string())], "a closed thread's document: its card");
-        let h = store::search_in(&brain::store_path(), "gateway rollout budget", 5, None, None, None).unwrap();
+        assert_eq!(sections(&doc), [(crate::intake::chunk::chunk_id(&doc, store::CARD_ORD), "card".to_string())], "a closed thread's document: its card");
+        let h = store::search_in(&intake::store_path(), "gateway rollout budget", 5, None, None, None).unwrap();
         let card = h["hits"].as_array().unwrap().iter().find(|x| x["source"] == doc.as_str()).expect("the card is found").clone();
         let text = card["text"].as_str().unwrap();
         assert!(text.contains("Headings: Gateway rollout · Budget") && text.contains("plan.md") && text.contains("Hooli workshop") && card["closed"].is_array(), "{card}");
@@ -318,11 +318,11 @@ mod tests {
         // Opened again, with no Microsoft 365 sign-in: everything back, with the ids it had (R10).
         assert!(crate::graph::account().is_none());
         projects::set_stage(&hooli, Stage::Active, Some("back")).unwrap();
-        brain::sync().unwrap();
+        intake::sync().unwrap();
         assert_eq!(sections(&source_of(&shut)), call_ids);
         assert_eq!(sections(&doc), doc_ids);
         assert_eq!(sections("mail/hooli-plan"), mail_ids, "the mail from its fact file");
-        let r = brain::sync().unwrap();
+        let r = intake::sync().unwrap();
         assert_eq!((r.retired, r.added, r.changed), (0, 0, 0), "{r:?}");
     }
 
@@ -333,19 +333,19 @@ mod tests {
         let hooli = projects::create("Hooli workshop", None, None).unwrap().id;
         let shut = call("hooli", 2, Some(&hooli));
         let other = call("other", 3, None);
-        brain::sync().unwrap();
+        intake::sync().unwrap();
         assert_eq!(kinds(&source_of(&shut)).len(), 4);
         projects::set_stage(&hooli, Stage::Done, Some("wrapped up")).unwrap();
         // Another call is being transcribed (its marker holds a live process: this one).
         let marker = other.join(crate::transcribe_marker());
         std::fs::write(&marker, std::process::id().to_string()).unwrap();
-        let r = brain::sync().unwrap();
+        let r = intake::sync().unwrap();
         assert!(r.sweep_waits && r.retired == 0, "{r:?}");
         assert_eq!(kinds(&source_of(&shut)).len(), 4, "the closed thread's call waits for the sweep");
-        assert!(due(&brain::store_path(), chrono::Local::now().date_naive(), &projects::closed_threads()).unwrap(), "still due");
+        assert!(due(&intake::store_path(), chrono::Local::now().date_naive(), &projects::closed_threads()).unwrap(), "still due");
         // A marker left by a process that is gone holds nothing back.
         std::fs::write(&marker, "999999999").unwrap();
-        let r = brain::sync().unwrap();
+        let r = intake::sync().unwrap();
         assert!(!r.sweep_waits && r.retired == 3, "{r:?}");
         assert_eq!(kinds(&source_of(&shut)), ["card"]);
     }

@@ -82,7 +82,7 @@ pub struct Senders {
 }
 
 fn path() -> std::path::PathBuf {
-    crate::brain::dir().join("senders.json")
+    crate::intake::dir().join("senders.json")
 }
 
 pub fn load() -> Senders {

@@ -4,8 +4,8 @@ use anyhow::Result;
 use clap::Subcommand;
 
 use super::print_json;
-#[cfg(feature = "brain")]
-use crate::brain;
+#[cfg(feature = "intake")]
+use crate::intake;
 use crate::{calls, config, guard, ledger, notes, people, projects, projectsync, tasks, threadlinks, watch};
 
 #[derive(Subcommand)]
@@ -95,7 +95,7 @@ pub enum ProjectCmd {
     /// subject, or its conversation's, contains one; * needs it), --channel <team id>|<channel id> (--name
     /// to show), --folder <path> (--exclude <glob>…: what in it not to read) into the Brain; --chat <chat
     /// id> (19:…) a meeting chat its work reads between calls; or --remove <kind:id> as `show` lists them
-    #[cfg(feature = "brain")]
+    #[cfg(feature = "intake")]
     Source {
         id: String,
         #[arg(long)]
@@ -446,7 +446,7 @@ pub fn project_command(cmd: ProjectCmd) -> Result<()> {
             })?;
             show(&p)?
         }
-        #[cfg(feature = "brain")]
+        #[cfg(feature = "intake")]
         ProjectCmd::Source { id, mail, subject, channel, folder, chat, exclude, name, remove } => {
             anyhow::ensure!(subject.is_none() || mail.is_some(), "--subject goes with --mail");
             let subject = subject.as_deref().map(projects::subject_words);
@@ -456,7 +456,7 @@ pub fn project_command(cmd: ProjectCmd) -> Result<()> {
                     anyhow::ensure!(c.starts_with("19:") && !c.contains(char::is_whitespace), "--chat takes a Teams chat id (19:…@thread.v2)");
                     Some(("teams_chat".to_string(), c))
                 }
-                (Some(m), _, _) => Some(("mail".to_string(), brain::sources::mail_source(&m)?)),
+                (Some(m), _, _) => Some(("mail".to_string(), intake::sources::mail_source(&m)?)),
                 (None, Some(c), _) if c.split_once('|').is_some_and(|(a, b)| !a.is_empty() && !b.is_empty()) => Some(("teams_channel".to_string(), c)),
                 (None, Some(_), _) => anyhow::bail!("--channel takes <team id>|<channel id>"),
                 (None, None, Some(f)) => {

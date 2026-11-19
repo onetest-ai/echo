@@ -1910,7 +1910,7 @@ mod tests {
         assert_eq!(h["applied"], true, "{h}");
     }
 
-    #[cfg(feature = "brain")]
+    #[cfg(feature = "intake")]
     #[test]
     fn trusting_a_sender_reads_the_clients_sources_again() {
         let (_env, _root) = crate::paths::testenv::folders("ledger-reread");
@@ -2054,7 +2054,7 @@ mod tests {
         assert_eq!(st["domain:acme.example"]["read_at"], "x", "the other sources as they were");
     }
 
-    #[cfg(feature = "brain")]
+    #[cfg(feature = "intake")]
     #[test]
     fn mail_waits_while_nobody_can_be_told_a_colleague() {
         let (_env, l, id) = setup("ledger-mail-sync");

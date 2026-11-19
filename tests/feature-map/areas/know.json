@@ -49,7 +49,7 @@
   },
   {
    "id": "F-KNOW-10",
-   "feature": "Recall search (`echoctl brain search`, MCP search_sources) narrows by source kind (call, mail, channel, document), section kind (summary, decisions, action items, open questions, other minutes, transcript, chat, mail, channel, document, card), days (since / until; without them a date said in the query, in English, Ukrainian or Russian, such as \"12 November\" or \"last week\") and who said it, before the hits are cut; unknown kinds and malformed days are refused",
+   "feature": "Recall search (`echoctl intake search`, MCP search_sources) narrows by source kind (call, mail, channel, document), section kind (summary, decisions, action items, open questions, other minutes, transcript, chat, mail, channel, document, card), days (since / until; without them a date said in the query, in English, Ukrainian or Russian, such as \"12 November\" or \"last week\") and who said it, before the hits are cut; unknown kinds and malformed days are refused",
    "priority": "high",
    "check": "agent",
    "axes": []

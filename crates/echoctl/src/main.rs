@@ -1,7 +1,7 @@
 #[cfg(feature = "transcribe")]
 mod aec;
-#[cfg(feature = "brain")]
-mod brain;
+#[cfg(feature = "intake")]
+mod intake;
 mod ai;
 mod app;
 mod apps;
@@ -259,11 +259,12 @@ enum Cmd {
         #[arg(long)]
         write: Option<String>,
     },
-    /// The Brain: cross-call intelligence over calls (later channels, mail, folders) (JSON)
-    #[cfg(feature = "brain")]
-    Brain {
+    /// Intake and search: mail and channel facts, senders, the dictionary, the search index (JSON)
+    #[cfg(feature = "intake")]
+    #[command(alias = "brain")]
+    Intake {
         #[command(subcommand)]
-        cmd: cli::brain::BrainCmd,
+        cmd: cli::intake::BrainCmd,
     },
     /// Projects: which calls belong (rules, pins), stage, glossary, people (JSON)
     Project {
@@ -349,7 +350,7 @@ enum Cmd {
     },
     /// Echo's MCP server for Claude sessions (stdio): what was said, people, echo:// links — read-only, one AI
     /// profile's sources (narrowed for a call's session)
-    #[cfg(feature = "brain")]
+    #[cfg(feature = "intake")]
     #[command(hide = true)]
     Mcp {
         #[arg(long)]
@@ -502,7 +503,7 @@ enum Cmd {
     GpuCheck,
     /// (internal) The text of a file for a plugin (`ctx.files.text`): the host runs this as a child it can stop
     /// (`jshost::files::text`); one JSON line on stdout
-    #[cfg(all(feature = "js", feature = "brain"))]
+    #[cfg(all(feature = "js", feature = "intake"))]
     #[command(hide = true, name = "files-text")]
     FilesText {
         path: std::path::PathBuf,
@@ -767,7 +768,7 @@ fn main() -> Result<()> {
         Cmd::Doctor { json, request, probe, open, no_ai } => permissions::doctor(json, request, probe, open.as_deref(), no_ai),
         Cmd::Model { cmd } => cli::app::model(cmd),
         Cmd::Config(args) => cli::app::config(args),
-        #[cfg(all(feature = "js", feature = "brain"))]
+        #[cfg(all(feature = "js", feature = "intake"))]
         Cmd::FilesText { path, pages, max } => std::process::exit(jshost::files::child_main(&path, pages.as_deref(), max)),
         Cmd::RunGuard => std::process::exit(guard::command()),
         Cmd::WrapperRun { args } => std::process::exit(ai::wrapper::relay(&args)),
@@ -784,8 +785,8 @@ fn main() -> Result<()> {
         #[cfg(feature = "transcribe")]
         Cmd::Speakers { call, names, relabel } => speakers::command(&call, &names, relabel),
         Cmd::Vocab { cmd } => cli::capture::vocab(cmd),
-        #[cfg(feature = "brain")]
-        Cmd::Brain { cmd } => cli::brain::brain_command(cmd),
+        #[cfg(feature = "intake")]
+        Cmd::Intake { cmd } => cli::intake::brain_command(cmd),
         Cmd::Project { cmd } => cli::project::project_command(cmd),
         Cmd::Client { cmd } => cli::project::client_command(cmd),
         Cmd::Org { cmd } => cli::project::org_command(cmd),
@@ -799,8 +800,8 @@ fn main() -> Result<()> {
         Cmd::Plugin { cmd } => cli::plugin::plugin_command(cmd),
         Cmd::Deliver { cmd } => cli::m365::deliver_command(cmd),
         Cmd::M365 { cmd } => cli::m365::run(cmd),
-        #[cfg(feature = "brain")]
-        Cmd::Mcp { profile, client, thread, call, who } => cli::brain::mcp(profile, client, thread, call, who),
+        #[cfg(feature = "intake")]
+        Cmd::Mcp { profile, client, thread, call, who } => cli::intake::mcp(profile, client, thread, call, who),
         Cmd::Read { link } => {
             print!("{}", links::read(&link)?);
             Ok(())
@@ -913,4 +914,20 @@ fn main() -> Result<()> {
     // A change that failed is noted too, with why.
     notes::note_action(&argv, out.as_ref().err().map(|e| format!("failed: {e:#}")).as_deref());
     out
+}
+
+#[cfg(all(test, feature = "intake"))]
+mod tests {
+    use super::*;
+    use clap::CommandFactory;
+
+    #[test]
+    fn echoctl_brain_is_a_hidden_alias_of_echoctl_intake() {
+        for name in ["intake", "brain"] {
+            let cli = Cli::try_parse_from(["echoctl", name, "search", "cap", "--limit", "3"]).unwrap();
+            assert!(matches!(cli.cmd, Cmd::Intake { cmd: cli::intake::BrainCmd::Search { limit: 3, .. } }), "{name}");
+        }
+        let help = Cli::command().render_help().to_string();
+        assert!(help.contains("\n  intake ") && !help.contains("\n  brain "), "{help}");
+    }
 }

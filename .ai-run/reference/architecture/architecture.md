@@ -16,7 +16,7 @@ in the same PR. The rules are in `.ai-run/guides/architecture/architecture.md`.
 | Tray and window | `tray.rs`, `window/<area>.rs`, `terminal.rs`, `ui/` |
 | AI jobs | `ai.rs`, `livenotes.rs`, `notes.rs`, `guard.rs`, `projectsync.rs` |
 | Threads and ledger | `projects.rs`, `ledger.rs`, `people.rs`, `tasks.rs` |
-| Recall (Brain) | `brain/` (feature `brain`) |
+| Recall (Intake and search) | `intake/` (feature `intake`; `brain` is its alias) |
 | Echo plugins | `plugins.rs`, `jshost.rs`, `web/` (a page read as Markdown), `claudejob.rs`, `share.rs` (feature `js`) |
 | Claude Code plugin | `plugin/` |
 
@@ -29,11 +29,11 @@ Optional dependencies sit behind `#[cfg(feature = …)]`, the module's `mod` lin
 |---|---|
 | `transcribe` | whisper-rs (whisper.cpp), ureq, libloading |
 | `tray` | tray-icon, tao, wry, portable-pty |
-| `brain` | rusqlite, zip, quick-xml, calamine, pdfium-render, regex |
+| `intake` | rusqlite, zip, quick-xml, calamine, pdfium-render, regex |
 | `js` | rquickjs |
 | `vulkan` | `transcribe` + whisper.cpp on the GPU (Windows/Linux) |
 
-Default features: `transcribe`, `tray`, `brain`, `js`.
+Default features: `transcribe`, `tray`, `intake`, `js`.
 
 ## Per-OS files
 

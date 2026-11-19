@@ -564,7 +564,7 @@ pub fn channel_messages(team: &str, channel: &str, since: DateTime<Utc>, cap: us
 
 /// Mail matching a KQL query received since `since` (newest first, at most `cap`): `[{id,
 /// conversation, subject, from, to, at, text, url}]`.
-#[cfg_attr(not(feature = "brain"), allow(dead_code))]
+#[cfg_attr(not(feature = "intake"), allow(dead_code))]
 pub fn mail(kql: &str, since: DateTime<Utc>, cap: usize) -> Result<Vec<Value>> {
     let token = access_token()?;
     let q = format!("{kql} received>={}", since.format("%Y-%m-%d"));
@@ -674,7 +674,7 @@ pub fn mail_auth(m: &Value) -> &'static str {
 }
 
 /// The organisation's own mail domains (colleagues), from the tenant's verified domains.
-#[cfg_attr(not(feature = "brain"), allow(dead_code))]
+#[cfg_attr(not(feature = "intake"), allow(dead_code))]
 pub fn org_domains() -> Result<Vec<String>> {
     let token = access_token()?;
     let v = graph_get(&token, &format!("{GRAPH}/organization?$select=verifiedDomains"))?;
@@ -683,7 +683,7 @@ pub fn org_domains() -> Result<Vec<String>> {
 
 /// A Teams author's mail address: the People API searched by their name, kept only when the person
 /// found is that author (the same directory id) — a name alone can be anyone's.
-#[cfg_attr(not(feature = "brain"), allow(dead_code))]
+#[cfg_attr(not(feature = "intake"), allow(dead_code))]
 pub fn person_email(name: &str, id: &str) -> Result<Option<String>> {
     let token = access_token()?;
     let url = format!("{GRAPH}/me/people?$search={}&$top=5&$select=id,displayName,scoredEmailAddresses,userPrincipalName", urlencode(&format!("\"{}\"", name.replace('"', ""))));

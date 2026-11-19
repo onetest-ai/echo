@@ -38,18 +38,18 @@ pub fn chat_due(p: &crate::projects::Project) -> bool {
 /// thread's client (the Brain's list); the others wait in that list. A Teams author not looked up yet
 /// holds the day back. Without the Brain built in, everyone in the chat (as for a call's own chat).
 pub(super) struct ChatTrust {
-    #[cfg(feature = "brain")]
-    snd: crate::brain::senders::Senders,
-    #[cfg(feature = "brain")]
+    #[cfg(feature = "intake")]
+    snd: crate::intake::senders::Senders,
+    #[cfg(feature = "intake")]
     lookups: usize,
-    #[cfg(feature = "brain")]
+    #[cfg(feature = "intake")]
     client: String,
-    #[cfg(feature = "brain")]
+    #[cfg(feature = "intake")]
     name: String,
 }
 
 #[derive(PartialEq)]
-#[cfg_attr(not(feature = "brain"), allow(dead_code))]
+#[cfg_attr(not(feature = "intake"), allow(dead_code))]
 pub(super) enum Said {
     Read,
     Skip,
@@ -59,21 +59,21 @@ pub(super) enum Said {
 impl ChatTrust {
     #[allow(unused_variables)]
     fn new(p: &crate::projects::Project, name: &str) -> ChatTrust {
-        #[cfg(feature = "brain")]
+        #[cfg(feature = "intake")]
         {
-            let mut snd = crate::brain::senders::load();
+            let mut snd = crate::intake::senders::load();
             snd.refresh_org();
             ChatTrust { snd, lookups: 0, client: p.client.clone().unwrap_or_else(|| "-".into()), name: name.to_string() }
         }
-        #[cfg(not(feature = "brain"))]
+        #[cfg(not(feature = "intake"))]
         ChatTrust {}
     }
 
     #[allow(unused_variables)]
     fn judge(&mut self, m: &Value) -> Said {
-        #[cfg(feature = "brain")]
+        #[cfg(feature = "intake")]
         {
-            use crate::brain::senders::Verdict;
+            use crate::intake::senders::Verdict;
             let Some(id) = m["from"]["user"]["id"].as_str() else { return Said::Skip }; // bots, apps
             let key = format!("teams:{id}");
             let who = m["from"]["user"]["displayName"].as_str().unwrap_or("?");
@@ -94,15 +94,15 @@ impl ChatTrust {
                 }
             }
         }
-        #[cfg(not(feature = "brain"))]
+        #[cfg(not(feature = "intake"))]
         Said::Read
     }
 
     fn save(self) {
-        #[cfg(feature = "brain")]
+        #[cfg(feature = "intake")]
         {
             let mut s = self.snd;
-            let _ = crate::brain::senders::save_merged(&mut s);
+            let _ = crate::intake::senders::save_merged(&mut s);
         }
     }
 }

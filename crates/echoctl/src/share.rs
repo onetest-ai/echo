@@ -16,7 +16,7 @@ fn call_id(dir: &Path) -> (String, String) {
 }
 
 /// A thread in a Recall document's refs: `{id, …}` (or a bare id, older).
-#[cfg(feature = "brain")]
+#[cfg(feature = "intake")]
 fn ref_thread(t: &Value) -> Option<&str> {
     t["id"].as_str().or(t.as_str())
 }
@@ -201,16 +201,16 @@ pub fn source(id: &str, opts: &Value) -> Result<Value> {
 
 /// A mail conversation or channel post as Recall indexed it, by its section (one a message): `{from, at, text, link}` —
 /// `at` the message's day and time, `text` the facts Recall's reader kept of it (never the message's own words), in order.
-#[cfg(feature = "brain")]
-fn mail_messages(f: &crate::brain::facts::Facts) -> Vec<Value> {
+#[cfg(feature = "intake")]
+fn mail_messages(f: &crate::intake::facts::Facts) -> Vec<Value> {
     let mut out: Vec<(String, Value)> = vec![];
-    for crate::brain::facts::Piece { title, text, speaker, link } in f.pieces() {
+    for crate::intake::facts::Piece { title, text, speaker, link } in f.pieces() {
         // A long message's facts are several chunks of one section.
         if let Some((_, last)) = out.last_mut().filter(|(t, _)| *t == title) {
             last["text"] = json!(format!("{}\n{}", last["text"].as_str().unwrap_or(""), text.trim()));
             continue;
         }
-        // The section's heading: "YYYY-MM-DD HH:MM <who>" (`brain::sources::part`).
+        // The section's heading: "YYYY-MM-DD HH:MM <who>" (`intake::sources::part`).
         let at = title.get(..16).filter(|a| a.as_bytes().get(4) == Some(&b'-')).map(str::to_owned);
         out.push((title.clone(), json!({"from": speaker, "at": at, "text": text.trim(), "link": link})));
     }
@@ -218,14 +218,14 @@ fn mail_messages(f: &crate::brain::facts::Facts) -> Vec<Value> {
 }
 
 /// What `mail_item` routes a mail by, read once for a list or an event: the threads, the clients, the default AI profile.
-#[cfg(feature = "brain")]
+#[cfg(feature = "intake")]
 struct Routing {
     threads: Vec<crate::projects::Project>,
     clients: Vec<crate::projects::Client>,
     default: String,
 }
 
-#[cfg(feature = "brain")]
+#[cfg(feature = "intake")]
 impl Routing {
     fn load() -> Self {
         Routing { threads: crate::projects::list(), clients: crate::projects::clients().unwrap_or_default(), default: crate::ai::default_id() }
@@ -239,8 +239,8 @@ impl Routing {
 /// messages of senders the user trusts (a sender waiting for the user's decision, ignored, or unauthenticated stays
 /// out of it); `at` its last message's day; a mail's Microsoft 365 ids as Recall keeps them, `m365_id` (its last
 /// message's Graph id, as `ctx.m365.mailThread` takes it) and `conversation_id`, null for a post or what Recall didn't keep.
-#[cfg(feature = "brain")]
-fn mail_item(f: &crate::brain::facts::Facts, routing: &Routing) -> Value {
+#[cfg(feature = "intake")]
+fn mail_item(f: &crate::intake::facts::Facts, routing: &Routing) -> Value {
     let (src, kind, title, date, refs) = (&f.source, &f.kind, Some(&f.title), &f.event_date, &f.refs);
     let Routing { threads: all, clients, default } = routing;
     let mine: Vec<&crate::projects::Project> = refs["threads"].as_array().into_iter().flatten().filter_map(|t| all.iter().find(|p| Some(p.id.as_str()) == ref_thread(t))).collect();
@@ -266,10 +266,10 @@ fn mail_item(f: &crate::brain::facts::Facts, routing: &Routing) -> Value {
 /// A mail conversation's or channel post's source: `mail_item`, plus `date` (= `at`), `text` (the facts Recall keeps
 /// of it, section by section — Recall keeps no message's own words; those are read from Microsoft 365, `ctx.m365`) and
 /// `messages` (`mail_messages`).
-#[cfg(feature = "brain")]
+#[cfg(feature = "intake")]
 fn mail_source(src: &str) -> Result<Value> {
     anyhow::ensure!(matches!(crate::links::Link::parse(&format!("echo://mail/{src}")), Some(crate::links::Link::Mail(_))), "not a mail or post: {src}");
-    let f = crate::brain::facts::read(src).ok_or_else(|| anyhow!("no {src:?} in Intake"))?;
+    let f = crate::intake::facts::read(src).ok_or_else(|| anyhow!("no {src:?} in Intake"))?;
     let mut out = mail_item(&f, &Routing::load());
     let text: Vec<String> = f.pieces().into_iter().map(|p| p.text).collect();
     out["date"] = out["at"].clone();
@@ -278,7 +278,7 @@ fn mail_source(src: &str) -> Result<Value> {
     Ok(out)
 }
 
-#[cfg(not(feature = "brain"))]
+#[cfg(not(feature = "intake"))]
 fn mail_source(src: &str) -> Result<Value> {
     bail!("{src}: this build has no Recall")
 }
@@ -325,11 +325,11 @@ pub fn sources(opts: &Value) -> Result<Value> {
             out.push(json!({"id": call_id(&dir).0, "stamp": crate::calls::stamp_of(&dir), "kind": "call", "title": meta["title"], "date": date, "threads": threads.iter().map(|t| t["id"].clone()).collect::<Vec<_>>(), "client": client_v}));
         }
     }
-    #[cfg(feature = "brain")]
+    #[cfg(feature = "intake")]
     if kind.is_empty() || kind == "mail" || kind == "channel" {
         {
             let routing = Routing::load();
-            let mut all = crate::brain::facts::all();
+            let mut all = crate::intake::facts::all();
             // Newest first, undated last.
             all.sort_by(|a, b| b.event_date.cmp(&a.event_date));
             for f in all {
@@ -547,17 +547,17 @@ pub fn people() -> Result<Value> {
 }
 
 /// The dictionary: `{terms: [{name, synonyms, spellings, kind, group, client}]}` — `client` none = the practice's.
-#[cfg(feature = "brain")]
+#[cfg(feature = "intake")]
 pub fn dictionary() -> Result<Value> {
-    let t = crate::brain::taxonomy::current().unwrap_or_default();
+    let t = crate::intake::taxonomy::current().unwrap_or_default();
     Ok(json!({"terms": t.terms.iter().map(|x| json!({
         "name": x.name, "synonyms": x.synonyms, "spellings": x.variants, "kind": x.kind,
-        "group": if x.group.is_empty() { crate::brain::taxonomy::group_of(&x.kind).to_string() } else { x.group.clone() },
+        "group": if x.group.is_empty() { crate::intake::taxonomy::group_of(&x.kind).to_string() } else { x.group.clone() },
         "client": (x.layer != "shared").then_some(&x.layer),
     })).collect::<Vec<_>>()}))
 }
 
-#[cfg(not(feature = "brain"))]
+#[cfg(not(feature = "intake"))]
 pub fn dictionary() -> Result<Value> {
     Ok(json!({"terms": []}))
 }
@@ -565,17 +565,17 @@ pub fn dictionary() -> Result<Value> {
 /// Names a plugin adds to the dictionary: `{name, synonyms?, spellings?, kind?, client?}`. Merged into the term any
 /// of its names already is (its other names added; nothing renamed or removed), else a new term in the client's
 /// layer (or the practice's). Answers `{term, added: [names new to it], new}`.
-#[cfg(feature = "brain")]
+#[cfg(feature = "intake")]
 pub fn dictionary_add(plugin: &str, v: &Value) -> Result<Value> {
     let name = v["name"].as_str().map(str::trim).filter(|n| !n.is_empty() && n.chars().count() <= 80).ok_or_else(|| anyhow!("a term needs a name (≤ 80 characters)"))?;
     let words = |k: &str| -> Vec<String> {
         v[k].as_array().into_iter().flatten().filter_map(|x| x.as_str()).map(str::trim).filter(|x| !x.is_empty() && x.chars().count() <= 80).map(str::to_owned).take(20).collect()
     };
     let client = v["client"].as_str().filter(|c| crate::projects::clients().ok().is_some_and(|cs| cs.iter().any(|x| x.id == *c)));
-    crate::brain::taxonomy::dictionary_add(name, &words("synonyms"), &words("spellings"), v["kind"].as_str(), client, &format!("plugin:{plugin}"))
+    crate::intake::taxonomy::dictionary_add(name, &words("synonyms"), &words("spellings"), v["kind"].as_str(), client, &format!("plugin:{plugin}"))
 }
 
-#[cfg(not(feature = "brain"))]
+#[cfg(not(feature = "intake"))]
 pub fn dictionary_add(_plugin: &str, _v: &Value) -> Result<Value> {
     bail!("this build has no dictionary")
 }
@@ -615,7 +615,7 @@ pub(crate) fn minutes_payload(dir: &Path) -> Value {
 }
 
 /// At most this many `items` in a `sources_changed` (the rest by their ids in `changed`, read with `echo.read('source')`).
-#[cfg_attr(not(feature = "brain"), allow(dead_code))]
+#[cfg_attr(not(feature = "intake"), allow(dead_code))]
 const ITEMS_MAX: usize = 100;
 
 /// Tell the plugins which of Recall's mail and channel posts are new, changed or gone after a sync.
@@ -634,12 +634,12 @@ pub(crate) fn sources_payload(touched: &[String], gone: &[String]) -> Option<Val
     if changed.is_empty() && removed.is_empty() {
         return None;
     }
-    #[cfg(feature = "brain")]
+    #[cfg(feature = "intake")]
     let items: Vec<Value> = {
         let routing = Routing::load();
-        changed.iter().take(ITEMS_MAX).filter_map(|s| crate::brain::facts::read(s)).map(|f| mail_item(&f, &routing)).collect()
+        changed.iter().take(ITEMS_MAX).filter_map(|s| crate::intake::facts::read(s)).map(|f| mail_item(&f, &routing)).collect()
     };
-    #[cfg(not(feature = "brain"))]
+    #[cfg(not(feature = "intake"))]
     let items: Vec<Value> = vec![];
     let ids = |v: Vec<String>| v.into_iter().map(|s| format!("mail:{s}")).collect::<Vec<_>>();
     Some(json!({"changed": ids(changed), "removed": ids(removed), "items": items}))
@@ -927,7 +927,7 @@ mod tests {
         assert_eq!(other, json!({"call": "x", "title": "t"}));
     }
 
-    #[cfg(feature = "brain")]
+    #[cfg(feature = "intake")]
     #[test]
     fn the_sources_list_and_event_give_each_mail_as_recall_decided_it() {
         let (_env, _root) = crate::paths::testenv::folders("share-sources-golden");
@@ -940,15 +940,15 @@ mod tests {
         crate::projects::add_client("Globex", &["globex.example".into()], false).unwrap();
         let globex = crate::projects::create("Globex pilot", Some("globex"), None).unwrap().id;
         // Intake's fact files, as a sync writes them (the index isn't read).
-        let mut w = crate::brain::facts::Writer::default();
+        let mut w = crate::intake::facts::Writer::default();
         for (src, title, day, threads) in [("mail/one", "Pilot dates", "2026-11-11", json!([{"id": pilot}])), ("mail/two", "Both pilots", "2026-11-12", json!([{"id": pilot}, {"id": globex}])), ("channel/three", "Standup", "2026-11-10", json!([{"id": globex}]))] {
             let kind = src.split('/').next().unwrap();
             let refs = json!({"kind": kind, "people": ["jane@acme.example"], "url": format!("https://outlook.example/{src}"), "subjects": [title], "threads": threads});
-            let sec = crate::brain::facts::Section { head: format!("{day} 09:12 Jane Doe"), from: Some("Jane Doe".into()), at: format!("{day}T09:12:00Z"), link: "https://outlook.example/x".into(),
-                                                     facts: vec![crate::brain::digest::Fact { text: format!("{title}, a fact"), quote: None }], ..Default::default() };
-            w.write(&crate::brain::facts::Facts::new(src.into(), kind, title.into(), Some(day.into()), refs, vec![sec])).unwrap();
+            let sec = crate::intake::facts::Section { head: format!("{day} 09:12 Jane Doe"), from: Some("Jane Doe".into()), at: format!("{day}T09:12:00Z"), link: "https://outlook.example/x".into(),
+                                                     facts: vec![crate::intake::digest::Fact { text: format!("{title}, a fact"), quote: None }], ..Default::default() };
+            w.write(&crate::intake::facts::Facts::new(src.into(), kind, title.into(), Some(day.into()), refs, vec![sec])).unwrap();
         }
-        assert!(!crate::brain::store_path().exists(), "served from the fact files alone");
+        assert!(!crate::intake::store_path().exists(), "served from the fact files alone");
         // Each mail as it was given before its threads and profiles were read once per list: one client and profile,
         // two threads of two clients (no client, no profile), the default profile.
         let (acme, globex_t) = (json!({"client": "acme", "client_name": "Acme", "id": "acme-pilot", "name": "Acme pilot"}), json!({"client": "globex", "client_name": "Globex", "id": "globex-pilot", "name": "Globex pilot"}));
@@ -976,19 +976,19 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "brain")]
+    #[cfg(feature = "intake")]
     #[test]
     fn sources_changed_carries_what_recall_decided_and_the_read_says_the_same() {
         let (_env, _root) = crate::paths::testenv::folders("share-sources-event");
         let pilot = acme_pilot();
-        use crate::brain::{digest::Fact, facts::{Facts, Section}};
+        use crate::intake::{digest::Fact, facts::{Facts, Section}};
         let refs = json!({"kind": "mail", "conversation": "c1", "message": "AAMk-c1-2", "people": ["jane@acme.example", "kim@acme.example"], "url": "https://outlook.example/1", "subjects": ["Pilot dates", "RE: Pilot dates"], "threads": [{"id": pilot}]});
         let sec = |head: &str, fact: Fact| Section { head: head.into(), from: head.splitn(3, ' ').nth(2).map(str::to_owned), at: String::new(), link: "https://outlook.example/1".into(), facts: vec![fact], ..Default::default() };
         let f = Facts::new("mail/abc".into(), "mail", "Pilot dates".into(), Some("2026-11-11".into()), refs, vec![
             sec("2026-11-10 09:12 Jane Doe", Fact { text: "The pilot moves to 24 Nov".into(), quote: Some("moves to the 24th".into()) }),
             sec("2026-11-11 08:00 Kim Ito", Fact { text: "Kim confirms the room".into(), quote: None }),
         ]);
-        crate::brain::facts::Writer::default().write(&f).unwrap();
+        crate::intake::facts::Writer::default().write(&f).unwrap();
         // The source as the window's link and the CLI read it: its facts with its Outlook link.
         assert_eq!(crate::links::mail_url("mail/abc").as_deref(), Some("https://outlook.example/1"));
         assert!(sources_payload(&["call/x".into()], &[]).is_none(), "calls aren't Recall's mail");
@@ -1066,21 +1066,21 @@ mod tests {
 
     /// A made-up index's mail, read the way the index was read before Intake's files (its own SQL, as `share` did): the
     /// same source moved into a fact file reads the same through `echo.read('source')`, link for link.
-    #[cfg(feature = "brain")]
+    #[cfg(feature = "intake")]
     #[test]
     fn a_mail_moved_from_the_index_reads_as_the_index_gave_it() {
         let (_env, _root) = crate::paths::testenv::folders("share-sources-moved");
         let pilot = acme_pilot();
         let md = "# Pilot dates\n\n### 2026-11-10 09:12 Jane Doe\n\n- The pilot moves to 24 Nov — “moves to the 24th”\n- Rooms are booked\n\n### 2026-11-11 08:00 Kim Ito\n\n- Kim confirms the room\n\n### 2026-11-11 09:30 Jane Doe\n\n- Jane thanks Kim\n";
         let refs = json!({"kind": "mail", "conversation": "c1", "message": "AAMk-c1-3", "people": ["jane@acme.example", "kim@acme.example"], "url": "https://outlook.example/1", "subjects": ["Pilot dates"], "threads": [{"id": pilot}]});
-        let input = crate::brain::store::Input {
+        let input = crate::intake::store::Input {
             source: "mail/abc".into(), kind: "mail".into(), title: "Pilot dates".into(), event_date: Some("2026-11-11".into()), md: md.into(), refs,
             link: Box::new(|c| format!("https://outlook.example/msg-{}", c.ord)), speaker: Box::new(|c| c.title.splitn(3, ' ').nth(2).map(str::to_owned)),
         };
-        let store = crate::brain::store_path();
-        crate::brain::store::sync_kinds(&store, vec![input], None, &[]).unwrap();
+        let store = crate::intake::store_path();
+        crate::intake::store::sync_kinds(&store, vec![input], None, &[]).unwrap();
         // The old reading: the document's row and its sections in order.
-        let c = crate::brain::store::open(&store).unwrap();
+        let c = crate::intake::store::open(&store).unwrap();
         let (title, date): (String, String) = c.query_row("SELECT title, event_date FROM documents WHERE source = 'mail/abc'", [], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
         let rows: Vec<(String, String, Option<String>, String)> = c
             .prepare("SELECT title, text, speaker, link FROM chunks WHERE source = 'mail/abc' ORDER BY ord").unwrap()
@@ -1094,7 +1094,7 @@ mod tests {
                 from.push(s);
             }
         }
-        crate::brain::facts::migrate().unwrap().unwrap();
+        crate::intake::facts::migrate().unwrap().unwrap();
         let s = source("mail:mail/abc", &json!({})).unwrap();
         assert_eq!((s["title"].as_str(), s["at"].as_str(), s["date"].as_str()), (Some(title.as_str()), Some(date.as_str()), Some(date.as_str())));
         assert_eq!(s["text"], json!(text));
@@ -1105,7 +1105,7 @@ mod tests {
         assert_eq!(crate::links::mail_url("mail/abc").as_deref(), Some("https://outlook.example/1"));
     }
 
-    #[cfg(feature = "brain")]
+    #[cfg(feature = "intake")]
     #[test]
     fn plugins_add_names_never_take_them() {
         let (_env, _root) = crate::paths::testenv::folders("share-dict");

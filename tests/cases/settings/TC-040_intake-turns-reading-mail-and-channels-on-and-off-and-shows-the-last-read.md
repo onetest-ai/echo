@@ -40,4 +40,4 @@ Intake is off, as it started.
 
 ## Notes
 - Who may speak, in the same section: `settings/TC-041`.
-- Reading mail and channels into fact files needs a real Microsoft 365 mailbox; the fact files, their backup and the move from the old index are Rust tests (`brain::facts::tests`).
+- Reading mail and channels into fact files needs a real Microsoft 365 mailbox; the fact files, their backup and the move from the old index are Rust tests (`intake::facts::tests`).

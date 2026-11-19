@@ -28,7 +28,7 @@ tags: [settings, intake, sender]
 | 1 | Navigate to `{{base_url}}/#today`, wait for "Your day", click "Inbox"; on the item "Acme News's mail isn't authenticated" click "Open" | The window shows Settings with "Intake" selected in the left list |
 | 2 | Read the card "Who may speak" | A line says mail and posts are read only from you, colleagues and the senders you trust; a table headed "Acme · senders · 1 waiting · 1 not authenticated" lists Dana Lee (dana@acme.example) with "Trust" and "Ignore", Acme News with "Read anyway" and "Keep out", and Acme News "trusted" with "Forget" |
 | 3 | Click "Read anyway" on Acme News | Within 2 s the row with "Read anyway" is gone; Acme News's trusted row says "trusted · unauthenticated mail read too" |
-| 4 | Run `. <dir>/env && echoctl brain senders` | Under `acme`, `trusted` has `news@acme.example` with `"unverified": true`; no `unverified` entry is left |
+| 4 | Run `. <dir>/env && echoctl intake senders` | Under `acme`, `trusted` has `news@acme.example` with `"unverified": true`; no `unverified` entry is left |
 | 5 | Click "Trust" on Dana Lee | Within 2 s Dana Lee's waiting row is gone; a row Dana Lee "trusted" with "Forget" shows; the head no longer says "waiting" |
 
 ## Expected Final State

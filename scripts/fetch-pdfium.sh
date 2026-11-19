@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# PDFium (Chromium's PDF engine, BSD-3) for the Brain's thread folders (`crates/echoctl/src/brain/files/pdf.rs`):
+# PDFium (Chromium's PDF engine, BSD-3) for the Brain's thread folders (`crates/echoctl/src/intake/files/pdf.rs`):
 # PDF text layers, page objects and page images. bblanchon/pdfium-binaries' build pinned to the version
 # pdfium-render expects (chromium/7881), checked by SHA-256, copied into <dest> with its license. Echo loads
 # it at runtime; nothing links against it.

@@ -5,26 +5,26 @@ rules are in `.ai-run/guides/data/intake-and-search.md`.
 
 ## Schema changes
 
-The schema is opened and migrated in `brain::store::open`: tables with `CREATE ... IF NOT EXISTS`; a new column is added
+The schema is opened and migrated in `intake::store::open`: tables with `CREATE ... IF NOT EXISTS`; a new column is added
 inside `BEGIN IMMEDIATE` after checking `pragma_table_info`, and backfilled once.
 
 ## Access
 
-- A session or job reads Recall data through a `brain::access::Access` built for its profile and scope; a source of
+- A session or job reads Recall data through a `intake::access::Access` built for its profile and scope; a source of
   another profile answers "not found".
-- The on/off switch: `brain::enabled`.
+- The on/off switch: `intake::enabled`.
 - The MCP server's tools are `mcp__echo__…`, listed in `guard::BRAIN_TOOLS`: `search_sources`, `list_sources`,
   `read_source`, `read_link` and `list_scopes` (every client and thread the reader may see, with its id; the session
-  block names at most 8 of each) (`brain::mcp::tools`; the old names `search_knowledge` and `read_document` still
+  block names at most 8 of each) (`intake::mcp::tools`; the old names `search_knowledge` and `read_document` still
   answer). Who people are and how things relate are the Knowledge plugin's: no people or relations tools.
-- What a session is told Echo holds (`brain::advert::summary`, the MCP server's instructions and `<echo_recall>`) and
+- What a session is told Echo holds (`intake::advert::summary`, the MCP server's instructions and `<echo_recall>`) and
   the window's per-view hint (`view::view_lines`) name `search_sources` and point to the Knowledge plugin for people.
 
 ## Mail and channel posts
 
-- Mail and posts are indexed as the quarantine reader's facts; `brain::digest::check` checks each quote word for word
+- Mail and posts are indexed as the quarantine reader's facts; `intake::digest::check` checks each quote word for word
   against its message.
-- Who is read (`brain::senders::Senders::mail`, `graph::mail_auth`): the user; a colleague (Exchange
+- Who is read (`intake::senders::Senders::mail`, `graph::mail_auth`): the user; a colleague (Exchange
   `AuthAs: Internal`, a Teams author by directory id); a sender trusted for all its threads' clients, when outside mail
   passes DMARC or compauth. An author not yet looked up is deferred.
 
@@ -32,9 +32,9 @@ inside `BEGIN IMMEDIATE` after checking `pragma_table_info`, and backfilled once
 
 - One JSON file per mail conversation or channel post, `<home>/recall/intake/facts/<source>.json`, by the index's
   source id: `mail/<short>` → `facts/mail/<short>.json`, `channel/<short>/<post>` → `facts/channel/<short>/<post>.json`
-  (`brain::facts::path_of`; an id that isn't plain parts gets no file: a sync leaves it out and says so,
-  `brain::sources::keep`).
-- A file (`brain::facts::Facts`, `version` 1; a newer field always has a default): `source`, `kind` (mail | channel),
+  (`intake::facts::path_of`; an id that isn't plain parts gets no file: a sync leaves it out and says so,
+  `intake::sources::keep`).
+- A file (`intake::facts::Facts`, `version` 1; a newer field always has a default): `source`, `kind` (mail | channel),
   `title`, `event_date`, `refs` (`threads`, `client`, `people`, `url`, `subjects`, `subject`, a mail's `conversation`
   and `message` ids, a post's `channel` and `channel_name`), `sections`, `archived` (every thread it is under is closed)
   and `migrated_raw` (moved from the index as its text was). A section: `head` "YYYY-MM-DD HH:MM <who>", `from`, `at`
@@ -43,21 +43,21 @@ inside `BEGIN IMMEDIATE` after checking `pragma_table_info`, and backfilled once
   mail's `internetMessageId`, which stays when the mail moves folders) and `raw` (its facts are the index's text).
 - A file that can't be read is moved to `intake/facts.broken/<source>.<time>.json` (out of `facts/` and its backups)
   before a new one is written (`Writer::write`).
-- A sync (`brain::sources::sync`) reads nothing until the move from the index is done (`facts::migrated`); why it is
+- A sync (`intake::sources::sync`) reads nothing until the move from the index is done (`facts::migrated`); why it is
   paused, and the files it couldn't write in its last sync, are in `intake/status.json` (`facts::status`), shown on
   Settings → Intake's Last read line. A file that can't be written is left out of that sync and said; a drop request
   one of its files couldn't take stays for the next sync.
-- It writes each read source into its file first, merged into what the file held (`brain::facts::merge`: a section is
+- It writes each read source into its file first, merged into what the file held (`intake::facts::merge`: a section is
   the same message by a mail's `internetMessageId`, else its Graph id, or, when one of the two has neither, by its
   heading and link; one read again replaces
   it, each old section at most once, so two sections of one read are never folded into one; a new one is added; one
   the new read lacks stays; people and subjects of both reads; the later date), then feeds the index from it
   (`Facts::input`), with every fact file the index has no document of (`missing_from_index`).
-- It then puts every file under the threads that match it now (`brain::sources::place`): moved, the file and the index
+- It then puts every file under the threads that match it now (`intake::sources::place`): moved, the file and the index
   rewritten; matched by none (its source left its thread), the file and its index rows removed. This runs only when
   every thread was read (`projects::list_whole`: none unreadable, at least one); otherwise nothing is moved or removed
   that sync and the reason is logged. More than a fifth of the files leaving at once (past 5) is refused and logged.
-- Who may speak (`brain::senders::decide`): Trust and Read anyway read the client's sources again
+- Who may speak (`intake::senders::decide`): Trust and Read anyway read the client's sources again
   (`request_reread`, `recall/reread.json`), merged in, nothing taken out; Ignore and Keep out ask (`request_drop`,
   `intake/drops.json`) for that sender's sections to leave that client's facts at the next sync (`apply_drops`; Keep
   out: only their `unverified` ones). Only sections that recorded that sender's id go; a section with only the
@@ -69,7 +69,7 @@ inside `BEGIN IMMEDIATE` after checking `pragma_table_info`, and backfilled once
 - A new reader version reads every window again and merges; it drops nothing.
 - Readers: `share::source` / `share::sources` / `sources_changed` (`mail_item`, `mail_messages`) and `links::mail_text`
   / `links::mail_url` read the files; the sections they give are the index's (`Facts::pieces`, the same chunker).
-- The move from the index (`brain::facts::migrate`): at the app's start (`brain::start_scheduler`, taking the sync's
+- The move from the index (`intake::facts::migrate`): at the app's start (`intake::start_scheduler`, taking the sync's
   lock `brain.lock`, skipped while a sync holds it) and at the start of every sync (`migrate_locked`, under that lock),
   until `intake/migrated.json` records it done with its counts (`documents`, `written`, `kept`, `raw`, `skipped`). It
   reads `knowledge.sqlite` read-only. A document that has a file keeps it; one whose facts give the index's sections
@@ -81,7 +81,7 @@ inside `BEGIN IMMEDIATE` after checking `pragma_table_info`, and backfilled once
 
 ## Intake facts backup
 
-- Before a sync's first change to the facts (a write that changes a file, or a removal), `brain::facts::backup` copies
+- Before a sync's first change to the facts (a write that changes a file, or a removal), `intake::facts::backup` copies
   `facts/` into today's generation, `intake/facts.bak/YYYY-MM-DD/`, made whole under a name of its own first
   (`.copy.<pid>.<n>.tmp`). The generation it replaces is renamed aside (`.old.<pid>.<n>.tmp`), the copy renamed in,
   and only then the old one deleted; what a backup stopped half way left (`.*.tmp`) is deleted at the next one.
@@ -92,23 +92,23 @@ inside `BEGIN IMMEDIATE` after checking `pragma_table_info`, and backfilled once
 
 ## Ids, archive
 
-- Chunk ids: `brain::chunk::chunk_id`. A document's card is `chunk_id(source, store::CARD_ORD)`.
-- A closed thread's sources are archived: `brain::store::archived_of`. What of them stays in the index is in
+- Chunk ids: `intake::chunk::chunk_id`. A document's card is `chunk_id(source, store::CARD_ORD)`.
+- A closed thread's sources are archived: `intake::store::archived_of`. What of them stays in the index is in
   Retention.
 - The index has no snapshots (it is rebuilt from its sources) and no `related` table (dropped at `open`). At the app's
-  start `brain::drop_old_folders` removes `recall/snapshots/` and `recall/assets/` (the old page images) when they are
+  start `intake::drop_old_folders` removes `recall/snapshots/` and `recall/assets/` (the old page images) when they are
   there; nothing else under `recall/` is touched.
 
 ## Thread folders
 
-- `brain::files::folder::sync` reads each file's text: md, html, txt, transcripts, docx, xlsx, pptx and PDF (its text
+- `intake::files::folder::sync` reads each file's text: md, html, txt, transcripts, docx, xlsx, pptx and PDF (its text
   layer, by PDFium), each page or slide with its tables; nothing is read from page images (a scan or a picture-only
   slide is the Knowledge plugin's). `READER_VERSION` 3 reads every file again once, from its text.
 
 ## Retention
 
-The index is working memory, not an archive (`brain::retain`). Each section has a kind, `chunks.section`, given by
-`brain::store::section_kind` when the section is written. A store from before the column gets the kinds once, at
+The index is working memory, not an archive (`intake::retain`). Each section has a kind, `chunks.section`, given by
+`intake::store::section_kind` when the section is written. A store from before the column gets the kinds once, at
 `open`. Mail and channel facts are dated by their own message once per `FACT_DAYS_VERSION` (`meta.fact_days`), at
 `open`, by one writer.
 
@@ -139,10 +139,10 @@ The index is working memory, not an archive (`brain::retain`). Each section has 
   - A document written without some sections for its closed threads is marked in `documents.retained`
     (`closed:<thread ids>`).
 - **The sweep** (`retain::apply`) takes what aged since a section was written, and closed threads' sections.
-  - It runs at the end of `brain::sync` when `retain::due` says so: once a day, and when the set of closed threads
+  - It runs at the end of `intake::sync` when `retain::due` says so: once a day, and when the set of closed threads
     changed (`meta.retained_for`).
   - The sweep waits while Echo records a call, or a call is being transcribed: the recorder's state, or a
-    `.transcribing` marker (`transcribe::IN_PROGRESS`) whose process is alive (`brain::recording_or_transcribing`).
+    `.transcribing` marker (`transcribe::IN_PROGRESS`) whose process is alive (`intake::recording_or_transcribing`).
     Battery doesn't hold it back.
     - The sync itself still runs; its report says `sweep_waits`.
     - The app's next pass, a minute later, tries again.
@@ -155,14 +155,14 @@ The index is working memory, not an archive (`brain::retain`). Each section has 
   - Mail and posts come back from their Intake fact files (`sources::feed_missing`). That runs at every sync, with or
     without a Microsoft 365 sign-in, before the move is done, and when the thread list can't be read.
 - The call folders, the thread folders' files, the dictionary and Intake's facts are never touched.
-- The app's sync runs at least once a day and when a thread closes or opens again (`brain::fingerprint`).
+- The app's sync runs at least once a day and when a thread closes or opens again (`intake::fingerprint`).
 
 ## Search
 
-- `brain::store::search_at`: the candidates are the keyword (FTS5, BM25) top 30 (or the limit asked, when higher),
+- `intake::store::search_at`: the candidates are the keyword (FTS5, BM25) top 30 (or the limit asked, when higher),
   read best first until that many pass scope, access, history and the filters; the query's words skip `STOPWORDS`
   (English, Ukrainian, Russian). A query of only stopwords searches nothing and says so in `note`.
-- Filters (`store::Filters`; `echoctl brain search --kind/--section/--since/--until/--person`; search_sources'
+- Filters (`store::Filters`; `echoctl intake search --kind/--section/--since/--until/--person`; search_sources'
   `kind`, `section`, `since`, `until`, `person`) are applied before the cut:
   - source kinds `call`, `mail`, `channel`, `document`, by the source id's prefix (`store::SOURCE_KINDS`), in SQL;
   - section kinds (`store::SECTION_KINDS`, as in Retention), in SQL;
@@ -170,7 +170,7 @@ The index is working memory, not an archive (`brain::retain`). Each section has 
   - `person`, a part of the section's speaker: a transcript turn's names or a fact's author. It is compared in Rust,
     in lowercase in any script, with `%` and `_` taken as plain letters. Minutes and documents have no speaker.
 - Unknown kinds and malformed days are refused. The answer's `filters` gives what was applied.
-- With neither `since` nor `until`, a date in the query (`brain::when::in_query`) becomes the filter, and its words
+- With neither `since` nor `until`, a date in the query (`intake::when::in_query`) becomes the filter, and its words
   leave the query; `filters.dates_from_query` says which words.
   - Explicit dates: an ISO day, or a day with its month in English, Ukrainian or Russian (any form), with or without
     a year. A day without a year is the latest such day not after today.
@@ -186,32 +186,32 @@ The index is working memory, not an archive (`brain::retain`). Each section has 
 - A range that reaches before the shortest horizon of the section kinds it may find adds `retain::OLDER` to `note`:
   "older than the index keeps: see the call folders or Knowledge".
 - Each hit has its `section_kind`.
-- The window's search (`window::search`, only with the `brain` feature): `/api/search` (`q`, `kind` and `section` comma
-  lists, `client` or `thread` as the scope, `since`, `until`, `person`) runs `brain::search` for the user, as `echoctl
-  brain search` does (no profile scope: the window is the user's own), at most 30 hits, the calls' cards left out unless
+- The window's search (`window::search`, only with the `intake` feature): `/api/search` (`q`, `kind` and `section` comma
+  lists, `client` or `thread` as the scope, `since`, `until`, `person`) runs `intake::search` for the user, as `echoctl
+  intake search` does (no profile scope: the window is the user's own), at most 30 hits, the calls' cards left out unless
   `section` asks for them. It answers `{enabled: false}` while Intake is off. Its answer: `words` (`store::query_words`
   of the query without a date it said), `filters`, `older`, `listed`, `titles` (the calls whose title, people or
   subject hold every word, on those days, in the scope, with the person: `window::call::matching`) and `sources` (hits
   grouped by source, in the order of each one's best hit, each hit a moment: section, heading, who, `t` in the call,
   day, the line with the words, a link at that turn). `/api/search/moment?chunk=` gives a moment's context: a call's
   row and the turns around its time, or a mail's or post's lines of that section.
-- With an embedding server that answers, the candidates are re-ranked by `brain::store::rerank`: weighted reciprocal
+- With an embedding server that answers, the candidates are re-ranked by `intake::store::rerank`: weighted reciprocal
   rank (k = 60) of the keyword rank (0.4) and the vector rank among the candidates (0.6). No section outside the
   candidates is added; without embeddings the keyword order stays.
 - A closed thread's sections weigh `ARCHIVE_WEIGHT` against current ones, except within that thread.
-- The keyword text of a section (`brain::store::fts_text`) leaves out of the minutes' `Who:`, `Thread:`, `Threads:`
+- The keyword text of a section (`intake::store::fts_text`) leaves out of the minutes' `Who:`, `Thread:`, `Threads:`
   and `Client:` lines that carry echo:// links their label and links (what else such a line says stays), and reduces
   other echo:// links to their labels. A store whose `meta.fts_text` differs from `FTS_TEXT_VERSION` has it written
   again from `chunks` at `open`, in batches of `FTS_BATCH` sections (`meta.fts_text_next`), each only when no one else
   writes, for `FTS_OPEN_BUDGET` per open; busy or out of time, the rest waits for a later open. Done, rows of
   `chunks_fts` without a section are dropped.
-- Term mentions after a dictionary edit (`brain::taxonomy::mentions::mentions_of`) take their candidates from the
+- Term mentions after a dictionary edit (`intake::taxonomy::mentions::mentions_of`) take their candidates from the
   keyword index and from the sections with an echo:// link (read once per edit), so a name only in a header line
   counts as in a full scan.
 
 ## Evaluation
 
-- The made-up regression set: `brain::store::tests::the_made_up_regression_set_finds_its_sources_first`.
-- The blind evaluation runs the built `echoctl brain search` on a copy of the developer's store (`ECHOCTL_HOME` and
+- The made-up regression set: `intake::store::tests::the_made_up_regression_set_finds_its_sources_first`.
+- The blind evaluation runs the built `echoctl intake search` on a copy of the developer's store (`ECHOCTL_HOME` and
   `ECHOCTL_CONFIG_DIR` pointing into a temp folder), at depth 5, graded 0/1/2 per unit (0: unrelated, 1: related,
   2: answers); it reports nDCG@5, P@5 and how many queries got an answer. The queries and grades stay off the repo.

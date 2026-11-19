@@ -2,8 +2,8 @@
 //! `Cmd` and its dispatch stay in `main.rs`.
 
 pub mod app;
-#[cfg(feature = "brain")]
-pub mod brain;
+#[cfg(feature = "intake")]
+pub mod intake;
 pub mod calendar;
 pub mod calls;
 pub mod capture;

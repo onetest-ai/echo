@@ -29,7 +29,7 @@ Prerequisites for the gates: `.ai-run/reference/development/dev-workflow.md` (Pr
 
 ## Windows before a release
 
-`cargo check -p echoctl --no-default-features --features tray,brain` (`crates/echoctl/Cargo.toml::features`).
+`cargo check -p echoctl --no-default-features --features tray,intake` (`brain` still works, as its alias; `crates/echoctl/Cargo.toml::features`).
 
 ## Fixing lint
 

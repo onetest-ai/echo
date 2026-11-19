@@ -14,7 +14,7 @@ pub(super) static BRAIN_EDIT_ERROR: std::sync::Mutex<(u64, String)> = std::sync:
 pub(super) fn brain_sync_now() {
     if !BRAIN_SYNC.swap(true, std::sync::atomic::Ordering::SeqCst) {
         std::thread::spawn(|| {
-            let r = match crate::brain::sync() {
+            let r = match crate::intake::sync() {
                 Ok(r) => json!(r),
                 Err(e) => json!({ "error": format!("{e:#}") }),
             };
@@ -42,14 +42,14 @@ pub(super) fn open_in_app(path: &Path) {
 pub(super) fn route(path: &str, req: &Request<Vec<u8>>) -> Option<Response<Cow<'static, [u8]>>> {
     Some(match path {
         // The thread folders' files: what was read, how, and why the others weren't.
-        "/api/brain/files" => json_reply(crate::brain::files::folder::status().unwrap_or_else(|e| json!({ "error": format!("{e:#}") }))),
+        "/api/brain/files" => json_reply(crate::intake::files::folder::status().unwrap_or_else(|e| json!({ "error": format!("{e:#}") }))),
         // How each thread source was last read (`brain/sources.json`).
-        "/api/brain/sources" => json_reply(json!({ "state": crate::brain::sources::state(), "senders": crate::brain::senders::view(), "signed_in": crate::graph::account().is_some(), "intake": crate::brain::facts::status(), "syncing": BRAIN_SYNC.load(std::sync::atomic::Ordering::SeqCst) })),
+        "/api/brain/sources" => json_reply(json!({ "state": crate::intake::sources::state(), "senders": crate::intake::senders::view(), "signed_in": crate::graph::account().is_some(), "intake": crate::intake::facts::status(), "syncing": BRAIN_SYNC.load(std::sync::atomic::Ordering::SeqCst) })),
         // Settings → Vocabulary's dictionary: the whole of it, never a scope, with Intake on or off (its terms a page at
         // a time, `browse/terms`). A taxonomy edit running now (`brain_taxonomy`), and the last one's error with its
         // number.
         "/api/brain/dictionary" => {
-            let mut tx = crate::brain::browse::view(None).unwrap_or_else(|e| json!({ "error": format!("{e:#}") }));
+            let mut tx = crate::intake::browse::view(None).unwrap_or_else(|e| json!({ "error": format!("{e:#}") }));
             let n = tx.get_mut("terms").map(Value::take).and_then(|t| t.as_array().map(Vec::len)).unwrap_or(0);
             tx["terms_n"] = json!(n);
             let mut v = json!({ "taxonomy": tx });
@@ -59,13 +59,13 @@ pub(super) fn route(path: &str, req: &Request<Vec<u8>>) -> Option<Response<Cow<'
             }
             json_reply(v)
         }
-        // The dictionary a page at a time (`brain::browse::terms`), by group and letter, whether Intake is on or off.
+        // The dictionary a page at a time (`intake::browse::terms`), by group and letter, whether Intake is on or off.
         "/api/brain/browse/terms" => {
             let q = req.uri().query().unwrap_or("");
             let (client, thread) = (query_param(q, "client"), query_param(q, "thread"));
             let scope = client.as_deref().map(|c| ("client", c)).or(thread.as_deref().map(|t| ("thread", t)));
             let num = |k: &str, d: usize| query_param(q, k).and_then(|v| v.parse().ok()).unwrap_or(d);
-            let r = crate::brain::browse::terms(scope, query_param(q, "group").as_deref(), query_param(q, "letter").as_deref(), query_param(q, "q").as_deref(), num("offset", 0), num("limit", 50));
+            let r = crate::intake::browse::terms(scope, query_param(q, "group").as_deref(), query_param(q, "letter").as_deref(), query_param(q, "q").as_deref(), num("offset", 0), num("limit", 50));
             json_reply(r.unwrap_or_else(|e| json!({ "error": format!("{e:#}") })))
         }
         // A term of the dictionary with its latest sections (Settings → Vocabulary's panel).
@@ -73,7 +73,7 @@ pub(super) fn route(path: &str, req: &Request<Vec<u8>>) -> Option<Response<Cow<'
             let q = req.uri().query().unwrap_or("");
             let (client, thread) = (query_param(q, "client"), query_param(q, "thread"));
             let scope = client.as_deref().map(|c| ("client", c)).or(thread.as_deref().map(|t| ("thread", t)));
-            json_reply(crate::brain::views::node(&query_param(q, "id").unwrap_or_default(), scope).unwrap_or_else(|e| json!({ "error": format!("{e:#}") })))
+            json_reply(crate::intake::views::node(&query_param(q, "id").unwrap_or_default(), scope).unwrap_or_else(|e| json!({ "error": format!("{e:#}") })))
         }
         _ => return None,
     })
@@ -89,7 +89,7 @@ pub(super) fn handle(v: &Value) -> Option<Handled> {
             let body = v["body"].clone();
             BRAIN_EDITS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             std::thread::spawn(move || {
-                let res = std::panic::catch_unwind(|| crate::brain::taxonomy::edit(&body)).unwrap_or_else(|_| Err(anyhow::anyhow!("the edit failed")));
+                let res = std::panic::catch_unwind(|| crate::intake::taxonomy::edit(&body)).unwrap_or_else(|_| Err(anyhow::anyhow!("the edit failed")));
                 if let Err(e) = &res {
                     if let Ok(mut x) = BRAIN_EDIT_ERROR.lock() {
                         *x = (x.0 + 1, format!("{e:#}"));
@@ -106,7 +106,7 @@ pub(super) fn handle(v: &Value) -> Option<Handled> {
         // A sender of mail or posts trusted, ignored or forgotten for a client: read again at the next sync.
         "brain_sender" => {
             let (client, key, decision) = (v["client"].as_str().unwrap_or(""), v["key"].as_str().unwrap_or(""), v["decision"].as_str().unwrap_or(""));
-            match crate::brain::senders::decide(client, key, decision) {
+            match crate::intake::senders::decide(client, key, decision) {
                 Ok(()) => {
                     brain_sync_now();
                     true.into()
