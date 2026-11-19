@@ -188,6 +188,7 @@ fn bash_rc(home: &Path) -> PathBuf {
 /// Settings → Health's "Add to PATH": Claude Code's folder for new terminals. macOS / Linux: one marked line at the
 /// end of the login shell's startup file (once); Windows: the user PATH. What was done, for the notification.
 pub fn add_to_path() -> Result<String> {
+    crate::paths::refuse_real_folders();
     let Some(claude) = crate::app::claude_bin() else { bail!("Claude Code is not installed") };
     let Some(dir) = claude.parent().map(Path::to_path_buf) else { bail!("no folder for {}", claude.display()) };
     #[cfg(unix)]

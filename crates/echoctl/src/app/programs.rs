@@ -224,6 +224,7 @@ pub fn cli_installed() -> bool {
 /// the app's binary (macOS asks for an administrator password when that folder is root-owned);
 /// Windows: the app's folder is added to the user's PATH.
 pub fn install_cli() -> Result<()> {
+    crate::paths::refuse_real_folders();
     let target = app_binary()?;
     #[cfg(target_os = "macos")]
     {

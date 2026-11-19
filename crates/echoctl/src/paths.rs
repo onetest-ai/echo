@@ -21,8 +21,38 @@ pub(crate) fn own_claude_folder() -> PathBuf {
     std::env::var_os("CLAUDE_CONFIG_DIR").map(PathBuf::from).filter(|p| p.is_absolute()).unwrap_or_else(|| user_home().join(".claude"))
 }
 
+/// The variable a development build misses to run under Claude Code: the run's own folders, or none. A test agent's
+/// `echoctl` without its data's env would otherwise read and write the user's real config and data.
+fn missing_run_env(under_claude_code: bool, config_set: bool, home_set: bool) -> Option<&'static str> {
+    match (under_claude_code, config_set, home_set) {
+        (false, ..) => None,
+        (true, false, _) => Some("ECHOCTL_CONFIG_DIR"),
+        (true, true, false) => Some("ECHOCTL_HOME"),
+        (true, true, true) => None,
+    }
+}
+
+/// A development build started by Claude Code (`CLAUDECODE`) without the run's folders exits before it resolves the
+/// real config dir or data folder, or changes the user's own files elsewhere (start at login, the shell's PATH, the
+/// CLI link). A release build, and a person's own terminal, never stop here; nor do unit tests, whose variables
+/// `testenv` sets and restores process-wide while other tests run (the binary's own tests check it).
+pub(crate) fn refuse_real_folders() {
+    if !cfg!(all(debug_assertions, not(test))) {
+        return;
+    }
+    let set = |k: &str| std::env::var_os(k).is_some_and(|v| !v.is_empty());
+    if let Some(k) = missing_run_env(set("CLAUDECODE"), set("ECHOCTL_CONFIG_DIR"), set("ECHOCTL_HOME")) {
+        eprintln!(
+            "echoctl (development build) under Claude Code: {k} is not set, so this would use your real Echo config and data. \
+             Load the run's env first: set -a; . <dir>/env; set +a"
+        );
+        std::process::exit(2);
+    }
+}
+
 /// Per-user application directory (fixed; never moves with the data folder).
 pub fn config_dir() -> PathBuf {
+    refuse_real_folders();
     if let Some(d) = std::env::var_os("ECHOCTL_CONFIG_DIR") {
         return d.into();
     }
@@ -77,6 +107,7 @@ pub fn downloads_dir() -> PathBuf {
 
 /// The data folder: calls + state.
 pub fn home() -> PathBuf {
+    refuse_real_folders();
     std::env::var_os("ECHOCTL_HOME").map(PathBuf::from).or_else(chosen_home).unwrap_or_else(config_dir)
 }
 
@@ -311,6 +342,19 @@ pub mod testenv {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_dev_build_under_claude_code_needs_both_of_the_runs_folders() {
+        // (CLAUDECODE, ECHOCTL_CONFIG_DIR, ECHOCTL_HOME) set → the variable it misses.
+        assert_eq!(missing_run_env(true, false, false), Some("ECHOCTL_CONFIG_DIR"));
+        assert_eq!(missing_run_env(true, false, true), Some("ECHOCTL_CONFIG_DIR"));
+        assert_eq!(missing_run_env(true, true, false), Some("ECHOCTL_HOME"));
+        assert_eq!(missing_run_env(true, true, true), None);
+        // A person's own terminal: as before.
+        for (c, h) in [(false, false), (false, true), (true, false), (true, true)] {
+            assert_eq!(missing_run_env(false, c, h), None);
+        }
+    }
 
     #[test]
     fn an_unused_name_never_takes_one_that_is_there() {

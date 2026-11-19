@@ -609,6 +609,7 @@ fn build_command(p: &Profile, claude: &Path, args: &[String], cwd: &Path, stdin:
     c.current_dir(cwd)
         .env(crate::notes::HEADLESS, "1")
         .env("ECHOCTL_HOME", paths::home())
+        .env("ECHOCTL_CONFIG_DIR", paths::config_dir())
         .stdin(if stdin { Stdio::piped() } else { Stdio::null() })
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -1376,6 +1377,9 @@ mod tests {
         // Started from inside a Claude Code session, Echo's are still sessions of their own (transcripts saved).
         assert!(system.get_envs().any(|(k, v)| k == "CLAUDE_CODE_CHILD_SESSION" && v.is_none()), "not a child of the session Echo came from");
         assert_eq!(system.get_args().count(), 1);
+        // A run's `echoctl` (under Claude Code) is on this Echo's folders, both of them.
+        assert!(system.get_envs().any(|(k, v)| k == "ECHOCTL_HOME" && v == Some(paths::home().as_os_str())));
+        assert!(system.get_envs().any(|(k, v)| k == "ECHOCTL_CONFIG_DIR" && v == Some(paths::config_dir().as_os_str())));
     }
 
     #[cfg(unix)]
