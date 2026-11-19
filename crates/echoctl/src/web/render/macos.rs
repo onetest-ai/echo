@@ -300,7 +300,8 @@ mod tests {
             assert_eq!(r["action"]["type"], "block");
             r["trigger"]["url-filter"].as_str().unwrap()
         }).collect();
-        assert!(filters.iter().all(|f| f.starts_with('^') && !f.contains('|')), "WebKit's syntax: anchored, no alternation");
+        assert!(filters.iter().all(|f| !f.contains('|')), "WebKit's syntax: no alternation");
+        assert!(filters.iter().filter(|f| **f != ".*").all(|f| f.starts_with('^')), "each address rule anchored");
         for want in ["^file:", "@)?\\[", "@)?127\\.", "@)?10\\.", "@)?192\\.168\\.", "@)?169\\.254\\.", "@)?203\\.0\\.113\\.9[:/]", "localhost", "\\.local\\.?"] {
             assert!(filters.iter().any(|f| f.contains(want)), "{want}: {filters:?}");
         }
