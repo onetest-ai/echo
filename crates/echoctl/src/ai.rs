@@ -1400,6 +1400,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn the_login_shell_command_starts_claude_with_the_profiles_routing() {
         let (_env, root) = crate::paths::testenv::folders("ai-shell-command");
         // What Claude Code would get: its arguments and environment.

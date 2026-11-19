@@ -3,6 +3,7 @@
 import importlib.util
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -39,9 +40,10 @@ class Git(unittest.TestCase):
             d = md.Data(base, "small")
             md.setup_env(d)
             for k in ("GIT_CONFIG_GLOBAL", "XDG_CONFIG_HOME"):
-                self.assertTrue(d.env[k].startswith(base + os.sep), d.env[k])
+                # Inside the run's folder, however its separators are written (`/` on Windows too: git and sh read it).
+                self.assertTrue(os.path.normpath(d.env[k]).startswith(base + os.sep), d.env[k])
             # A shell that sources <dir>/env (serve.sh, a case's step) over a user's identity variables.
-            r = subprocess.run(["/bin/sh", "-c", '. "$1/env" && cd "$1" && git init -q repo && cd repo && git commit -q --allow-empty -m x'
+            r = subprocess.run([shutil.which("sh") or "/bin/sh", "-c", '. "$1/env" && cd "$1" && git init -q repo && cd repo && git commit -q --allow-empty -m x'
                                 ' && git log -1 --format="%an <%ae>|%cn <%ce>" && printf "%s|%s\\n" "$GIT_CONFIG_GLOBAL" "$XDG_CONFIG_HOME"', "sh", base],
                                capture_output=True, text=True, env=os.environ)
             self.assertEqual(r.returncode, 0, r.stderr)

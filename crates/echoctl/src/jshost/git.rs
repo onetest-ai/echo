@@ -1004,15 +1004,25 @@ mod tests {
         std::fs::write(top.join("README.md"), "# Initech, staged\n").unwrap();
         user_git(&top, &["add", "README.md"]);
         std::fs::write(vault.join("a1.md"), "one, the user's\n").unwrap();
-        for name in ["a*.md", ":(glob)x.md", "-n.md", "[b].md"] {
+        // Names git could read as patterns or options; `*` and `:` can't be in a Windows file name.
+        let names: &[&str] = if cfg!(windows) { &["-n.md", "[b].md"] } else { &["a*.md", ":(glob)x.md", "-n.md", "[b].md"] };
+        for name in names {
             std::fs::write(vault.join(name), "Echo's\n").unwrap();
         }
         let i = run("lit", "info", json!({})).unwrap();
         assert_eq!(i["subfolder"], true, "a vault inside a larger repository");
         let mut st = rel(&run("lit", "status", json!({})).unwrap(), "path");
         st.sort();
-        assert_eq!(st, ["-n.md", ":(glob)x.md", "[b].md", "a*.md", "a1.md"], "the vault's own files only, relative to it");
-        for name in ["a*.md", ":(glob)x.md", "-n.md", "[b].md"] {
+        let mut want: Vec<&str> = names.iter().copied().chain(["a1.md"]).collect();
+        want.sort();
+        assert_eq!(st, want, "the vault's own files only, relative to it");
+        // Windows: a pattern given as a path matches nothing, never the user's a1.md (still unstaged below).
+        if cfg!(windows) {
+            for name in ["a*.md", ":(glob)a1.md", "*.md"] {
+                assert!(run("lit", "commit", json!({"paths": [name], "message": "x"})).is_err(), "{name} is no file");
+            }
+        }
+        for name in names {
             run("lit", "commit", json!({"paths": [name], "message": format!("Echo: {name}")})).unwrap();
             assert_eq!(user_git(&top, &["-c", "core.quotePath=false", "show", "--format=", "--name-only", "HEAD"]).trim(), format!("Vault/{name}"), "{name} is itself, not a pattern");
         }
@@ -1206,6 +1216,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn a_repositorys_own_settings_run_nothing() {
         let (_env, root) = paths::testenv::folders("jshost-git-trap");
         if program().is_err() {
@@ -1970,7 +1981,8 @@ mod tests {
         // A file elsewhere that includes one a plugin can write.
         let outside = root.join("test-data/gitconfig");
         test_identity(&outside);
-        std::fs::write(&outside, format!("[user]\n\tname = Sam Rivera\n[include]\n\tpath = {}\n", s(vault.join(".tools/gitconfig")))).unwrap();
+        // As a person writes it on Windows too: `\` would be an escape in git's syntax.
+        std::fs::write(&outside, format!("[user]\n\tname = Sam Rivera\n[include]\n\tpath = {}\n", s(vault.join(".tools/gitconfig")).replace('\\', "/"))).unwrap();
         refused("reach", &s(outside.clone()), "includes a file in a grant", "a plugin could change");
         // The home's settings a link into the grant, the environment's file elsewhere: refused all the same (a git
         // older than 2.32 reads the home's).

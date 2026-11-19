@@ -878,10 +878,14 @@ mod tests {
 
         // A file, a folder, the granted folder itself and a hidden file in it (shown, as it may be read): each logged as
         // it would open, by its real path — nothing opened.
-        for (path, shown) in [("Projects/Q3/Plan, v2.md", real.join("Projects/Q3/Plan, v2.md")), ("Projects", real.join("Projects")), ("", real.clone()), (".obsidian/app.json", real.join(".obsidian/app.json"))] {
+        let at = |p: &str| p.split('/').filter(|s| !s.is_empty()).fold(real.clone(), |f, s| f.join(s));
+        for path in ["Projects/Q3/Plan, v2.md", "Projects", "", ".obsidian/app.json"] {
+            let shown = at(path).display().to_string();
             assert_eq!(ask("notes", &vault, path), json!({"value": true}), "{path}");
-            assert!(logged().ends_with(&format!("reveal {}\n", shown.display())), "{path}: {}", logged());
-            assert_eq!(crate::app::reveal_command(&shown.display().to_string(), false).unwrap().1, vec!["-R".to_string(), shown.display().to_string()]);
+            assert!(logged().ends_with(&format!("reveal {shown}\n")), "{path}: {}", logged());
+            // As Finder or Explorer gets it: `open -R <path>`, `explorer.exe /select,"<path>"`.
+            let want = if cfg!(windows) { vec![format!("/select,\"{shown}\"")] } else { vec!["-R".to_string(), shown.clone()] };
+            assert_eq!(crate::app::reveal_command(&shown, cfg!(windows)).unwrap().1, want, "{path}");
         }
         let before = logged();
         // Out of the folder, absolute, not there; a link out of it; a folder it wasn't given; a plugin that didn't ask
