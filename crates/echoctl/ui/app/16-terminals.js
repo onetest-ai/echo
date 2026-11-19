@@ -218,18 +218,21 @@ function termView(key, kind, startLabel, intro = '', extra = {}) {
   return head + termBody(e, key, kind, startLabel, intro, extra, running, attrs)
 }
 function termBody(e, key, kind, startLabel, intro, extra, running, attrs) {
+  // New conversation beside Resume: a Claude panel's ended session, when it ended on its own (`[data-conv]`).
+  const fresh = key.startsWith('claude:') && e && e.exited && !e.error && !e.signin
+    ? `<button class="btn" data-conv="new" data-term-kind="${esc(kind)}" data-term-key="${esc(key)}"${extra.call ? ` data-term-call="${esc(extra.call)}"` : ''}>New conversation</button>` : ''
   // Ended (or couldn't start): a card like the one before starting — what happened, and Resume —
   // not an empty terminal. What it printed stays one click away (an error is worth reading).
   if (e && e.exited && !(S.termOutput || {})[key]) {
     const why = e.error ? `<p class="term-error">${esc(e.error)}</p>` : ''
     const msg = e.signin ? 'This profile needs a sign-in before Claude can start.' : e.error ? "Claude couldn't start." : 'The session ended. Resume picks up the conversation where it stopped.'
     const signin = e.signin ? `<button class="btn primary" data-signin="${esc(e.signin)}">Sign in…</button>` : ''
-    return `<div class="term-empty"><p>${msg}</p>${why}<div class="term-acts">${signin}<button class="btn${e.signin ? '' : ' primary'}" ${attrs}>${e.error || e.signin ? 'Try again' : 'Resume'}</button>${e.error ? '' : `<button class="btn ghost" data-term-output="${esc(key)}">Show output</button>`}</div></div><div class="term-slot" data-term="${esc(key)}" hidden></div>`
+    return `<div class="term-empty"><p>${msg}</p>${why}<div class="term-acts">${signin}<button class="btn${e.signin ? '' : ' primary'}" ${attrs}>${e.error || e.signin ? 'Try again' : 'Resume'}</button>${fresh}${e.error ? '' : `<button class="btn ghost" data-term-output="${esc(key)}">Show output</button>`}</div></div><div class="term-slot" data-term="${esc(key)}" hidden></div>`
   }
   if (!running && !(e && (e.exited || e.starting))) {
     return `<div class="term-empty">${intro}<button class="btn primary" ${attrs}>${esc(startLabel)}</button></div><div class="term-slot" data-term="${esc(key)}" hidden></div>`
   }
-  const head = e && e.exited ? `<div class="term-bar"><span class="grow">The session ended — its output.</span><button class="btn ghost" data-term-output="${esc(key)}">Hide</button><button class="btn" ${attrs}>Resume</button></div>`
+  const head = e && e.exited ? `<div class="term-bar"><span class="grow">The session ended — its output.</span><button class="btn ghost" data-term-output="${esc(key)}">Hide</button><button class="btn" ${attrs}>Resume</button>${fresh}</div>`
     : e && e.starting ? '<div class="term-bar"><span class="grow">Starting Claude Code…</span></div>' : ''
   return `<div class="term-wrap">${head}<div class="term-slot" data-term="${esc(key)}"></div></div>`
 }

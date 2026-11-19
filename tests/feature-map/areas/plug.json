@@ -452,7 +452,7 @@
   },
   {
    "id": "F-PLUG-94",
-   "feature": "Each plugin's Claude session has its own bottom-panel tab ('Claude · <plugin name>'): another plugin's session opening never takes it away, so every running one can be reached and ended; one found running when the window opens gets its tab back, and its Start/Resume keeps the profile it ran on (the same conversation, the profile checked again by Echo); ⌘K has 'Restart Claude · <plugin name>' and 'New conversation in Claude · <plugin name>' for each, as for the folder session",
+   "feature": "Each plugin's Claude session has its own bottom-panel tab ('Claude · <plugin name>'): another plugin's session opening never takes it away, so every running one can be reached and ended; one found running when the window opens gets its tab back, and its Start/Resume keeps the profile it ran on (the same conversation, the profile checked again by Echo); ⌘K has 'Restart Claude · <plugin name>' and 'New conversation in Claude · <plugin name>' for each, as for the folder session; a session that ended shows Resume, New conversation (a fresh conversation at once) and Show output",
    "priority": "medium",
    "check": "agent",
    "axes": [

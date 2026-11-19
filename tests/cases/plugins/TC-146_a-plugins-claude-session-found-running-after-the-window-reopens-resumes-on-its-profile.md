@@ -28,13 +28,14 @@ tags: [plugins, claude-code, terminal, ai-profiles]
 | 1 | `open acme-ask '"path":"","mode":"read","profile":"acme-work"'`; `grep -E -A1 '^--(resume\|session-id)$' "$D/run-args"`; note the id | `"ok":true` with `"profile":"acme-work"` in its `about`; `--session-id` or `--resume` with a `<uuid>` (`--resume` after TC-140) |
 | 2 | Reload `{{base_url}}/` (the window reopened: the session found running); open the bottom panel with the status bar's "Claude" if it is closed; click the tab "Claude · Acme ask"; read the panel | `Acme ask · Claude Code in <$D/vault>, as that folder's own project — it reads only; asks each time · <acme-work's name>` above its terminal (`acme fake session in <$D/vault>`) |
 | 3 | `close`; wait until the panel says `The session ended. Resume picks up the conversation where it stopped.`; `rm "$D/run-args"`; click "Resume"; wait 2 s; `grep -E -A1 '^--(resume\|session-id)$' "$D/run-args"` | `--resume` with step 1's uuid and no `--session-id`: started again on `acme-work`, the same conversation (on the default profile it would be another one) |
+| 4 | `close` again; wait until the panel says `The session ended. Resume picks up the conversation where it stopped.`; read its buttons; `rm "$D/run-args"`; click "New conversation"; wait 2 s; `grep -E -A1 '^--(resume\|session-id)$' "$D/run-args"` | The card's buttons are "Resume", "New conversation", "Show output" in that order; then `--session-id` with a NEW uuid (not step 1's) and no `--resume`: another conversation, on `acme-work` (`Acme ask · … · <acme-work's name>` above its terminal) |
 
 ## Expected Final State
-Acme ask's session open on `acme-work`, its conversation of step 1.
+Acme ask's session open on `acme-work`, a new conversation (step 4's; step 1's is kept in Conversations).
 
 ## Teardown
 - `close`; then `plugins/TC-140`'s teardown
 
 ## Notes
 - Besides `echoctl`, this case runs `grep`, `rm`, `curl` and `python3` (the helpers).
-- Echo checks the profile again at the start (a wrapper profile that isn't the default is refused): the Rust test `terminal::a_plugins_session_opens_in_its_folder_as_that_folders_own_project_with_the_folder_sessions_permissions`; what Resume asks for from what the app says of the session (`aboutExtra`): the node test `plugin-session.test.mjs`.
+- Echo checks the profile again at the start (a wrapper profile that isn't the default is refused): the Rust test `terminal::a_plugins_session_opens_in_its_folder_as_that_folders_own_project_with_the_folder_sessions_permissions`; what Resume asks for from what the app says of the session (`aboutExtra`): the node test `plugin-session.test.mjs`; the ended card's buttons: `ended-card.test.mjs`.

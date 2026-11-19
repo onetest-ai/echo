@@ -43,7 +43,7 @@
   },
   {
    "id": "F-CC-05",
-   "feature": "The Claude panel (status bar, ⌘`, ⌘K) runs the Echo-folder session; closing the window keeps it; Restart and New conversation ask first while it runs; it knows what the window shows",
+   "feature": "The Claude panel (status bar, ⌘`, ⌘K) runs the Echo-folder session; closing the window keeps it; Restart and New conversation ask first while it runs; it knows what the window shows; an ended session's card offers Resume, New conversation and Show output",
    "priority": "medium",
    "check": "person",
    "axes": [
