@@ -317,3 +317,43 @@ fn a_rendered_page_plays_no_media_and_starts_no_worker() {
     let asked = seen.lock().unwrap().clone();
     assert!(!asked.iter().any(|p| p.contains(".m3u8") || p.contains(".mp4") || p.contains(".mp3")), "media was fetched: {asked:?}");
 }
+
+/// Links held where the window's listener can't see them (in no document, a fragment, a closed shadow root), and one
+/// in the page and an SVG one, each sent every event that could activate a link but a click.
+const EVENTS: &str = r#"<!doctype html><body><p id="out">x</p><script>
+const U = 'http://127.0.0.1:{TCP}/c';
+function links() {
+  const out = [];
+  const a = document.createElement('a'); a.href = U; out.push(a);
+  const f = document.createDocumentFragment(); const b = document.createElement('a'); b.href = U; f.appendChild(b); out.push(b);
+  const h = document.createElement('div'); document.body.appendChild(h); const r = h.attachShadow({mode: 'closed'}); const c = document.createElement('a'); c.href = U; r.appendChild(c); out.push(c);
+  const d = document.createElement('a'); d.href = U; document.body.appendChild(d); out.push(d);
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg'); const e = document.createElementNS('http://www.w3.org/2000/svg', 'a'); e.setAttribute('href', U); svg.appendChild(e); out.push(e);
+  const s = document.createElement('span'); const g = document.createElement('a'); g.href = U; g.appendChild(s); out.push(s);
+  return out;
+}
+const events = [
+  () => new KeyboardEvent('keydown', {key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true}),
+  () => new KeyboardEvent('keypress', {key: 'Enter', code: 'Enter', keyCode: 13, charCode: 13, which: 13, bubbles: true, cancelable: true}),
+  () => new KeyboardEvent('keyup', {key: ' ', code: 'Space', keyCode: 32, which: 32, bubbles: true, cancelable: true}),
+  () => new MouseEvent('mousedown', {bubbles: true, cancelable: true}),
+  () => new MouseEvent('mouseup', {bubbles: true, cancelable: true}),
+  () => new UIEvent('DOMActivate', {bubbles: true, cancelable: true}),
+  () => new PointerEvent('pointerup', {bubbles: true, cancelable: true}),
+  () => new Event('auxclick', {bubbles: true}),
+];
+let sent = 0;
+for (const make of events) { for (const l of links()) { try { l.focus && l.focus(); l.dispatchEvent(make()); sent++; } catch (e) {} } }
+document.getElementById('out').textContent = 'sent ' + sent;
+</script></body>"#;
+
+#[test]
+#[ignore = "needs a GUI session (WKWebView): cargo test --test render_page -- --ignored --test-threads=1"]
+fn a_link_is_followed_by_no_event_at_all() {
+    let c = canary();
+    let (port, _) = site(vec![("/events", EVENTS.replace("{TCP}", &c.tcp.to_string()))]);
+    let v = json(&render(port, "/events", 15).0);
+    std::thread::sleep(Duration::from_millis(500));
+    assert!(c.hits.lock().unwrap().is_empty(), "the canary was reached: {:?}", c.hits.lock().unwrap());
+    assert!(v["html"].as_str().unwrap().contains("<p id=\"out\">sent "), "{}", v["html"]);
+}

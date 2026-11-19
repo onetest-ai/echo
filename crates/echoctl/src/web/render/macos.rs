@@ -145,7 +145,8 @@ pub(super) fn run(r: Render) -> Result<()> {
 fn stop(rules_dir: &Path, code: i32) -> ! {
     let _ = std::fs::remove_dir_all(rules_dir);
     let pid = WEB_PID.load(Ordering::SeqCst);
-    if pid > 0 {
+    // Only while that id is still a WebContent process: never another process that got the id since.
+    if pid > 0 && web_content(pid) {
         unsafe { libc::kill(pid, libc::SIGKILL) };
         if code != 0 {
             eprintln!("web process {pid} stopped");
@@ -154,7 +155,15 @@ fn stop(rules_dir: &Path, code: i32) -> ! {
     std::process::exit(code)
 }
 
-/// The view's WebContent process (WKWebView's private `_webProcessIdentifier`), 0 when it can't be told.
+/// Whether process `pid` is WebKit's WebContent process (its program's path, `proc_pidpath`).
+fn web_content(pid: i32) -> bool {
+    let mut buf = vec![0u8; 4096];
+    let n = unsafe { libc::proc_pidpath(pid, buf.as_mut_ptr().cast(), buf.len() as u32) };
+    n > 0 && String::from_utf8_lossy(&buf[..n as usize]).contains("com.apple.WebKit.WebContent")
+}
+
+/// The view's WebContent process (WKWebView's private `_webProcessIdentifier`, read again at each navigation's
+/// commit), 0 when it can't be told.
 fn web_process(view: &WebView) -> i32 {
     use wry::WebViewExtMacOS;
     let wk = view.webview();
@@ -307,6 +316,13 @@ mod tests {
         }
         assert!(own_ipv4().unwrap().contains(&Ipv4Addr::LOCALHOST));
         assert!(v.as_array().unwrap().iter().any(|r| r["trigger"]["resource-type"] == serde_json::json!(["media"])), "every media load blocked");
+    }
+
+    #[test]
+    fn only_a_webcontent_process_is_ever_stopped() {
+        assert!(!web_content(std::process::id() as i32), "this process isn't one");
+        assert!(!web_content(1), "launchd isn't one");
+        assert!(!web_content(99_999_999), "nor a process that doesn't exist");
     }
 
     #[test]

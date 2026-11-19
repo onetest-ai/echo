@@ -39,13 +39,14 @@ const SNAPSHOT_JS: &str = "(function(){var n=document.getElementsByTagName('*').
 ///   on macOS the webview's own setting switches WebRTC off as well (`macos::configuration`);
 /// - a link (`a`, `area`) is never followed by a click: on a link's activation WebKit connects to its host before the
 ///   navigation is decided, outside the rule list (a loopback canary saw it, for download links and for links in no
-///   document, a fragment or a closed shadow root). Nobody clicks in a hidden render, so every click on a link is
-///   refused: on the window, capturing, first of all listeners; and in `click()` and `dispatchEvent` of a click, for an
-///   element in a link however it is held.
+///   document, a fragment or a closed shadow root; and for an `auxclick` event sent to one). Nobody clicks or types
+///   in a hidden render, so a link gets no event from the page at all: `dispatchEvent` of any event to an element in
+///   a link (`a`, `area`, SVG `a`) however it is held is refused, as is `click()`; and on the window, capturing, first
+///   of all listeners, every `click`, `auxclick` and `DOMActivate` on a link is cancelled.
 ///
 /// Every getter and method the guard uses is taken here, before the page runs, and called through `Reflect.apply`
-/// taken here too: a page that redefines `localName`, `parentNode`, `preventDefault`, `composedPath`, `target`, `type`
-/// or `Function.prototype.call` changes nothing it reads. Its `click` and `dispatchEvent` are unwritable and
+/// taken here too: a page that redefines `localName`, `parentNode`, `preventDefault`, `composedPath`, `target` or
+/// `Function.prototype.call` changes nothing it reads. Its `click` and `dispatchEvent` are unwritable and
 /// unconfigurable.
 const INIT_JS: &str = concat!(
     "(function(){var W=window,O=Object,R=Reflect.apply,G=O.getOwnPropertyDescriptor,P=O.defineProperty;",
@@ -54,15 +55,16 @@ const INIT_JS: &str = concat!(
     "for(var i=0;i<gone.length;i++)off(W,gone[i]);try{off(Navigator.prototype,'serviceWorker')}catch(e){}",
     "var EP=Element.prototype,NP=Node.prototype,VP=Event.prototype,TP=EventTarget.prototype,HP=HTMLElement.prototype;",
     "var gName=G(EP,'localName').get,gKind=G(NP,'nodeType').get,gUp=G(NP,'parentNode').get,gHost=G(ShadowRoot.prototype,'host').get,",
-    "mPath=G(VP,'composedPath').value,mStop=G(VP,'preventDefault').value,gType=G(VP,'type').get,gTarget=G(VP,'target').get,",
+    "mPath=G(VP,'composedPath').value,mStop=G(VP,'preventDefault').value,gTarget=G(VP,'target').get,",
     "mListen=G(TP,'addEventListener').value,mClick=G(HP,'click').value,mDispatch=G(TP,'dispatchEvent').value;",
     "function nm(n){try{return R(gKind,n,[])===1?R(gName,n,[]):''}catch(e){return ''}}",
     "function up(n){var p=null;try{p=R(gUp,n,[])}catch(e){}if(p)return p;try{return R(gHost,n,[])}catch(e){return null}}",
     "function link(n){for(var k=0;n&&k<4096;k++){var g=nm(n);if(g==='a'||g==='area')return true;n=up(n)}return false}",
-    "R(mListen,W,['click',function(e){var p=[];try{p=R(mPath,e,[])}catch(x){}for(var k=0;k<p.length;k++){if(link(p[k])){R(mStop,e,[]);return}}",
-    "var t=null;try{t=R(gTarget,e,[])}catch(x){}if(link(t))R(mStop,e,[])},true]);",
+    "function guard(e){var p=[];try{p=R(mPath,e,[])}catch(x){}for(var k=0;k<p.length;k++){if(link(p[k])){R(mStop,e,[]);return}}",
+    "var t=null;try{t=R(gTarget,e,[])}catch(x){}if(link(t))R(mStop,e,[])}",
+    "var on=['click','auxclick','DOMActivate'];for(var k=0;k<on.length;k++)R(mListen,W,[on[k],guard,true]);",
     "P(HP,'click',{value:function(){if(!link(this))R(mClick,this,[])},writable:false,configurable:false});",
-    "P(TP,'dispatchEvent',{value:function(e){var t='';try{t=R(gType,e,[])}catch(x){}if(t==='click'&&link(this))return false;return R(mDispatch,this,[e])},writable:false,configurable:false});",
+    "P(TP,'dispatchEvent',{value:function(e){if(link(this))return false;return R(mDispatch,this,[e])},writable:false,configurable:false});",
     "})();"
 );
 
