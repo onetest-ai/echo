@@ -113,25 +113,63 @@ pub fn stale_plugins() -> Vec<Value> {
 /// stop the rest. What each step said, for the log; an error naming every failure (and what did update) when any failed.
 #[cfg_attr(not(feature = "tray"), allow(dead_code))]
 pub fn update_plugins() -> Result<String> {
+    update_plugins_within(Duration::from_secs(120))
+}
+
+/// `update_plugins`, each `claude` call stopped (and counted as failed) after `limit`: a git fetch can hang.
+fn update_plugins_within(limit: Duration) -> Result<String> {
     let claude = claude_bin().ok_or_else(|| anyhow::anyhow!("Claude Code is not installed"))?;
     let stale = stale_plugins();
     let (mut said, mut done, mut failed) = (String::new(), Vec::<String>::new(), Vec::<String>::new());
-    let mut run = |args: &[&str], config: &Value, cwd: Option<&str>, what: String| {
+    // `config`: a profile's own folder for `CLAUDE_CONFIG_DIR`; the default config inherits the app's environment.
+    let mut run = |args: &[&str], config: Option<&str>, cwd: Option<&str>, what: String| {
         let mut c = std::process::Command::new(&claude);
-        c.args(args).stdin(std::process::Stdio::null());
-        if let Some(d) = config.as_str() {
+        c.args(args).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped());
+        if let Some(d) = config {
             c.env("CLAUDE_CONFIG_DIR", d);
         }
         if let Some(d) = cwd.filter(|d| Path::new(d).is_dir()) {
             c.current_dir(d);
         }
-        match c.output() {
-            Ok(o) => {
-                said.push_str(&String::from_utf8_lossy(&o.stdout));
-                said.push_str(&String::from_utf8_lossy(&o.stderr));
-                if o.status.success() { done.push(what) } else { failed.push(what) }
+        let mut child = match c.spawn() {
+            Ok(ch) => ch,
+            Err(e) => return failed.push(format!("{what} ({e})")),
+        };
+        let readers: Vec<_> = [child.stdout.take().map(|r| Box::new(r) as Box<dyn std::io::Read + Send>), child.stderr.take().map(|r| Box::new(r) as Box<dyn std::io::Read + Send>)]
+            .into_iter()
+            .flatten()
+            .map(|mut r| {
+                let (tx, rx) = std::sync::mpsc::channel();
+                std::thread::spawn(move || {
+                    let mut b = Vec::new();
+                    let _ = r.read_to_end(&mut b);
+                    let _ = tx.send(b);
+                });
+                rx
+            })
+            .collect();
+        let start = Instant::now();
+        let status = loop {
+            match child.try_wait() {
+                Ok(Some(st)) => break Some(st),
+                Ok(None) if start.elapsed() < limit => std::thread::sleep(Duration::from_millis(20)),
+                _ => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    break None;
+                }
             }
-            Err(e) => failed.push(format!("{what} ({e})")),
+        };
+        // A killed call's descendants may still hold the pipes: don't wait for them.
+        for rx in readers {
+            if let Ok(b) = rx.recv_timeout(if status.is_some() { Duration::from_secs(5) } else { Duration::from_millis(200) }) {
+                said.push_str(&String::from_utf8_lossy(&b));
+            }
+        }
+        match status {
+            Some(st) if st.success() => done.push(what),
+            Some(_) => failed.push(what),
+            None => failed.push(format!("{what} (no answer in {} s)", limit.as_secs().max(1))),
         }
     };
     let markets: std::collections::BTreeSet<(String, String, String)> = stale
@@ -139,12 +177,12 @@ pub fn update_plugins() -> Result<String> {
         .filter_map(|s| Some((s["plugin"].as_str()?.split_once('@')?.1.to_string(), s["profile"].as_str().unwrap_or_default().to_string(), s["config"].as_str()?.to_string())))
         .collect();
     for (m, profile, config) in &markets {
-        run(&["plugin", "marketplace", "update", m], &Value::from(config.as_str()), None, format!("marketplace {m}{}", in_profile(profile)));
+        run(&["plugin", "marketplace", "update", m], (!profile.is_empty()).then_some(config.as_str()), None, format!("marketplace {m}{}", in_profile(profile)));
     }
     for s in &stale {
         let (Some(p), Some(scope)) = (s["plugin"].as_str(), s["scope"].as_str()) else { continue };
         let what = format!("{p} {} ({scope}{})", s["version"].as_str().unwrap_or("?"), in_profile(s["profile"].as_str().unwrap_or_default()));
-        run(&["plugin", "update", p, "--scope", scope], &s["config"], s["project"].as_str(), what);
+        run(&["plugin", "update", p, "--scope", scope], s["profile"].as_str().and_then(|_| s["config"].as_str()), s["project"].as_str(), what);
     }
     anyhow::ensure!(failed.is_empty(), "couldn't update {}{}", failed.join(", "), if done.is_empty() { String::new() } else { format!("; updated {}", done.join(", ")) });
     Ok(said)
@@ -368,6 +406,8 @@ mod tests {
         fs::set_permissions(bin.join("claude"), fs::Permissions::from_mode(0o755)).unwrap();
         let path = std::env::var_os("PATH");
         std::env::set_var("PATH", &bin);
+        // The default config is the app's own environment: with the variable unset (~/.claude) its calls get none.
+        std::env::remove_var("CLAUDE_CONFIG_DIR");
         let r = update_plugins();
         match path {
             Some(p) => std::env::set_var("PATH", p),
@@ -376,10 +416,40 @@ mod tests {
         let err = format!("{:#}", r.unwrap_err());
         assert!(err.contains("couldn't update echo@onetest 0.0.1 (user, profile work)") && err.contains("updated marketplace onetest") && err.contains("echo@onetest 0.0.1 (user)"), "{err}");
         let calls: Vec<String> = fs::read_to_string(&log).unwrap().lines().map(str::to_owned).collect();
-        let (d, w) = (default.display().to_string(), p.config_folder().display().to_string());
-        for c in [format!("{d}|plugin marketplace update onetest"), format!("{d}|plugin update echo@onetest --scope user"), format!("{w}|plugin marketplace update onetest"), format!("{w}|plugin update echo@onetest --scope user")] {
+        let w = p.config_folder().display().to_string();
+        for c in ["|plugin marketplace update onetest".to_string(), "|plugin update echo@onetest --scope user".to_string(), format!("{w}|plugin marketplace update onetest"), format!("{w}|plugin update echo@onetest --scope user")] {
             assert!(calls.contains(&c), "{c} in {calls:?}");
         }
         assert_eq!(calls.len(), 4);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_claude_call_that_doesnt_answer_is_stopped_and_the_others_go_on() {
+        use std::os::unix::fs::PermissionsExt;
+        let (_env, root) = crate::paths::testenv::folders("update-plugins-timeout");
+        let default = installed_plugins_file().parent().unwrap().parent().unwrap().to_path_buf();
+        installs(&default, "0.0.1", "user", None);
+        let p = work_profile();
+        installs(&p.config_folder(), "0.0.1", "user", None);
+        let bin = root.join("bin");
+        fs::create_dir_all(&bin).unwrap();
+        let log = root.join("calls.log");
+        // Every call in the profile's config hangs; the default config's answer.
+        fs::write(bin.join("claude"), format!("#!/bin/sh\necho \"$CLAUDE_CONFIG_DIR|$*\" >> '{}'\ncase \"$CLAUDE_CONFIG_DIR\" in */claude/work) exec /bin/sleep 30;; esac\nexit 0\n", log.display())).unwrap();
+        fs::set_permissions(bin.join("claude"), fs::Permissions::from_mode(0o755)).unwrap();
+        let path = std::env::var_os("PATH");
+        std::env::set_var("PATH", &bin);
+        std::env::remove_var("CLAUDE_CONFIG_DIR");
+        let t = Instant::now();
+        let r = update_plugins_within(Duration::from_millis(300));
+        match path {
+            Some(p) => std::env::set_var("PATH", p),
+            None => std::env::remove_var("PATH"),
+        }
+        assert!(t.elapsed() < Duration::from_secs(10));
+        let err = format!("{:#}", r.unwrap_err());
+        assert!(err.contains("marketplace onetest, profile work (no answer") && err.contains("echo@onetest 0.0.1 (user, profile work) (no answer") && err.contains("; updated marketplace onetest, echo@onetest 0.0.1 (user)"), "{err}");
+        assert_eq!(fs::read_to_string(&log).unwrap().lines().count(), 4);
     }
 }
