@@ -1077,6 +1077,7 @@ mod tests {
 
     #[test]
     fn a_local_profile_runs_its_own_model_for_each_of_claudes_names() {
+        let (_env, _) = crate::paths::testenv::folders("ai-local-models");
         let mut p = Profile { id: "q".into(), name: "Q".into(), kind: Kind::Local, base_url: Some("http://localhost:11434".into()), token: None, live_model: Some("small-m".into()), notes_model: Some("m".into()), account: None, email: None, sso: false, models: Default::default(), wrapper: None };
         let env = |p: &Profile| routing_env(p).into_iter().filter(|(k, _)| k.starts_with("ANTHROPIC_DEFAULT") || *k == "ANTHROPIC_SMALL_FAST_MODEL").map(|(k, v)| format!("{k}={v}")).collect::<Vec<_>>();
         assert!(env(&p).iter().all(|e| e.ends_with("=m")), "unmapped: every name its model, as before: {:?}", env(&p));

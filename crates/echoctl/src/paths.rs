@@ -34,9 +34,11 @@ fn missing_run_env(under_claude_code: bool, config_set: bool, home_set: bool) ->
 
 /// A development build started by Claude Code (`CLAUDECODE`) without the run's folders exits before it resolves the
 /// real config dir or data folder, or changes the user's own files elsewhere (start at login, the shell's PATH, the
-/// CLI link). A release build, and a person's own terminal, never stop here; nor do unit tests, whose variables
-/// `testenv` sets and restores process-wide while other tests run (the binary's own tests check it).
+/// CLI link). A release build, and a person's own terminal, never stop here. A unit test outside `testenv` panics
+/// here instead (`testenv::refuse_outside`).
 pub(crate) fn refuse_real_folders() {
+    #[cfg(test)]
+    testenv::refuse_outside();
     if !cfg!(all(debug_assertions, not(test))) {
         return;
     }
@@ -56,6 +58,9 @@ pub fn config_dir() -> PathBuf {
     if let Some(d) = std::env::var_os("ECHOCTL_CONFIG_DIR") {
         return d.into();
     }
+    // A test's helper thread whose test has just ended: never this computer's folder.
+    #[cfg(test)]
+    testenv::outside();
     #[cfg(windows)]
     if let Some(d) = std::env::var_os("APPDATA") {
         return PathBuf::from(d).join("echo");
@@ -276,10 +281,33 @@ pub fn unused(dir: &Path, name: &str, ext: &str) -> PathBuf {
 /// they don't move each other's folders (the variables are process-wide).
 #[cfg(test)]
 pub mod testenv {
+    use std::cell::Cell;
     use std::path::PathBuf;
     use std::sync::{Mutex, MutexGuard};
 
     static LOCK: Mutex<()> = Mutex::new(());
+
+    thread_local! {
+        /// This thread's test holds a test environment (the variables are process-wide: another test's say nothing
+        /// about this one).
+        static HELD: Cell<bool> = const { Cell::new(false) };
+    }
+
+    pub(super) fn outside() {
+        panic!("a unit test resolved Echo's real config or data folder: take paths::testenv::folders first (#824)");
+    }
+
+    /// A unit test never resolves this computer's config or data folder. A test's own thread (named for the test)
+    /// holds a test environment itself; a thread it started (a plugin host, a reader) runs while one is held.
+    pub(super) fn refuse_outside() {
+        if HELD.get() {
+            return;
+        }
+        let a_test = std::thread::current().name().is_some_and(|n| n.contains("::"));
+        if a_test || std::env::var_os("ECHOCTL_CONFIG_DIR").is_none() {
+            outside();
+        }
+    }
 
     /// Held by a test: on drop the variables are restored and the folder removed.
     pub struct Env {
@@ -290,8 +318,12 @@ pub mod testenv {
 
     impl Drop for Env {
         fn drop(&mut self) {
-            // The test's background threads end first, while its folders are still the current ones.
+            // The test's background threads end first, and its plugins unload, while its folders are still the
+            // current ones.
             crate::signin::wait_idle();
+            #[cfg(feature = "js")]
+            crate::jshost::unload_all();
+            HELD.set(false);
             for (k, v) in &self.before {
                 match v {
                     Some(v) => std::env::set_var(k, v),
@@ -300,6 +332,13 @@ pub mod testenv {
             }
             let _ = std::fs::remove_dir_all(&self.root);
         }
+    }
+
+    /// A child process of a test, run on the folders its parent's test environment set (`ECHOCTL_HOME`,
+    /// `ECHOCTL_CONFIG_DIR`): this thread holds them as its own.
+    pub fn given_by_parent() {
+        assert!(std::env::var_os("ECHOCTL_CONFIG_DIR").is_some(), "the parent test sets the folders");
+        HELD.set(true);
     }
 
     /// `f()` comes true soon (polled every 20 ms) — for a lock just released: while another test thread starts
@@ -320,6 +359,7 @@ pub mod testenv {
     /// computer's Claude Code setup, the user's shell files or a git settings file the test didn't name.
     pub fn folders(name: &str) -> (Env, PathBuf) {
         let lock = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        HELD.set(true);
         crate::livenotes::forget_all();
         let root = std::env::temp_dir().join(format!("echo-test-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
@@ -354,6 +394,18 @@ mod tests {
         for (c, h) in [(false, false), (false, true), (true, false), (true, true)] {
             assert_eq!(missing_run_env(false, c, h), None);
         }
+    }
+
+    #[test]
+    #[should_panic(expected = "take paths::testenv::folders first")]
+    fn a_unit_test_outside_a_test_environment_never_resolves_the_config_dir() {
+        config_dir();
+    }
+
+    #[test]
+    #[should_panic(expected = "take paths::testenv::folders first")]
+    fn a_unit_test_outside_a_test_environment_never_resolves_the_data_folder() {
+        home();
     }
 
     #[test]

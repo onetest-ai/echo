@@ -247,6 +247,7 @@ mod tests {
 
     #[test]
     fn a_refusal_names_the_owning_source_without_its_credentials() {
+        let (_env, _) = crate::paths::testenv::folders("shared-refusal");
         let all = vec![("a".to_string(), "https://me:tok@git.example.com/g/r.git".to_string(), "acme".to_string()), ("b".to_string(), "other".to_string(), "other".to_string())];
         let e = check_set(&all, "b", "acme").unwrap_err().to_string();
         assert!(e.contains("(https://git.example.com/g/r.git)") && !e.contains("tok") && !e.contains("me:"), "{e}");

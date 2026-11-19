@@ -1218,6 +1218,7 @@ mod tests {
 
     #[test]
     fn only_frames_inside_a_call_are_served() {
+        let (_env, _) = crate::paths::testenv::folders("window-frames");
         // Rejected before touching the disk: traversal, absolute paths, non-frame files.
         assert!(frame_file("../etc/passwd").is_none());
         assert!(frame_file("x/../../etc/passwd").is_none());

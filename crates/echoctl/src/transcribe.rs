@@ -1421,6 +1421,7 @@ mod tests {
 
     #[test]
     fn prompt_is_bare_deduplicated_terms() {
+        let (_env, _) = crate::paths::testenv::folders("transcribe-prompt");
         let cfg = Config { vocabulary: vec!["ServiceNow".into(), "Miro".into()], ..Default::default() };
         let m = MeetingContext {
             organizer: Some(crate::meeting::Person { name: "Pat O".into(), email: None }),

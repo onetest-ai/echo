@@ -944,6 +944,7 @@ mod tests {
     #[test]
     #[cfg(unix)]
     fn closing_a_profiles_sessions_lets_its_lease_go() {
+        let (_env, _) = crate::paths::testenv::folders("terminal-profile-lease");
         let mut cmd = CommandBuilder::new("/bin/sh");
         cmd.args(["-c", "sleep 30"]);
         let id = open_with("claude:folder", cmd, 80, 20, Some(("acme-test".into(), Box::new(()))), None).unwrap();

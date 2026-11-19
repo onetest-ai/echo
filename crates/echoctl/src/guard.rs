@@ -493,6 +493,7 @@ mod tests {
 
     #[test]
     fn a_project_sync_writes_its_run_and_runs_only_its_apply_people_apply_and_done_steps() {
+        let (_env, _) = crate::paths::testenv::folders("guard-project-sync");
         let root = std::env::temp_dir().join(format!("echo-guard-project-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
         let ledger = root.join("projects/aurora/ledger");
@@ -578,6 +579,7 @@ mod tests {
 
     #[test]
     fn only_this_calls_files_and_the_previous_minutes() {
+        let (_env, _) = crate::paths::testenv::folders("guard-files");
         let root = fixture("files");
         let s = scope(&root);
         let call = root.join("calls/2026-10-25_100000-call");
@@ -640,6 +642,7 @@ mod tests {
 
     #[test]
     fn the_windows_session_on_a_call_reads_and_changes_nothing() {
+        let (_env, _) = crate::paths::testenv::folders("guard-windows-session");
         let root = fixture("ask");
         let s = Scope { ask: true, ..scope(&root) };
         assert!(s.judge(&json!({"tool_name": "mcp__echo__search_sources", "tool_input": {"query": "budget"}})).is_ok(), "the Brain reads");
@@ -679,6 +682,7 @@ mod tests {
 
     #[test]
     fn a_neighbour_named_like_the_call_is_another_call() {
+        let (_env, _) = crate::paths::testenv::folders("guard-neighbour");
         let root = fixture("neighbour");
         // A second call in the same second gets `-2`; an untitled call is its bare stamp: both
         // start like a neighbour's name.
@@ -724,6 +728,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_link_out_of_the_call_is_followed_and_refused() {
+        let (_env, _) = crate::paths::testenv::folders("guard-link-out");
         let root = fixture("links");
         let s = scope(&root);
         let call = root.join("calls/2026-10-25_100000-call");
@@ -743,6 +748,7 @@ mod tests {
 
     #[test]
     fn no_instruction_files_are_written() {
+        let (_env, _) = crate::paths::testenv::folders("guard-instructions");
         let root = fixture("instructions");
         let s = scope(&root);
         let call = root.join("calls/2026-10-25_100000-call");

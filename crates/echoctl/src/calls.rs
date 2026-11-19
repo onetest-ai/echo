@@ -1548,6 +1548,7 @@ mod tests {
 
     #[test]
     fn frames_are_pruned_to_the_ones_kept() {
+        let (_env, _) = crate::paths::testenv::folders("frames-pruned");
         let home = std::env::temp_dir().join(format!("echo-frames-{}", std::process::id()));
         let dir = home.join("calls").join("call");
         let bin = home.join(".echo").join("trash").join("call.frames");
@@ -1836,7 +1837,8 @@ mod tests {
     #[test]
     fn inside_a_run_the_cli_takes_only_its_call() {
         if std::env::var_os("ECHOCTL_TEST_IN_RUN").is_some() {
-            let own = std::env::var(crate::guard::RUN_CALL).unwrap();
+            crate::paths::testenv::given_by_parent();
+            let own =std::env::var(crate::guard::RUN_CALL).unwrap();
             let real = dunce::canonicalize(&own).unwrap();
             assert_eq!(resolve_call(&own).unwrap(), real);
             // A spelling through another call: the resolved path, never that spelling.
