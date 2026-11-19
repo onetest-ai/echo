@@ -6,7 +6,8 @@ use windows::Win32::Foundation::ERROR_BUFFER_OVERFLOW;
 use windows::Win32::NetworkManagement::IpHelper::{GetAdaptersAddresses, GAA_FLAG_SKIP_ANYCAST, GAA_FLAG_SKIP_DNS_SERVER, GAA_FLAG_SKIP_MULTICAST, IP_ADAPTER_ADDRESSES_LH};
 use windows::Win32::Networking::WinSock::{AF_INET, AF_INET6, AF_UNSPEC, SOCKADDR_IN, SOCKADDR_IN6};
 
-pub fn addresses() -> Vec<IpAddr> {
+/// `None` when `GetAdaptersAddresses` fails.
+pub fn addresses() -> Option<Vec<IpAddr>> {
     let mut out = vec![];
     let mut size: u32 = 16 << 10;
     for _ in 0..4 {
@@ -19,7 +20,7 @@ pub fn addresses() -> Vec<IpAddr> {
             continue;
         }
         if r != 0 {
-            return out;
+            return None;
         }
         unsafe {
             let mut adapter = first;
@@ -39,7 +40,7 @@ pub fn addresses() -> Vec<IpAddr> {
                 adapter = (*adapter).Next;
             }
         }
-        return out;
+        return Some(out);
     }
-    out
+    None
 }

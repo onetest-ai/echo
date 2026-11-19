@@ -71,7 +71,7 @@ pub(crate) fn within<T: Send + 'static>(wait: Duration, f: impl FnOnce() -> T + 
 /// points into the user's network is refused), looked up by `until` (`LOOKUP_SECS` at most). A host written as a
 /// number other than a plain IPv4 or IPv6 address (`2130706433`, `0x7f.1`) is refused, as curl would read it.
 pub(crate) fn public_address(host: &str, port: u16, until: Instant) -> Result<IpAddr> {
-    public_address_by(host, port, until, Arc::new(system_lookup), &crate::netif::addresses())
+    public_address_by(host, port, until, Arc::new(system_lookup), &crate::netif::addresses()?)
 }
 
 /// Whether `ip` is this computer's: one of its interfaces' addresses (`own`), or an IPv6 address in the /64 of one of

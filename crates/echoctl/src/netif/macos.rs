@@ -2,12 +2,13 @@
 
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
-pub fn addresses() -> Vec<IpAddr> {
+/// `None` when `getifaddrs` fails.
+pub fn addresses() -> Option<Vec<IpAddr>> {
     let mut out = vec![];
     unsafe {
         let mut list: *mut libc::ifaddrs = std::ptr::null_mut();
         if libc::getifaddrs(&mut list) != 0 {
-            return out;
+            return None;
         }
         let mut at = list;
         while !at.is_null() {
@@ -23,5 +24,5 @@ pub fn addresses() -> Vec<IpAddr> {
         }
         libc::freeifaddrs(list);
     }
-    out
+    Some(out)
 }

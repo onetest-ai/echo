@@ -65,8 +65,8 @@ pub type Connect = dyn Fn(SocketAddr, Duration) -> std::io::Result<TcpStream> + 
 pub struct Net {
     pub lookup: Arc<Lookup>,
     pub connect: Arc<Connect>,
-    /// This computer's own addresses, read for each connection (`netif::addresses`).
-    pub own: Arc<dyn Fn() -> Vec<IpAddr> + Send + Sync>,
+    /// This computer's own addresses, read for each connection (`netif::addresses`: an error refuses it).
+    pub own: Arc<dyn Fn() -> Result<Vec<IpAddr>> + Send + Sync>,
     /// The ports a page's hosts are reached on: 443 (a development build's tests add their plain-http fakes' 80).
     pub ports: &'static [u16],
 }
@@ -290,7 +290,7 @@ fn open<'a>(target: &str, s: &'a Shared) -> Result<(TcpStream, Slot<'a>)> {
         bail!("past the {} MB a render moves", s.caps.bytes >> 20);
     }
     // Looked up again for every connection: a name that now points into the user's network is refused.
-    let ip: IpAddr = public_address_by(&host, port, s.until, s.net.lookup.clone(), &(s.net.own)())?;
+    let ip: IpAddr = public_address_by(&host, port, s.until, s.net.lookup.clone(), &(s.net.own)()?)?;
     let wait = s.until.saturating_duration_since(Instant::now()).min(Duration::from_secs(CONNECT_SECS));
     if wait.is_zero() {
         bail!("the render's time is up");
@@ -373,7 +373,7 @@ mod tests {
         let (l, c) = (lookups.clone(), connected.clone());
         let m = map.clone();
         let net = Net {
-            own: Arc::new(|| vec!["127.0.0.1".parse().unwrap(), "93.184.215.99".parse().unwrap(), "2a00:1450:4001:80b::5".parse().unwrap()]),
+            own: Arc::new(|| Ok(vec!["127.0.0.1".parse().unwrap(), "93.184.215.99".parse().unwrap(), "2a00:1450:4001:80b::5".parse().unwrap()])),
             ports: &[443],
             lookup: Arc::new(move |host, _| {
                 l.fetch_add(1, Ordering::SeqCst);
@@ -474,6 +474,16 @@ mod tests {
         }
         assert!(seen.connected.lock().unwrap().is_empty(), "nothing was connected to: {:?}", seen.connected.lock().unwrap());
         assert!(g.stats()["refused"].as_array().unwrap().iter().any(|r| r.as_str().unwrap().contains("mixed.acme.example")));
+    }
+
+    #[test]
+    fn when_this_computers_addresses_cant_be_read_nothing_is_reached() {
+        let (net, seen) = fake(&[("news.acme.example", &["93.184.215.14"])], upstream(0));
+        let net = Net { own: Arc::new(|| anyhow::bail!("can't list")), ..net };
+        let g = Gate::start(net, CAPS, soon()).unwrap();
+        assert_eq!(ask(&g, "news.acme.example:443", Some(&g.token.clone())).0, 403);
+        assert_eq!(ask(&g, "8.8.8.8:443", Some(&g.token.clone())).0, 403);
+        assert!(seen.connected.lock().unwrap().is_empty());
     }
 
     #[test]

@@ -382,7 +382,8 @@ prompt, no click needed — queued and background work reads as a command does).
     only these pictures, GET only, https (http only for an http page), port 80 or 443 (or the page's own port on the
     page's own host), a host name or an IPv4 address (an IPv6 address written as one refused), and only from a public
     address: Echo looks the host up (10 s at most, within the 2 minutes), refuses it when any of its addresses is this
-    computer (loopback, any address of its own interfaces, and the /64 of its own global IPv6 ones) or a private, link-local, shared, unique-local, site-local or reserved range, or an IPv6 form that carries
+    computer (loopback, any address of its own interfaces, and the /64 of its own global IPv6 ones; when they can't be
+    listed nothing is reached) or a private, link-local, shared, unique-local, site-local or reserved range, or an IPv6 form that carries
     or tunnels to an IPv4 address (IPv4-compatible and -translated, 6to4, Teredo, local-use NAT64; v4-mapped and NAT64
     only to a public IPv4), an address written as a number other than plain IPv4 or IPv6 refused too, and connects to
     the address it checked, never through a proxy. A page on the user's own network or this computer gets only pictures the plugin
@@ -408,7 +409,9 @@ again, else as a public https page); once any of them was a public page, only as
 `network.hosts` host or an address the user listed. The size and time caps are the whole read's: no redirect is
 followed past its time. A name that points into this computer or the user's network and one that isn't found are
 refused in the same words ("Echo found no public address for <host> (never this computer or your own network)"), so
-no name inside it can be probed. Rejected, with why: plain http ("… over plain http: Echo reads a page on the
+no name inside it can be probed. "Public" means outside the private, shared and reserved ranges and this computer's own
+addresses: a company network that uses public addresses, or a VPN whose DNS points names at hosts inside it, can still
+be reached that way — Echo can't tell them from the internet. Rejected, with why: plain http ("… over plain http: Echo reads a page on the
 public internet only over https"), another port ("… on port <n>: … only on ports 80 and 443"), this computer or the
 user's network ("<plugin> reads only pages on the public internet and the addresses it may reach: <host> is on this
 computer or your own network"), a redirect to any of these ("the page moved to <address>, which Echo doesn't read: …")
