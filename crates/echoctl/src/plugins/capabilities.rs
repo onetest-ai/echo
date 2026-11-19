@@ -310,7 +310,7 @@ pub(super) fn describe_deliver_provider(v: &Value) -> Result<String> {
 }
 
 /// The sheet's line for `uses.network.web`: its own, after the `Talks to …` one.
-pub const WEB_LINE: &str = "Reads web pages on the public internet (https)";
+pub const WEB_LINE: &str = "Reads web pages on the public internet (https), and can send what it knows to any site through the addresses it opens";
 
 /// `uses.network`: one line, and `web` one of its own (the lines apart by a line break: `describe`).
 pub(super) fn describe_network(v: &Value) -> Result<String> {
@@ -727,7 +727,7 @@ mod tests {
     fn reading_the_public_web_is_a_line_of_its_own_on_the_sheet() {
         let lines = |v: serde_json::Value| describe(serde_json::json!({"network": v}).as_object().unwrap());
         assert_eq!(lines(serde_json::json!({"web": true})).unwrap(), [WEB_LINE]);
-        assert_eq!(WEB_LINE, "Reads web pages on the public internet (https)");
+        assert_eq!(WEB_LINE, "Reads web pages on the public internet (https), and can send what it knows to any site through the addresses it opens");
         assert_eq!(lines(serde_json::json!({"hosts": ["api.acme.example"], "web": true})).unwrap(), ["Talks to api.acme.example over HTTPS", WEB_LINE]);
         assert_eq!(lines(serde_json::json!({"ask": true, "web": true})).unwrap(), ["Fetches a web page from an address you type in Echo's own box when it asks — that page only, once each time", WEB_LINE]);
         assert_eq!(lines(serde_json::json!({"hosts": ["api.acme.example"], "web": false})).unwrap(), ["Talks to api.acme.example over HTTPS"], "false: no line");

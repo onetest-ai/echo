@@ -38,7 +38,7 @@ for i in $(seq 50); do curl -s -o /dev/null http://127.0.0.1:48231/ && break; sl
 
 | # | Action | Expected Result |
 |---|--------|----------------|
-| 1 | `$E plugin install <dir>/crawler --yes` | The sheet it prints lists "Runs its own code in Echo, with your rights (new)" and, as a line of its own, "Reads web pages on the public internet (https) (new)"; `Installed Acme crawler 0.1.0` |
+| 1 | `$E plugin install <dir>/crawler --yes` | The sheet it prints lists "Runs its own code in Echo, with your rights (new)" and, as a line of its own, "Reads web pages on the public internet (https), and can send what it knows to any site through the addresses it opens (new)"; `Installed Acme crawler 0.1.0` |
 | 2 | `$E plugin call crawler read '{"url":"https://news.acme.example/pilot.html"}'` | Exit 0, JSON: `url` `https://news.acme.example/pilot.html`, `title` `Acme pilot notes`; its `links` against `https://news.acme.example/` (`https://news.acme.example/plan.pdf`) — no dialog, nothing asked of the user |
 | 3 | `$E plugin call crawler read '{"url":"https://news.acme.example/docs"}'`; then `grep -c 'GET /docs/ ' "$(dirname "$ECHOCTL_HOME")/site.out"` | Exit 0, `url` `https://news.acme.example/docs/`: the site's 301 to `/docs/` was followed; `1` |
 | 4 | `$E plugin call crawler read '{"url":"http://news.acme.example/pilot.html"}'` | Exit 1: `… news.acme.example over plain http: Echo reads a page on the public internet only over https` |
