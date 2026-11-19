@@ -412,6 +412,9 @@ enum Msg {
     Settle(String, u64, String),
     /// An event of one of a plugin's connections (`net.rs`): plugin, connection, JSON.
     Net(String, u64, String),
+    /// (tests) Answered once every message sent before it is handled (`unload_all`).
+    #[cfg(test)]
+    Done(Sender<()>),
 }
 
 struct Host {
@@ -569,6 +572,25 @@ fn sync_some(only: Option<&str>) {
         // Reloaded every time: an update changes the files under the same id.
         let _ = h.tx.send(Msg::Load(id, dir));
     }
+}
+
+/// (tests) Unload every plugin and wait until the host has: a test's plugins never run on, or stop their scripts,
+/// once its folders are gone (`paths::testenv`).
+#[cfg(test)]
+pub fn unload_all() {
+    let Some(h) = HOST.get() else { return };
+    let done = || {
+        let (tx, rx) = channel();
+        if h.tx.send(Msg::Done(tx)).is_ok() {
+            let _ = rx.recv_timeout(Duration::from_secs(15));
+        }
+    };
+    // The loads already sent go first, so none is left loaded.
+    done();
+    for id in h.loaded.lock().map(|l| l.keys().cloned().collect::<Vec<_>>()).unwrap_or_default() {
+        let _ = h.tx.send(Msg::Unload(id));
+    }
+    done();
 }
 
 /// Each loaded plugin and whether it loaded (or why not).
@@ -753,6 +775,10 @@ fn run(rx: Receiver<Msg>, tx: Sender<Msg>) {
                 });
                 current.lock().unwrap().providing = false;
                 current.lock().unwrap().widget = false;
+            }
+            #[cfg(test)]
+            Ok(Msg::Done(done)) => {
+                let _ = done.send(());
             }
             Ok(Msg::Forget(plugin, n)) => {
                 if let Some(p) = plugins.get_mut(&plugin) {

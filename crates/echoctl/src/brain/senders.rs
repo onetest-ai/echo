@@ -355,6 +355,7 @@ mod tests {
 
     #[test]
     fn verdicts() {
+        let (_env, _) = crate::paths::testenv::folders("senders-verdicts");
         let mut s = Senders { org_domains: vec!["ours.example".into()], ..Default::default() };
         s.clients.insert("acme".into(), List { trusted: vec![Entry { key: "ana@acme.com".into(), ..Default::default() }], ignored: vec![Entry { key: "spam@acme.com".into(), ..Default::default() }], ..Default::default() });
         // A colleague's mail inside the organisation; the same address from outside isn't a colleague.

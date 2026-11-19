@@ -183,6 +183,7 @@ mod tests {
 
     #[test]
     fn a_plugins_dashboards_are_checked_against_its_own_widgets_and_said_on_the_sheet_without_asking() {
+        let (_env, _) = crate::paths::testenv::folders("presets-dashboards");
         let ok = json!([
             {"id": "staffing", "kind": "client", "name": "Staffing", "about": "Who works where", "items": [{"widget": "glance", "size": "L", "height": 2, "params": {"span": "month"}}, {"widget": "plugin:acme-staff:roster", "row": true}]},
             {"id": "pursuit", "kind": "thread", "name": "Pursuit", "for": ["pursuit"], "items": [{"widget": "plugin:acme-crm:pipe"}]}

@@ -454,6 +454,7 @@ mod tests {
 
     #[test]
     fn the_block_says_what_is_open_and_selected() {
+        let (_env, _) = crate::paths::testenv::folders("view-block");
         let tmp = std::env::temp_dir().join(format!("echo-view-{}", std::process::id()));
         std::fs::create_dir_all(tmp.join("2026-10-29_170208-bruno")).unwrap();
         let now = chrono::Utc::now();

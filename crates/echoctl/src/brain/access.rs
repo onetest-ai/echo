@@ -155,6 +155,7 @@ mod tests {
 
     #[test]
     fn documents_belong_to_their_threads_profiles() {
+        let (_env, _) = crate::paths::testenv::folders("brain-access-profiles");
         let threads: BTreeMap<String, String> = [("a".to_string(), "acme-account".to_string()), ("b".to_string(), "system".to_string())].into_iter().collect();
         let refs = json!({"threads": [{"id": "a", "client": "acme"}]});
         assert_eq!(profiles_of("mail/x", &refs, &threads, "system"), ["acme-account".to_string()].into_iter().collect());

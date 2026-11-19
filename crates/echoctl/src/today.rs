@@ -884,6 +884,7 @@ mod tests {
 
     #[test]
     fn work_is_this_weeks_and_late_tasks_late_first_with_their_links() {
+        let (_env, _) = crate::paths::testenv::folders("today-work");
         let today = Local::now().date_naive();
         let later = (today + chrono::Duration::days(30)).to_string();
         let tasks = json!({"piles": {"mine": [

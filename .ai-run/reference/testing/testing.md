@@ -21,6 +21,16 @@ in the same PR. The rules are in `.ai-run/guides/testing/testing.md`; how to wri
 
 `paths::testenv::folders(name)` returns a guard that, while alive, points `ECHOCTL_HOME`, `ECHOCTL_CONFIG_DIR`, `HOME`
 and `CLAUDE_CONFIG_DIR` at the test's own folders (`user/`, `user/.claude` for the last two) and unsets `ZDOTDIR` and `GIT_CONFIG_GLOBAL`.
+It marks the test's own thread as holding it; on drop it waits for sign-in checks, unloads the test's plugins from the
+plugin host (`jshost::unload_all`), then restores the variables.
+
+Under `cargo test`, `paths::config_dir` and `paths::home` panic (`paths::testenv::refuse_outside`) when:
+
+- a test's own thread (named for the test) resolves them without holding a test environment;
+- any other thread resolves them while no test environment is held.
+
+A child process a test starts of the test binary, on the folders the parent set, calls
+`paths::testenv::given_by_parent` (`calls::inside_a_run_the_cli_takes_only_its_call`).
 
 ## Helpers
 

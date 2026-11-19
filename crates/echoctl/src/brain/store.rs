@@ -1242,6 +1242,7 @@ mod tests {
 
     #[test]
     fn sync_search_and_deltas() {
+        let (_env, _) = crate::paths::testenv::folders("brain-store");
         let dir = std::env::temp_dir().join(format!("echo-brain-store-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let db = dir.join("knowledge.sqlite");
@@ -1312,6 +1313,7 @@ mod tests {
 
     #[test]
     fn client_and_thread_are_dimensions() {
+        let (_env, _) = crate::paths::testenv::folders("brain-scopes");
         let dir = std::env::temp_dir().join(format!("echo-brain-scopes-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let db = dir.join("knowledge.sqlite");
