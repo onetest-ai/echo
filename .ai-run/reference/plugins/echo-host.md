@@ -38,9 +38,16 @@ as the code it describes. The rules are in `.ai-run/guides/plugins/echo-plugins.
   to end; a gate still busy counts as running); the locks go with its data. Evidence: `claudejob::Keyed`,
   `claudejob::stop_keyed`, `claudejob::stop_keyed_runs`, `claudejob::forget_keys`
 - A plugin's conversation (`ctx.claude.run({resume})`) keeps `.runs/<id>/c-<resume in lower case>.json` — `{session,
-  profile, cwd}`, written (atomically) after each run that ends with a session id — and holds `c-<resume>.busy` while
-  a run of it goes on or `ctx.claude.forget` removes the record (taken without waiting: refused while held). Both go
-  with its data. Evidence: `claudejob::Talk`, `claudejob::forget_talk`
+  profile, cwd, config, images, image_bytes}` (`config` the Claude Code folder its transcript is in; the pictures it
+  has sent, base64 bytes), written (atomically) after each run that ends with a session id — and holds
+  `c-<resume>.busy` while a run of it goes on or `ctx.claude.forget` removes the record (taken without waiting:
+  refused while held). A conversation with no tools runs in `.runs/<id>/talk/`. Removing the plugin with its data
+  forgets each conversation nobody holds (record and transcript) and marks one whose run goes on `c-<resume>.gone`:
+  that run forgets it once it ends, and a `.gone` left by a run that never ended is settled by the next `Talk::take`.
+  The `talk/` folder goes when no run holds a conversation. Evidence: `claudejob::Talk`, `claudejob::forget_talk`,
+  `claudejob::forget_keys`
+- The stream numbers Echo gives for `onText` (`claude.stream`) are kept in this process's memory per plugin, each
+  taken once by the run it was given for, 1,000 waiting at most. Evidence: `jshost::service_async::stream_for`
 - Echo keeps the plugin's `settings.json`, `inbox.json`, `widgets.json`, `threads.json`, `client-values.json` and
   `work.json` there; `threads.json`, `client-values.json` and `work.json` each change under its own lock across
   processes (`.locks/<id>.threads.lock`, `.locks/<id>.clients.lock`, `.locks/<id>.work.lock`); a `threads.json` or

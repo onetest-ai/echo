@@ -1259,7 +1259,7 @@ fn service(id: &str, op: &str, arg: &Value) -> Result<Value> {
             json!({"default": set.default_id(), "profiles": set.all().into_iter().map(|p| json!({"id": p.id, "name": p.name})).collect::<Vec<_>>()})
         }
         // A number for a run's streamed answer (`ctx.claude.run({onText})`), its pieces delivered as a connection's events.
-        "claude.stream" => json!(NEXT.fetch_add(1, Ordering::Relaxed)),
+        "claude.stream" => json!(service_async::stream_for(id)),
         "deliver.status" => crate::deliver::status(),
         "deliver.provide" => {
             let kind = s(&arg["kind"]);

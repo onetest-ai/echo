@@ -396,25 +396,47 @@ links and pictures only as that allows: § Host half) — never as HTML of its o
   stopped first. Evidence: `claudejob::Keyed`, `claudejob::stop_keyed`, `claudejob::stop_keyed_runs`
 - Pictures: `ctx.claude.run({..., images: [handle]})` — handles of files handed to the plugin (§ Folders and files;
   each its own, checked as `ctx.files.read` checks one), 10 at most, each a PNG, JPEG, GIF or WebP by its first bytes
-  and 5 MB at most; else refused before Claude Code starts ("“x” isn't a PNG, JPEG, GIF or WebP picture", "“x” is over
-  5 MB…", "a run takes 10 pictures at most, not N"). They go with the prompt as one stream-json user message on stdin
-  (`-p --input-format stream-json`; base64 image content blocks, then Echo's preamble and the prompt as text), never on
-  the command line; in every mode, `tools: "none"` too. The run's log says "with N picture(s)". Evidence:
-  `jshost::files::images`, `claudejob::image_block`
-- Its answer as it comes: `ctx.claude.run({..., onText: (chunk) => …})` — each piece of Claude's own text (Claude
-  Code's partial messages, `--include-partial-messages`: a `stream_event` text delta, not a subagent's) handed to
-  `onText` in order, all before the run's promise settles; the result is the same as without. An error `onText` throws
-  is logged, the run goes on. Evidence: `claudejob::run_with`, `claudejob::text_delta`
+  and 3.75 MB at most (5 MB base64-encoded: Amazon Bedrock's limit, the smallest of the platforms a profile may reach;
+  the Claude API takes 10 MB), all of them 15 MB base64-encoded at most (Bedrock takes 20 MB a request); else refused
+  before Claude Code starts ("“x” isn't a PNG, JPEG, GIF or WebP picture", "“x” is over 3.75 MB…", "a run takes 10
+  pictures at most, not N", "a run's pictures come to X MB base64-encoded: 15.0 MB at most in all"). They go with the
+  prompt as one stream-json user message on stdin (`-p --input-format stream-json`; base64 image content blocks, then
+  Echo's preamble and the prompt as text), never on the command line; in every mode, `tools: "none"` too. The run's log
+  says "with N picture(s)". Evidence: `jshost::files::images`, `claudejob::image_block`, `claudejob::IMAGES_TOTAL_BYTES`
+- Its text as it comes: `ctx.claude.run({..., onText: (chunk) => …})` — Claude's own text (Claude Code's partial
+  messages, `--include-partial-messages`: `stream_event` text deltas, not a subagent's), in a run with tools its text
+  between tool calls too (what it says before and after each step, not only the final answer), handed to `onText` in
+  order, all before the run's promise settles; pieces are gathered for 50 ms at most and at the end of each block, so a
+  chunk may hold several deltas. The result is the same as without. An error `onText` throws is logged, the run goes
+  on. The stream's number is Echo's (`onText` given; a `stream` the plugin passes itself is refused). Evidence:
+  `claudejob::run_with`, `claudejob::text_delta`, `jshost::service_async::stream_for`
 - A conversation: `ctx.claude.run({..., resume})`, `resume` 1 to 64 letters, digits, `.`, `_` or `-` (any case the same;
   else refused). Its first run begins a Claude Code session (kept: no `--no-session-persistence`); Echo keeps that
-  session's id, with the run's profile and folder, for the plugin and that conversation (under Echo's state,
-  `plugins/.runs/<plugin>/c-<resume>.json`, never another plugin's; gone with its data), and its next run continues it
-  (`--resume <session>`, the session Claude Code last answered in). A run on another AI profile or in another folder
-  than it began in is refused ("this conversation is on the AI profile “…”, not …: run it there, or forget it
-  (ctx.claude.forget) to begin a new one"); one run at a time per conversation ("a run in conversation “…” is going on
-  already"). `await ctx.claude.forget(resume)` (needs `uses.claude`) forgets it — `true`, or `false` when there was
-  none; refused while a run of it goes on — and its next run begins a new one. A run that fails keeps the session it
-  had. Evidence: `claudejob::Talk`, `claudejob::forget_talk`
+  session's id, with the run's profile, folder, Claude Code folder and the pictures it sent, for the plugin and that
+  conversation (under Echo's state, `plugins/.runs/<plugin>/c-<resume>.json`, never another plugin's), and its next run
+  continues it (`--resume <session>`, the session Claude Code last answered in).
+  - Where: with no tools it runs in a folder of the plugin's own (`plugins/.runs/<plugin>/talk`), so its transcripts
+    stay out of the Claude · Echo folder session's conversations (Claude Code lists them by folder). With tools it runs
+    in the data folder as any routine, and in a folder it was given in that folder: there its conversations show in
+    `/resume` of a Claude Code session in the same folder. Not with `copy` (each copy run is a snapshot of its own:
+    refused), nor in a folder whose path isn't text (UTF-8).
+  - Kept to where it began: a run on another AI profile or in another folder is refused ("this conversation is on the
+    AI profile “a”, not “b”: run it on “a”, or forget it (ctx.claude.forget) to begin a new one"); one run at a time
+    ("a run in conversation “…” is going on already").
+  - Its pictures: Claude Code sends a conversation's earlier pictures again with every turn, so a run whose pictures
+    would bring the conversation past 20 pictures (where the API takes only smaller ones) or 15 MB base64-encoded is
+    refused ("this conversation has sent N picture(s) (X MB) already… forget it"); a turn without pictures goes on.
+  - Its transcript: Claude Code keeps it in the profile's Claude Code folder (`projects/<folder>/<session>.jsonl`, and
+    `<session>/`; on `system` and a wrapper profile the user's own `~/.claude` or `CLAUDE_CONFIG_DIR` — a wrapper
+    keeping another folder keeps its own copy, which Echo doesn't reach). `await ctx.claude.forget(resume)` (needs
+    `uses.claude`) forgets the conversation and removes that transcript — `true`, or `false` when there was none;
+    refused while a run of it goes on — and its next run begins a new one. Removing the plugin with its data does the
+    same for each of its conversations; one whose run goes on then is forgotten when that run ends, never kept.
+  - A session Claude Code no longer has (its transcript removed, its folder wiped: "No conversation found with session
+    ID") fails the run with "this conversation's Claude Code session is gone (its transcript was removed): Echo forgot
+    the conversation, and the next run under it begins a new one"; any other failure keeps the session it had.
+
+  Evidence: `claudejob::Talk`, `claudejob::forget_talk`, `claudejob::forget_keys`
 - In a folder it was given (needs `uses.folders`): `await ctx.claude.run({folder, path, mode, prompt, title, profile,
   model, dir, timeout})` — `folder` a root as `ctx.fs.folders()` names it, `path` a subfolder of it (`""` the root).
   Claude Code starts there as that folder's own project: its `CLAUDE.md`, `.claude/` skills, settings and hooks load

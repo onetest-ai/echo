@@ -76,7 +76,7 @@ pub(super) fn read(plugin: &str, file: &Value, max: Option<u64>) -> Result<Value
 }
 
 /// `ctx.claude.run({images})`: the pictures behind its handles, each checked as `read` checks one, as Claude's image
-/// blocks — 10 at most, each a PNG, JPEG, GIF or WebP of 5 MB at most.
+/// blocks — 10 at most, each a PNG, JPEG, GIF or WebP of 3.75 MB at most (5 MB base64-encoded).
 pub(super) fn images(plugin: &str, list: &Value) -> Result<Vec<Value>> {
     let list = match list {
         Value::Null => return Ok(vec![]),
@@ -93,7 +93,7 @@ pub(super) fn images(plugin: &str, list: &Value) -> Result<Vec<Value>> {
             let mut buf = vec![];
             crate::grants::open_regular(&path)?.take(crate::claudejob::IMAGE_BYTES + 1).read_to_end(&mut buf)?;
             if buf.len() as u64 > crate::claudejob::IMAGE_BYTES {
-                bail!("“{name}” is over 5 MB: a run takes pictures up to 5 MB");
+                bail!("“{name}” is over 3.75 MB: a run takes pictures up to 3.75 MB (5 MB base64-encoded, what every platform takes)");
             }
             crate::claudejob::image_block(&buf, &name)
         })
@@ -249,7 +249,9 @@ mod tests {
         let gif = pic("dot.gif", b"GIF89a\x01\0\x01\0");
         // Its pictures with the prompt, its answer piece by piece and whole, its conversation begun.
         let out = run("talker", "talk", json!({"prompt": "What is it?", "resume": "lesson-1"}), &[png.clone(), gif.clone()]).unwrap();
-        assert_eq!(out, json!({"answer": "A red square.", "got": ["A red ", "square."]}));
+        assert_eq!(out["answer"], "A red square.");
+        let got: Vec<&str> = out["got"].as_array().unwrap().iter().map(|t| t.as_str().unwrap()).collect();
+        assert!(!got.is_empty() && got.concat() == "A red square.", "in order, gathered as it came: {got:?}");
         let turn: Value = serde_json::from_str(std::fs::read_to_string(crate::ai::fake::file(&p, "p.turns")).unwrap().lines().last().unwrap()).unwrap();
         let kinds: Vec<&str> = turn["message"]["content"].as_array().unwrap().iter().map(|c| c["source"]["media_type"].as_str().unwrap_or("text")).collect();
         assert_eq!(kinds, ["image/png", "image/gif", "text"]);
@@ -265,19 +267,27 @@ mod tests {
         run("talker", "talk", json!({"prompt": "Again", "resume": "lesson-1"}), &[]).unwrap();
         assert!(!args().contains(&"--resume".to_string()));
         assert!(run("talker", "talk", json!({"prompt": "x", "resume": "a b"}), &[]).unwrap_err().contains("a conversation (resume) is 1 to 64"));
-        // Refused before Claude Code starts: over 10 pictures, one over 5 MB, one that isn't a picture, another's handle.
+        // Refused before Claude Code starts: over 10 pictures, one over 3.75 MB, one that isn't a picture, another's handle.
         let runs = || std::fs::read_to_string(crate::ai::fake::file(&p, "p.turns")).unwrap().lines().count();
         let before = runs();
         let eleven = vec![png.clone(); 11];
         assert!(run("talker", "talk", json!({"prompt": "x"}), &eleven).unwrap_err().contains("10 pictures at most, not 11"));
         let mut big = b"\x89PNG\r\n\x1a\n".to_vec();
-        big.resize((5 << 20) + 1, 0);
+        big.resize(crate::claudejob::IMAGE_BYTES as usize + 1, 0);
         let big = pic("big.png", &big);
-        assert!(run("talker", "talk", json!({"prompt": "x"}), &[big]).unwrap_err().contains("“big.png” is over 5 MB"));
+        assert!(run("talker", "talk", json!({"prompt": "x"}), &[big]).unwrap_err().contains("“big.png” is over 3.75 MB"));
         let text = pic("notes.txt", b"plain words");
         assert!(run("talker", "talk", json!({"prompt": "x"}), &[text]).unwrap_err().contains("“notes.txt” isn't a PNG, JPEG, GIF or WebP"));
         let theirs = make("other", &root.join("red.png")).unwrap();
         assert!(service_async("talker", "claude.run", &json!({"prompt": "x", "tools": "none", "images": [theirs]})).unwrap_err().to_string().contains("isn't a file handed to talker"));
+        // A stream number only Echo gives, to that plugin, once.
+        let refused = |n: u64| service_async("talker", "claude.run", &json!({"prompt": "x", "tools": "none", "stream": n})).unwrap_err().to_string();
+        assert!(refused(424242).contains("a run's stream is Echo's to give"));
+        assert!(refused(service_async::stream_for("other")).contains("a run's stream is Echo's to give"));
+        assert!(service_async("talker", "claude.run", &json!({"prompt": "x", "tools": "none", "stream": "7"})).is_err());
+        let n = service_async::stream_for("talker");
+        assert!(service_async("talker", "claude.run", &json!({"prompt": "x", "tools": "none", "profile": "work", "stream": n})).is_ok());
+        assert!(refused(n).contains("a run's stream is Echo's to give"), "once");
         assert_eq!(runs(), before, "no run started");
         // Forgetting needs `claude`.
         assert!(service_async("other", "claude.forget", &json!("lesson-1")).unwrap_err().to_string().contains("“claude”"));
