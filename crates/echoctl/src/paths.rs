@@ -52,6 +52,16 @@ pub(crate) fn refuse_real_folders() {
     }
 }
 
+/// Whether this run may use the real config and data folders: false only where `refuse_real_folders` would refuse
+/// (a development build under Claude Code without the run's env), for a caller that can do without them.
+pub fn real_folders_allowed() -> bool {
+    if !cfg!(all(debug_assertions, not(test))) {
+        return true;
+    }
+    let set = |k: &str| std::env::var_os(k).is_some_and(|v| !v.is_empty());
+    missing_run_env(set("CLAUDECODE"), set("ECHOCTL_CONFIG_DIR"), set("ECHOCTL_HOME")).is_none()
+}
+
 /// Per-user application directory (fixed; never moves with the data folder).
 pub fn config_dir() -> PathBuf {
     refuse_real_folders();

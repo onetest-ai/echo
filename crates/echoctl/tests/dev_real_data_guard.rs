@@ -91,3 +91,18 @@ fn with_the_runs_env_it_works_under_claude_code() {
     assert_eq!(files(&user), Vec::<String>::new(), "nothing under the home");
     let _ = std::fs::remove_dir_all(&root);
 }
+
+#[test]
+fn without_the_runs_env_plugin_check_still_checks_a_folder_and_touches_nothing() {
+    let root = fresh("check");
+    let user = root.join("user");
+    let plugin = root.join("acme-plugin");
+    std::fs::create_dir_all(&plugin).unwrap();
+    std::fs::write(plugin.join("echo-plugin.json"), r#"{"id": "acme-plugin", "name": "Acme", "version": "0.1.0"}"#).unwrap();
+    let out = echoctl(&user, &[], &["plugin", "check", plugin.to_str().unwrap()]);
+    let said = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(0), "{said} {}", String::from_utf8_lossy(&out.stderr));
+    assert!(said.contains("acme-plugin") && said.contains("ok"), "{said}");
+    assert_eq!(files(&user), Vec::<String>::new(), "plugin check wrote under the home");
+    let _ = std::fs::remove_dir_all(&root);
+}

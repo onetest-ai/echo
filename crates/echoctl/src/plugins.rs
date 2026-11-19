@@ -304,7 +304,8 @@ fn needs_echo(req: &str) -> Result<String> {
 /// (`part_problems`): a plugin installed before a newer rule keeps running. An install refuses them (`read_package`).
 pub fn read_manifest(dir: &Path) -> Result<Manifest> {
     // An installed copy changes only by an install, which forgets it here: read and walked once, not on each look.
-    let installed = dir.starts_with(plugins_dir().join("installed"));
+    // A folder being checked (`plugin check`) needs no config: where it may not be read, nothing is installed.
+    let installed = paths::real_folders_allowed() && dir.starts_with(plugins_dir().join("installed"));
     let stamp = fs::metadata(dir.join(MANIFEST)).and_then(|m| m.modified()).ok();
     if installed {
         if let Some((_, m)) = READ.lock().ok().and_then(|c| c.get(dir).cloned()).filter(|(s, _)| *s == stamp) {
