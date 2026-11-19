@@ -2,6 +2,7 @@
 //! (`public_address`): what Echo checks before it reaches a host no plugin was granted.
 
 use std::net::{IpAddr, ToSocketAddrs};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, bail, Result};
@@ -70,6 +71,19 @@ pub(crate) fn within<T: Send + 'static>(wait: Duration, f: impl FnOnce() -> T + 
 /// points into the user's network is refused), looked up by `until` (`LOOKUP_SECS` at most). A host written as a
 /// number other than a plain IPv4 or IPv6 address (`2130706433`, `0x7f.1`) is refused, as curl would read it.
 pub(crate) fn public_address(host: &str, port: u16, until: Instant) -> Result<IpAddr> {
+    public_address_by(host, port, until, Arc::new(system_lookup))
+}
+
+/// How a host name's addresses are looked up: the system's resolver (`system_lookup`), or a test's.
+pub(crate) type Lookup = dyn Fn(&str, u16) -> std::io::Result<Vec<IpAddr>> + Send + Sync;
+
+/// The system's resolver.
+pub(crate) fn system_lookup(host: &str, port: u16) -> std::io::Result<Vec<IpAddr>> {
+    (host, port).to_socket_addrs().map(|a| a.map(|a| a.ip()).collect())
+}
+
+/// `public_address`, the name looked up by `lookup`.
+pub(crate) fn public_address_by(host: &str, port: u16, until: Instant, lookup: Arc<Lookup>) -> Result<IpAddr> {
     if let Ok(ip) = host.parse::<IpAddr>() {
         return if public(ip) { Ok(ip) } else { bail!("{host} is on this computer or your own network") };
     }
@@ -79,7 +93,7 @@ pub(crate) fn public_address(host: &str, port: u16, until: Instant) -> Result<Ip
     }
     let wait = until.saturating_duration_since(Instant::now()).min(Duration::from_secs(LOOKUP_SECS));
     let name = host.to_string();
-    let found = if wait.is_zero() { None } else { within(wait, move || (name.as_str(), port).to_socket_addrs().map(|a| a.map(|a| a.ip()).collect::<Vec<_>>())) };
+    let found = if wait.is_zero() { None } else { within(wait, move || lookup(&name, port)) };
     let ips = found.ok_or_else(|| anyhow!("looking up {host} took too long"))?.unwrap_or_default();
     all_public(host, &ips)
 }
