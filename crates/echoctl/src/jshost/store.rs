@@ -142,7 +142,32 @@ mod tests {
         let bad = test("bad");
         assert_eq!(bad["ok"], false);
         assert!(bad["message"].as_str().unwrap().contains("the server said no to ••••") && !bad.to_string().contains("sk-made-up-key"), "{bad}");
-        // A plugin with no test: told so, not a stack of errors.
+        // The secret in the other forms a message may carry it in, and a URL's query string: all gone, longest first.
+        use base64::Engine as _;
+        let b64 = base64::engine::general_purpose::STANDARD;
+        let msg = format!(
+            "raw sk-made-up-key url sk-made-up-key%20x json {} basic {} {} {} at https://api.acme.example/v1/check?key=abc&u=1#frag done",
+            "sk-made-up-key", b64.encode("sk-made-up-key"), b64.encode(":sk-made-up-key"), b64.encode("*:sk-made-up-key")
+        );
+        let masked = plugins::test_answer("voiced", Ok(json!({"ok": true, "message": msg})));
+        let m = masked["message"].as_str().unwrap();
+        assert!(!m.contains("sk-made") && !m.contains(&b64.encode("sk-made-up-key")) && !m.contains("c2stbWFkZ") && !m.contains("OnNrLW1hZGU") && !m.contains("KjpzaytfF"), "{m}");
+        assert!(m.contains("https://api.acme.example/v1/check done") && !m.contains("key=abc") && !m.contains("frag"), "{m}");
+        plugins::set_setting("voiced", "token", &json!("a b/\"c")).unwrap();
+        let odd = plugins::test_answer("voiced", Ok(json!({"ok": true, "message": "enc a%20b%2F%22c json a b/\\\"c"})));
+        assert!(!odd["message"].as_str().unwrap().contains("%20") && !odd["message"].as_str().unwrap().contains("a b"), "{odd}");
+        // A secret that holds another is taken out whole.
+        plugins::set_setting("voiced", "token", &json!("sk-made-up-key")).unwrap();
+        // The same test run from an Inbox button (`plugin_call`): the notice it shows is masked too, and a passed test says nothing.
+        plugins::set_setting("voiced", "token", &json!("sk-made-up-key")).unwrap();
+        let said = plugins::call_notice("voiced", plugins::TEST_SETTINGS, call_with("voiced", plugins::TEST_SETTINGS, &json!({"section": "bad"}), &[], CALL_TIMEOUT)).unwrap();
+        assert!(said.contains("the server said no to ••••") && !said.contains("sk-made-up-key"), "{said}");
+        assert_eq!(plugins::call_notice("voiced", plugins::TEST_SETTINGS, Ok(json!({"ok": true, "message": "fine sk-made-up-key"}))), None);
+        assert_eq!(plugins::call_notice("voiced", "other", Err(anyhow!("plain failure"))), Some("plain failure".into()));
+        // A plugin with no test: told so; its own error that merely says "no command" is shown as it is.
+        let missing = plugins::test_answer("voiced", call_with("nobody-home", plugins::TEST_SETTINGS, &json!({}), &[], CALL_TIMEOUT));
+        assert_eq!(missing["ok"], false);
+        assert_eq!(plugins::test_answer("voiced", Err(anyhow!("the proxy said no command is allowed"))), json!({"ok": false, "message": "the proxy said no command is allowed"}));
         let none = plugins::test_answer("voiced", Err(anyhow!("no command “__testSettings”")));
         assert_eq!(none, json!({"ok": false, "message": "this plugin has no connection test"}));
         assert_eq!(plugins::test_answer("voiced", Ok(json!(true))), json!({"ok": true, "message": ""}));

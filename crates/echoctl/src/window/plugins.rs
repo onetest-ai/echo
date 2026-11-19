@@ -493,8 +493,8 @@ pub(super) fn handle(v: &Value) -> Option<Handled> {
         "plugin_call" => {
             let (id, command, args) = (v["id"].as_str().unwrap_or("").to_string(), v["command"].as_str().unwrap_or("").to_string(), v["args"].clone());
             std::thread::spawn(move || {
-                if let Err(e) = crate::jshost::call(&id, &command, &args) {
-                    crate::app::notify(&id, &format!("{e:#}"));
+                if let Some(why) = crate::plugins::call_notice(&id, &command, crate::jshost::call(&id, &command, &args)) {
+                    crate::app::notify(&id, &why);
                 }
                 crate::attention::stale();
             });

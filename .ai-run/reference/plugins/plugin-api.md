@@ -17,13 +17,21 @@ both, this after the rules. Where this and Echo's code differ, the code wins: fi
 - A setting is `{key, label, type, default?, help?}`: `key` unique (a–z 0–9 `-` `_`), `type` `string` (default), `bool`,
   `folder` or `secret`; read with `ctx.settings.get(key)`, which gives what the user set, else the setting's `default`,
   else `null` — never a default for a `secret` or an address list the plugin may reach (only the user enters those).
+  Before this, an unset setting gave `null` even when the manifest had a `default`: a plugin that wrote `get(key) ?? fallback`
+  now gets the manifest's default where it got its fallback, so the two may differ.
   Evidence: `plugins::set_setting`, `plugins::setting`
 - A settings page's "Test connection": the plugin's host half registers `ctx.command('__testSettings', async ({section}) => …)`
   and reads what it needs itself (`ctx.settings.get('token')`, secrets included); its answer is `true`, a message
   (ok), or `{ok, message}`. Its window half runs it with `ctx.call('__testSettings', {section})` and is given only
-  `{ok, message}` — whatever else the host half answered is dropped, `message` is cut at 300 characters, each value the
-  user keeps as a secret (3 characters or more) is replaced by `••••` in it, and a host half that throws, or has no such
-  command ("this plugin has no connection test"), gives `{ok: false, message}`. Evidence: `plugins::test_answer`
+  `{ok, message}` — whatever else the host half answered is dropped, `message` is cut at 300 characters, and in it each
+  value the user keeps as a secret (3 characters or more) is replaced by `••••` — as it is, URL-encoded, JSON-escaped,
+  and in base64 (of the secret, of `:secret` and of `*:secret`), longest first — and every URL loses its query string and
+  fragment. A host half that throws gives `{ok: false, message}` (its own words, masked); a plugin that has no such
+  command gives "this plugin has no connection test". The same masking applies when the command runs from an Inbox
+  item's button (`plugin_call`: a failed test's notice). The `message` is free text for the user: it must not echo
+  request details (headers, bodies, URLs with keys). The masking guards against accidents only: the host half is the
+  plugin's own code, trusted with the secrets, and can leak one through any channel it has. Evidence: `plugins::test_answer`,
+  `plugins::call_notice`
 - A plugin and a marketplace tree hold plain files only (no links or special files): 400 files / 20 MB a plugin,
   5000 / 64 MB a marketplace. Evidence: `plugins::check_tree`
 - `echoctl plugin check <folder>` runs an install's checks of the package (manifest, `uses`, widgets, dashboards, skills,
