@@ -292,10 +292,10 @@ pub(super) fn text(plugin: &str, file: &Value, opts: &Value) -> Result<Value> {
     }
     cmd.stdin(std::process::Stdio::null()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped());
     #[cfg(windows)]
-    {
+    let mut cmd = {
         use crate::app::NoWindow;
-        cmd.no_window();
-    }
+        cmd.no_window()
+    };
     let mut child = cmd.spawn().context("the reader couldn't start")?;
     let drain = |s: Option<Box<dyn Read + Send>>| {
         std::thread::spawn(move || {
