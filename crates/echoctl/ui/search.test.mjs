@@ -10,7 +10,7 @@ const end = src.indexOf('// end of the search request block', start)
 assert.ok(start >= 0 && end > start, 'the search request block not found in app.js')
 const escLine = src.match(/^const esc = .*$/m)
 assert.ok(escLine, 'esc not found in app.js')
-const X = new Function(`${escLine[0]}\n${src.slice(start, end)}\nreturn { esc, sxNoFilters, sxRequest, sxSaidLabel, sxDays, sxChips, sxDropWords, sxMark, sxOpen, sxSection, sxWhen, sxNothing }`)()
+const X = new Function(`${escLine[0]}\n${src.slice(start, end)}\nreturn { esc, sxSelectionShared, SX_PRIVATE, sxNoFilters, sxRequest, sxSaidLabel, sxDays, sxChips, sxDropWords, sxMark, sxOpen, sxSection, sxWhen, sxNothing }`)()
 
 const tests = []
 const test = (name, f) => tests.push([name, f])
@@ -95,6 +95,19 @@ test('no match is one line naming what was searched, with a wider search only wh
   assert.deepEqual(X.sxNothing(f({ thread: 'acme-rollout' }), 'zebra', name), { text: 'Nothing in Acme rollout’s sources says “zebra”.', wider: true })
   assert.deepEqual(X.sxNothing(f({ kinds: ['call', 'channel'] }), 'x', name), { text: 'Nothing in calls or channels says “x”.', wider: true })
   assert.equal(X.sxNothing(f({ sections: ['decisions'] }), 'x', name).wider, true)
+})
+
+test('a selection in a search’s words (the moment’s panel, the moments in the list) or a terminal is never told to Claude', () => {
+  // An element inside the given ancestors (by selector), as `closest` answers on the page.
+  const inside = (...sel) => ({ closest: (q) => (q.split(',').map((x) => x.trim()).some((x) => sel.includes(x)) ? {} : null) })
+  assert.equal(X.sxSelectionShared(inside('.sx-pm')), false, 'the What was said panel')
+  assert.equal(X.sxSelectionShared(inside('.sx-moments')), false, 'a moment in the list')
+  assert.equal(X.sxSelectionShared(inside('.sx-also')), false, 'Also in this call')
+  assert.equal(X.sxSelectionShared(inside('.sx-src')), false, 'a source row')
+  assert.equal(X.sxSelectionShared(inside('.xterm')), false, 'a terminal')
+  assert.equal(X.sxSelectionShared(inside('.transcript')), true, 'the open call’s own transcript')
+  assert.equal(X.sxSelectionShared(null), true)
+  assert.ok(['.sx-pm', '.sx-moments', '.sx-also'].every((s) => X.SX_PRIVATE.includes(s)))
 })
 
 let failed = 0

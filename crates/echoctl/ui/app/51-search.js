@@ -75,6 +75,12 @@ function sxNothing(f, q, name) {
   if (!whose && !kinds.length) return { text: `Nothing said matches “${q}”.`, wider: !!narrowed }
   return { text: `Nothing in ${whose ? `${whose}’s ` : ''}${kinds.length ? kinds.join(' or ') : 'sources'} says “${q}”.`, wider: !!narrowed }
 }
+/** Where a search shows others' words (its moments in the list, the moment's panel): a selection there never goes to
+ *  Claude's view (`viewState`), since they may be another call's or another AI profile's (Intake and search R8). */
+const SX_PRIVATE = '.sx-pm, .sx-moments, .sx-also, .sx-src'
+/** Whether the page's selection at `el` (the element its end is in; any with `closest`) may be told to Claude: not in
+ *  a terminal, not in a search's words. */
+const sxSelectionShared = (el) => !(el && el.closest && (el.closest('.xterm') || el.closest(SX_PRIVATE)))
 // end of the search request block
 
 /** The window's search: on (search mode: the box's chips), its filters, the last answer, what is open. */
@@ -111,7 +117,8 @@ function sxHead() {
   const add = `<span class="sx-add-wrap"><button class="sx-chip add" data-sx-menu aria-haspopup="menu" aria-expanded="${S.sx.menu}" title="Filter by section, client, thread, person or date" aria-label="Filters">${SX_ICON('<path d="M4 5h16l-6 7.5V19l-4 1.5v-8z"/>')}</button>${S.sx.menu ? sxMenu() : ''}</span>`
   const count = res ? [[res.titles.length, 'call'], [res.sources.length, 'source']].filter(([k]) => k).map(([k, w]) => `${k} ${w}${k === 1 ? '' : 's'}`).join(' · ') : ''
   const n = count && !chips.length ? `<span class="sx-count">${count}</span>` : ''
-  const clear = S.query ? `<button class="icon-btn" data-sx-clear title="Clear the search (esc)" aria-label="Clear the search">${SX_ICON(SX_X)}</button>` : ''
+  // Always while searching: an empty box with a filter set leaves the search too.
+  const clear = `<button class="icon-btn" data-sx-clear title="Clear the search (esc)" aria-label="Clear the search">${SX_ICON(SX_X)}</button>`
   return `<div class="sx-q"><input class="search" id="q" placeholder="Search what was said" value="${esc(S.query)}" aria-label="Search calls">${clear}</div>
     <div class="sx-chips">${seg}${chips.join('')}${add}${n}</div>`
 }
@@ -191,6 +198,9 @@ async function sxRun() {
   S.sx.busy = false
   // Intake went off meanwhile: the box keeps to titles and people.
   if (!res.enabled) { S.sx.on = false; S.sx.res = null; return render() }
+  // A new search: the panel never keeps a moment of an older one.
+  sxClosePanel()
+  S.sx.moment = null; S.sx.sel = null; S.sx.pmenu = false
   S.sx.res = { titles: [], sources: [], words: [], ...res }
   S.sx.toggled = {}; S.sx.more = false
   render()
@@ -208,11 +218,16 @@ function sxStart(q) {
   if (S.query.trim()) sxRun()
 }
 
-/** Back to the calls: the box empty, no filters, no results; the moment's panel view goes with them. */
-function sxLeave() {
+/** The right panel closed when it shows a moment (its view goes with the search's moment). */
+function sxClosePanel() {
   const eff = Layout.effective(window.innerWidth, window.innerHeight, panelViews(), S.overlay)
   if (eff.right.shown && eff.right.active === 'said') { Layout.close('right'); layoutChanged() }
-  S.sx ={ ...S.sx, on: false, f: sxNoFilters(), res: null, toggled: {}, more: false, sel: null, moment: null, menu: false, gen: S.sx.gen + 1 }
+}
+
+/** Back to the calls: the box empty, no filters, no results; the moment's panel view goes with them. */
+function sxLeave() {
+  sxClosePanel()
+  S.sx = { ...S.sx, on: false, f: sxNoFilters(), res: null, toggled: {}, more: false, sel: null, moment: null, menu: false, gen: S.sx.gen + 1 }
   S.query = ''
   loadCalls(true).then(render)
   render()
@@ -261,6 +276,19 @@ function sxPanel() {
   return `<div class="sx-pm selectable"><div><h3>${SX_ICON(k[3])}${esc(c ? c.title : m.title)}</h3><div class="facts">${facts}</div>${chips ? `<div class="pj-chips">${chips}</div>` : ''}</div>${said}${acts}${also}</div>`
 }
 PANEL_VIEWS.unshift({ id: 'said', label: 'What was said', icon: ICON(SX_SEARCH), area: 'right', when: () => S.view === 'calls' && !!S.sx.moment, render: sxPanel })
+
+/** Ask Claude about `call` once it is the open call with its profile known (`S.call.live`), so Claude runs on that
+ *  call's own profile; not open within 10 s (another click took over): nothing. */
+async function sxAskWhenOpen(call) {
+  for (let i = 0; i < 50; i++) {
+    if (S.view === 'calls' && S.call && S.call.name === call && S.call.live) return askClaudeAboutCall()
+    if (!location.hash.startsWith(`#call/${call}`)) return
+    await new Promise((ok) => setTimeout(ok, 200))
+  }
+}
+
+/** Leaving Calls leaves the search: back there, the list is the calls. */
+addEventListener('hashchange', () => setTimeout(() => { if (S.sx.on && S.view !== 'calls') sxLeave() }))
 
 /** A filter changed: search again (when there is something to search). */
 function sxFilter(change) {
@@ -315,7 +343,7 @@ document.addEventListener('click', (e) => {
   // Ask Claude: a call's moment opens that call there, and Claude on the call's own profile (a call's text goes only to
   // its profile); another source's, the Claude panel.
   if (d.sxClaude !== undefined) {
-    if (m.call && m.moment.link) return window.echo.openLink(m.moment.link, true).then(() => setTimeout(askClaudeAboutCall, 300))
+    if (m.call && m.moment.link) return window.echo.openLink(m.moment.link, true).then(() => sxAskWhenOpen(m.call.name))
     return claudePanel('claude-folder')
   }
 })

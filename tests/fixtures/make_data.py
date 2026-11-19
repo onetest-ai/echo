@@ -2246,7 +2246,7 @@ def build_intake(d):
     facts("mail/acme-sso-window", "mail", "Re: SSO cutover window", d.now - timedelta(days=2, hours=3), "Dana Lee", "dana@acme.example",
           "https://outlook.office.com/mail/acme.example/sso-window",
           [("Acme's help desk can staff Saturday morning for the SSO cutover", "Please confirm the cutover starts at 6 and not at 8")])
-    facts("channel/acme-okta/1", "channel", "Acme rollout › Okta and SSO", d.now - timedelta(days=4, hours=2), "Omar Haddad", "omar-haddad-id",
+    facts("channel/acme-okta/1", "channel", "Acme › Okta and SSO", d.now - timedelta(days=4, hours=2), "Omar Haddad", "omar-haddad-id",
           "https://teams.microsoft.com/l/message/acme-okta/1",
           [("The SSO cutover rehearsal passed except the expense app", "Test users are moved. The SSO cutover rehearsal passed except the expense app")])
 

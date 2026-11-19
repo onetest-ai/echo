@@ -17,7 +17,7 @@ tags: [calls, search, recall, filters]
 ## Preconditions
 - As TC-233: standard data served at `{{base_url}}`, Recall on and synced (`brain set --enabled true`, `brain sync`, run
   with the data's env and `ECHOCTL_CONFIG_DIR` checked inside `<dir>`), the page loaded again
-- Intake's facts of the standard set: the mail "Re: SSO cutover window" and the post "Acme rollout › Okta and SSO", both Acme's
+- Intake's facts of the standard set: the mail "Re: SSO cutover window" and the post "Acme › Okta and SSO", both Acme's
 
 ## Test Data
 
@@ -30,7 +30,7 @@ tags: [calls, search, recall, filters]
 
 | # | Action | Expected Result |
 |---|--------|----------------|
-| 1 | Navigate to `{{base_url}}/#calls`, type `sso cutover`, press Enter | "Said in calls, mail, channels · N"; among the sources "Re: SSO cutover window" (mail icon) and "Acme rollout › Okta and SSO" (channel icon) |
+| 1 | Navigate to `{{base_url}}/#calls`, type `sso cutover`, press Enter | "Said in calls, mail, channels · N"; among the sources "Re: SSO cutover window" (mail icon) and "Acme › Okta and SSO" (channel icon) |
 | 2 | Click the Mail icon (tooltip "Mail") | It shows pressed (violet); the group reads "Said in mail · 1" with only "Re: SSO cutover window"; its moment "Mail · Dana Lee · <day>" marks "SSO cutover" |
 | 3 | Click the Mail icon again, clear the box, type `sso this week`, press Enter | A dashed chip "Since <this week's Monday>" (e.g. "Since Nov 16") appears; hovering it reads "Read from “this week” in your words"; every source's day is in this week |
 | 4 | Click the Calls icon | "Said in calls · N": only call sources |

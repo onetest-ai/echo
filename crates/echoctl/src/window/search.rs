@@ -10,6 +10,8 @@ const HITS: usize = 30;
 const TITLES: usize = 20;
 /// The longest snippet a moment gives (the page shows two lines of it).
 const SNIPPET: usize = 400;
+/// The longest query searched (characters; more is cut).
+const QUERY_MAX: usize = 500;
 
 /// The echo:// requests of this area (`respond` asks each area in turn).
 pub(super) fn route(path: &str, req: &Request<Vec<u8>>) -> Option<Response<Cow<'static, [u8]>>> {
@@ -39,7 +41,7 @@ pub(super) fn search(q: &str) -> Value {
     if !crate::brain::enabled() {
         return json!({ "enabled": false });
     }
-    let query = param(q, "q").unwrap_or_default();
+    let query: String = param(q, "q").unwrap_or_default().chars().take(QUERY_MAX).collect();
     let (client, thread) = (param(q, "client"), param(q, "thread"));
     let sections = list(q, "section");
     let filters = store::Filters {
@@ -239,7 +241,7 @@ pub(super) fn moment(q: &str) -> Value {
     let (call, turns) = match &dir {
         Some(d) => (
             call::summaries(&[d]).pop().unwrap_or(Value::Null),
-            m["t"].as_f64().map(|t| turns_around(d, t, m["section_kind"] == "transcript")).unwrap_or_default(),
+            m["t"].as_f64().map(|t| turns_around(d, t, m["section_kind"] == "transcript", &words)).unwrap_or_default(),
         ),
         None => (Value::Null, vec![]),
     };
@@ -252,7 +254,8 @@ pub(super) fn moment(q: &str) -> Value {
 
 /// The call's turns (one speaker's lines that follow each other) around `t`: the one said then, the one after, and with
 /// `before` the one before. Each: its time, who, whether it is the user, the remote speaker's number, its text, `hit`.
-fn turns_around(dir: &Path, t: f64, before: bool) -> Vec<Value> {
+/// Of several turns started in that second, the one with the words said.
+fn turns_around(dir: &Path, t: f64, before: bool, words: &[String]) -> Vec<Value> {
     let me = crate::config::Config::load().ok().and_then(|c| c.me).map(|m| m.name).unwrap_or_else(|| "Me".into());
     let segs = read_json(&dir.join("segments.json"));
     let mut turns: Vec<(f64, String, bool, Value, String)> = vec![];
@@ -272,7 +275,8 @@ fn turns_around(dir: &Path, t: f64, before: bool) -> Vec<Value> {
         }
     }
     // The index's clock drops the fraction of a second (`[00:35]` for 35.6 s): the turn that started within that second.
-    let Some(at) = turns.iter().rposition(|x| x.0 < t + 1.0).or((!turns.is_empty()).then_some(0)) else { return vec![] };
+    let Some(last) = turns.iter().rposition(|x| x.0 < t + 1.0).or((!turns.is_empty()).then_some(0)) else { return vec![] };
+    let at = (0..=last).rev().take_while(|&i| turns[i].0 >= t.floor()).find(|&i| has_word(&turns[i].4, words)).unwrap_or(last);
     let from = if before { at.saturating_sub(1) } else { at };
     turns[from..(at + 2).min(turns.len())]
         .iter()
@@ -319,7 +323,8 @@ mod tests {
             d.join("segments.json"),
             json!([
                 {"speaker": "remote", "name": "Dana Lee", "start": 451.0, "end": 460.0, "text": "The risk is the apps that cache sessions."},
-                {"speaker": "remote", "name": "Omar Haddad", "start": 468.7, "end": 480.0, "text": "If the cutover slips again we keep the old tenant <b>one</b> more week."},
+                {"speaker": "remote", "name": "Omar Haddad", "start": 468.2, "end": 468.6, "text": "If the cutover slips again we keep the old tenant <b>one</b> more week."},
+                {"speaker": "remote", "name": "Kim Park", "start": 468.7, "end": 480.0, "text": "Right."},
                 {"speaker": "me", "start": 485.0, "end": 490.0, "text": "Fine by us."},
                 {"speaker": "remote", "name": "Dana Lee", "start": 500.0, "end": 505.0, "text": "Then Saturday stays."},
             ])
@@ -392,6 +397,10 @@ mod tests {
         assert!(srcs("person=omar").iter().all(|s| s.starts_with("call/")));
         // Mail only: no titles (they are calls).
         assert_eq!(get("/api/search?q=go-live&kind=mail")["titles"], json!([]));
+        // A query past its longest is cut, not refused.
+        let long = format!("cutover{}", " acme".repeat(400));
+        let cut = get(&format!("/api/search?q={}", long.replace(' ', "%20")));
+        assert_eq!(cut["query"].as_str().unwrap().chars().count(), QUERY_MAX);
         // A filter that isn't one is said, not searched.
         assert!(get("/api/search?q=cutover&kind=fax")["error"].as_str().unwrap().contains("no source kind"));
     }
@@ -419,7 +428,8 @@ mod tests {
         assert_eq!(m["call"]["name"], name.as_str());
         assert_eq!(m["call"]["title"], "Acme go-live check");
         let turns = m["turns"].as_array().unwrap();
-        assert_eq!(turns.iter().map(|t| t["who"].as_str().unwrap()).collect::<Vec<_>>(), vec!["Dana Lee", "Omar Haddad", "Me"], "the turn before, the one said, the one after");
+        // Two turns start at 07:48 (the index's clock has no fractions): the one with the words is the moment.
+        assert_eq!(turns.iter().map(|t| t["who"].as_str().unwrap()).collect::<Vec<_>>(), vec!["Dana Lee", "Omar Haddad", "Kim Park"], "the turn before, the one said, the one after");
         assert_eq!(turns.iter().map(|t| t["hit"] == true).collect::<Vec<_>>(), vec![false, true, false]);
         // Others' words reach the page as they were said: the page escapes them (window guide R1).
         assert!(turns[1]["text"].as_str().unwrap().contains("<b>one</b>"));
