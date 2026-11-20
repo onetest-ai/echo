@@ -59,8 +59,9 @@ cases:
   - tests/cases/plugins/TC-087_a-partial-clone-is-refused-and-fetches-nothing-through-a-plugin.md
   - tests/cases/plugins/TC-086_a-plugin-gets-no-git-in-a-repository-it-could-lay-out.md
   - tests/cases/plugins/TC-090_a-plugins-claude-run-in-its-folder-reads-edits-or-works-on-a-copy-as-that-folders-own-project.md
-  - tests/cases/plugins/TC-091_a-plugins-claude-run-in-its-folder-takes-the-routines-permission-setting-never-its-own.md
+  - tests/cases/plugins/TC-091_a-plugins-claude-run-in-its-folder-takes-the-permissions-it-asked-else-the-routines-setting.md
   - tests/cases/plugins/TC-092_a-plugins-claude-run-in-its-folder-is-refused-before-it-starts-when-its-mode-path-or-settings-dont-fit.md
+  - tests/cases/plugins/TC-244_a-plugins-claude-run-in-a-folder-of-its-own-store-works-with-its-files-and-leaves-its-output-there.md
   - tests/cases/window/TC-029_recall-shows-only-a-plugins-knowledge-tabs-and-old-addresses-land-safely.md
 auto: [tests/auto/specs/S-12.spec.mjs]
 ---
@@ -150,9 +151,10 @@ auto: [tests/auto/specs/S-12.spec.mjs]
 | 53 | `plugins/TC-087_a-partial-clone-is-refused-and-fetches-nothing-through-a-plugin.md` | 47 | Acme history is installed with `$D/history` given to it and a repository started by stage 47: skip the precondition lines and step 1. Last of the git stages on `$D/history` (step 2 leaves the repository refused); its teardown removes Acme history and `acme-git` |
 | 54 | `plugins/TC-086_a-plugin-gets-no-git-in-a-repository-it-could-lay-out.md` | — | Stage 53 removed Acme history and `acme-git`: run its precondition lines as written (its own vault, `$D/layout`) |
 | 55 | `plugins/TC-090_a-plugins-claude-run-in-its-folder-reads-edits-or-works-on-a-copy-as-that-folders-own-project.md` | — | Its own marketplace `acme-tidy`, folder `$D/tidy` and profile `acme-work`: run its precondition lines as written. Skip its teardown: Acme tidy, `$D/tidy` and the fake `claude` stay for stages 56–57 |
-| 56 | `plugins/TC-091_a-plugins-claude-run-in-its-folder-takes-the-routines-permission-setting-never-its-own.md` | 55 | Acme tidy is installed with `$D/tidy` given to it and the fake `claude` in place: skip the precondition lines of TC-090 and its step 1; set `D`, `E` and `S` as its prelude does. Skip its teardown |
+| 56 | `plugins/TC-091_a-plugins-claude-run-in-its-folder-takes-the-permissions-it-asked-else-the-routines-setting.md` | 55 | Acme tidy is installed with `$D/tidy` given to it and the fake `claude` in place: skip the precondition lines of TC-090 and its step 1; set `D`, `E` and `S` as its prelude does. Skip its teardown |
 | 57 | `plugins/TC-092_a-plugins-claude-run-in-its-folder-is-refused-before-it-starts-when-its-mode-path-or-settings-dont-fit.md` | 55 | As for stage 56. Its teardown ends with TC-090's: Acme tidy, `acme-tidy`, `acme-work` and `$D/tidy` go, the data's fake `claude` back |
 | 58 | `window/TC-029_recall-shows-only-a-plugins-knowledge-tabs-and-old-addresses-land-safely.md` | — | Its own marketplace `acme-know` in `market-know`: run its precondition lines as written. On this scenario's `small` data any call or "Pick a call" counts as Calls |
+| 59 | `plugins/TC-244_a-plugins-claude-run-in-a-folder-of-its-own-store-works-with-its-files-and-leaves-its-output-there.md` | 57 | Its own marketplace `acme-crawl` and profile `acme-work` (TC-092's teardown removed the earlier one): run its precondition lines as written |
 
 ## Notes
 - The plugin stages use the made-up local marketplace the prelude writes in the run's scratch folder; nothing is fetched from the network, and the built-in marketplace's own plugins are never installed. It is added once (stage 22, in the window), installed from once (stage 26, through the sheet), and the plugin's settings, switch and removal follow on that install; stage 31 removes the marketplace.

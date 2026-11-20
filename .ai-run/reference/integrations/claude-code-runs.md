@@ -35,7 +35,7 @@ How Echo starts Claude Code on AI profiles. It changes with the code, in the sam
   more than 20 pictures in a request: smaller pictures only), counted across a conversation's turns, since Claude Code
   sends its earlier pictures again (`claudejob::IMAGES_TOTAL`, `IMAGES_TOTAL_BYTES`).
 - The folder session, a plugin's session (on the folder session's setting), a routine, Yolo and a plugin's folder run (on the
-  routines' setting) get their permission flags
+  plugin's `tools`, else the routines' setting) get their permission flags
   from one helper, `folder_args::permission_args(setting, profile, model, may_edit)` → (flags, words for the run's
   record): Ask each time none; Skip all permission checks `--dangerously-skip-permissions`; Auto
   `--permission-mode auto` where `folder_args::auto_mode_works` (a `claude` or `system` profile, its model Claude's
