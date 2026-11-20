@@ -581,7 +581,7 @@ links and pictures only as that allows: § Host half) — never as HTML of its o
   - `read` (the default): `--tools Bash,Read,Grep,Glob,Skill,WebFetch,WebSearch` and `--permission-mode dontAsk`
     whatever the setting (`folder_args::read_only_args`): only reading, Echo's reading commands (`echoctl context`,
     `project show`… — never `project work`, `compose`, `prep`, `project people`, a plugin's command or script) and the
-    web run, with the CLI's limits for runs (no routine's marks), and anything else refused without asking — but what
+    web run, and anything else refused without asking — but what
     the user's own Claude Code settings or the folder's `.claude` allow, which Claude Code runs as they say;
   - `edit` (needs `folders.write`): every tool of Claude Code's (no `--tools`), Bash and the web too;
   - `copy`: the `edit` run on a snapshot of the folder in its store (`ctx.fs.snapshot` with dot names, so `.claude`

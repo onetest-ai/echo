@@ -772,11 +772,8 @@ fn run_job(spec: &Spec, mut on_text: Option<&mut dyn FnMut(&str)>) -> Result<(St
             let set = crate::folder_args::run_settings();
             a.extend(in_folder(profile, model.as_deref(), f, m, &exe, &set)?);
             let mut env = crate::folder_args::env(&profile.id);
-            // One that only reads keeps the CLI's limits for runs (no routine's marks): nothing it runs writes.
-            if f.tools().is_none() {
-                env.push((notes::RUN_SESSION, "acts".into()));
-                env.push((notes::RUN_ACTIONS, actions.display().to_string()));
-            }
+            env.push((notes::RUN_SESSION, "acts".into()));
+            env.push((notes::RUN_ACTIONS, actions.display().to_string()));
             (Some(set), env)
         }
         // A routine or Yolo: the folder session's arguments, but for `-p` and its prompt.
@@ -1218,7 +1215,7 @@ mod tests {
             for no in ["--dangerously-skip-permissions", "--strict-mcp-config"] {
                 assert!(!a.contains(&no.to_string()), "{no}: {a:?}");
             }
-            assert_eq!(file("p.env").contains("ECHOCTL_RUN_SESSION=acts"), tools.is_none(), "the routine's marks where it may change things; a read keeps the CLI's limits for runs");
+            assert!(file("p.env").contains("ECHOCTL_RUN_SESSION=acts"), "the routine's marks: Echo's commands it may run work as in a routine");
             let r = record(mode.name());
             let used = r["used"].as_str().unwrap();
             assert_eq!(r["asked"], mode.name());

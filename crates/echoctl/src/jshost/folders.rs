@@ -610,7 +610,9 @@ pub(super) fn claude_folder(id: &str, arg: &Value, spec: &mut crate::claudejob::
             Ok(rel) => dunce::canonicalize(&base)?.join(rel),
             Err(_) => spec.run_dir.clone(),
         };
-        if records.starts_with(&cwd) || cwd.starts_with(&records) {
+        // Compared as text in one case: a disk that folds case opens `Cache/Pages` as `cache/pages`.
+        let (r, c) = (records.to_string_lossy().to_lowercase(), cwd.to_string_lossy().to_lowercase());
+        if Path::new(&r).starts_with(&c) || Path::new(&c).starts_with(&r) {
             bail!("the run keeps its records (dir) in that folder: give it a dir outside it");
         }
         spec.folder = Some(InFolder { cwd, mode: FolderMode::Edit, store: true });
@@ -1225,7 +1227,7 @@ mod tests {
             claude("reader", json!({"store": "cache", "folder": v})),
             claude("asker", json!({"store": "runs/x"})),
             claude("asker", json!({"store": "Runs./x"})),
-            service_async("asker", "claude.run", &json!({"prompt": "x", "store": "cache/pages", "dir": "cache/pages/r1"})),
+            service_async("asker", "claude.run", &json!({"prompt": "x", "store": "cache/pages", "dir": "Cache/Pages/r1"})),
         ];
         let why: Vec<String> = refused.into_iter().map(|r| r.unwrap_err().to_string()).collect();
         assert!(why[0].contains("never the store itself") && why[1].contains("never the store itself") && why[2].contains("isn't a path inside"), "{why:?}");
