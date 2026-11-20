@@ -33,12 +33,16 @@ struct Guide {
     entries: Vec<Value>,
 }
 
-/// The plugins with a guide laid out for Claude, each folder checked first as the core's are
-/// (`plugins::agent::checked_rows`): by id.
+/// The plugins whose folders this server couldn't check (busy) when it was first asked: checked once a session, as the
+/// core's hook does, never on every call.
+static UNCHECKED: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
+
+/// The plugins with a guide laid out for Claude, their folders checked as the core's are: by id.
 fn guides() -> std::collections::BTreeMap<String, Guide> {
     let clean = |t: &str| crate::plugins::agent::plain(t, 200);
+    let unchecked = UNCHECKED.get_or_init(crate::plugins::agent::check_folders);
     let mut out: std::collections::BTreeMap<String, Guide> = Default::default();
-    for r in crate::plugins::agent::checked_rows() {
+    for r in crate::plugins::agent::rows().into_iter().filter(|r| !unchecked.contains(&r.id)) {
         let parts: Vec<&str> = r.read.split('/').collect();
         match parts.as_slice() {
             [".plugins", _, "CLAUDE.md"] => {

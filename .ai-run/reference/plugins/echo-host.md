@@ -232,8 +232,9 @@ Echo lays out each enabled plugin's `agent/` folder, package skills and runtime 
 beside it and swapped in, `${CLAUDE_PLUGIN_ROOT}` filled in; again on install, update, enable or a changed installed
 copy; removed on disable and remove, and what isn't an enabled plugin's pruned at start — but `.plugins/.proof/`
 (`plugins::agent::PROOF`: the marks of runs through a wrapper, claude-code-runs reference § Wrapper profiles), never. The folder session gets no
-plugin skill up front: Echo's core (`echoctl core --hook`, a SessionStart hook) names each plugin with its id, its
-summary and its `CLAUDE.md` to Read first (a plugin that only offers commands, `ctx.expose`, with none), and Claude Code loads the rest of that folder when Claude reads there; plugin text in the
+plugin skill up front: Echo's core (`echoctl core --hook`, a SessionStart hook) names each plugin with its id and its
+summary (a plugin that only offers commands, `ctx.expose`, too), and tells Claude to ask `echo_plugins`' plugin(id) for
+its commands, skills and guide, then Read its `CLAUDE.md`, and Claude Code loads the rest of that folder when Claude reads there; plugin text in the
 core is one line each, `|` escaped, the core ≤ 9,000 chars (rows left out are counted and pointed to `echo_plugins`'
 `plugins` tool, which also names each plugin's skills: API § Claude in Echo). Each skill is laid out as
 `<prefix>-<name>` (the manifest's `agent.prefix`, bound to its marketplace source like a shared namespace; a laid-out
