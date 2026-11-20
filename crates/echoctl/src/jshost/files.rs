@@ -723,10 +723,10 @@ mod tests {
         std::env::remove_var("ECHOCTL_PICK_FOLDER");
         assert!(files.unwrap_err().contains("not inside a run Echo started"));
         assert!(folder.unwrap_err().contains("not inside a run Echo started"));
-        assert_eq!(heard, Some(json!("a picker opens only for what you asked, not from a timer or an event")));
+        assert_eq!(heard, Some(json!("a picker opens only for what you asked, not from a timer, an event or another plugin's or Claude's call")));
         // Its own start-up (`apply`, on every load) and Echo's ask for a widget's data: refused too.
         run("picker", "__widget:w", json!({}), &[]).unwrap();
-        let refused = json!("a picker opens only for what you asked, not from a timer or an event");
+        let refused = json!("a picker opens only for what you asked, not from a timer, an event or another plugin's or Claude's call");
         let unasked = (0..100).find_map(|_| run("picker", "unasked", json!({}), &[]).ok().filter(|v| v["atStart"] != "waiting" && v["inWidget"] != "waiting").or_else(|| { std::thread::sleep(Duration::from_millis(50)); None }));
         assert_eq!(unasked, Some(json!({"atStart": refused, "inWidget": refused})));
         plugins::remove("picker", true).unwrap();

@@ -15,7 +15,9 @@ use super::PRELUDE;
 use crate::{paths, plugins};
 
 /// How long a dry run's JavaScript may take.
-const DRY: Duration = Duration::from_secs(2);
+const DRY: Duration = Duration::from_secs(5);
+/// A version whose dry run ran over this many times in a row is taken to offer nothing (until it or Echo changes).
+const TRIES: u64 = 3;
 const MAX_COMMANDS: usize = 20;
 const MAX_ABOUT: usize = 200;
 const MAX_COMMAND_ABOUT: usize = 300;
@@ -52,14 +54,18 @@ pub struct Arg {
 pub struct Found {
     pub offer: Option<Offer>,
     pub problems: Vec<String>,
+    /// It ran over its time: tried again next time (`TRIES`).
+    pub over: bool,
 }
 
 /// What the enabled plugin `id` offers (None: it offers nothing, isn't installed and on, or has no host half).
 pub fn of(id: &str) -> Option<Offer> {
     let p = plugins::enabled().into_iter().find(|p| p.id == id)?;
     let file = record_file(id);
-    let key = format!("{}:{}", p.commit, p.files);
-    if let Some(r) = std::fs::read(&file).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok()).filter(|r| r["key"] == key.as_str()) {
+    // This Echo's version too: a change to the dry run finds again what plugins offer.
+    let key = format!("{}:{}:{}", env!("CARGO_PKG_VERSION"), p.commit, p.files);
+    let kept = std::fs::read(&file).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok()).filter(|r| r["key"] == key.as_str());
+    if let Some(r) = kept.as_ref().filter(|r| r.get("offer").is_some()) {
         return serde_json::from_value(r["offer"].clone()).ok().flatten();
     }
     let found = discover(id, &plugins::plugin_dir(&p));
@@ -69,8 +75,15 @@ pub fn of(id: &str) -> Option<Offer> {
     if let Some(d) = file.parent() {
         let _ = std::fs::create_dir_all(d);
     }
-    let _ = paths::write_atomic(&file, json!({"key": key, "offer": found.offer}).to_string().as_bytes());
+    let over = kept.and_then(|r| r["over"].as_u64()).unwrap_or(0) + 1;
+    let record = if found.over && over < TRIES { json!({"key": key, "over": over}) } else { json!({"key": key, "offer": found.offer}) };
+    let _ = paths::write_atomic(&file, record.to_string().as_bytes());
     found.offer
+}
+
+/// Whether `id`'s offered command `name` is marked `reads`.
+pub fn reads(id: &str, name: &str) -> bool {
+    of(id).is_some_and(|o| o.commands.iter().any(|c| c.name == name && c.reads))
 }
 
 /// Every enabled plugin that offers itself, by id.
@@ -151,6 +164,7 @@ pub fn discover(id: &str, dir: &Path) -> Found {
         }
         Err(e) => {
             if e.to_string().contains("ran over") {
+                found.over = true;
                 found.problems.push(format!("Echo's dry run of apply(ctx) didn't end: {e:#}"));
             }
             return found;
@@ -191,7 +205,8 @@ fn command(c: &Value) -> Result<Command> {
             let about = v.as_str().map(|s| s.chars().take(MAX_ABOUT).collect::<String>());
             match list.iter_mut().find(|a| a.name == *k) {
                 Some(a) => a.about = about,
-                None => list.push(Arg { name: k.clone(), optional: false, default: None, about }),
+                // Named only here: whether it is needed isn't known, so Echo doesn't ask for it.
+                None => list.push(Arg { name: k.clone(), optional: true, default: None, about }),
             }
         }
     }
@@ -254,6 +269,10 @@ fn dry_run(id: &str, dir: &Path) -> Result<(Value, Option<String>)> {
 /// The names in a function's first parameter when it is destructured (`({query, limit = 10}) => …`): Some([]) when it
 /// takes none, None when they can't be told (`(args) => …`).
 pub fn params(src: &str) -> Option<Vec<Arg>> {
+    // A bound or built-in function shows no source.
+    if src.contains("[native code]") {
+        return None;
+    }
     let s = src.trim_start();
     let s = s.strip_prefix("async").map(str::trim_start).unwrap_or(s);
     let s = match s.strip_prefix("function") {
@@ -272,8 +291,11 @@ pub fn params(src: &str) -> Option<Vec<Arg>> {
     if !first.starts_with('{') {
         return None;
     }
+    // `({a} = {}) => …`: the whole object may be left out, so each name in it may be.
+    let inner = balanced(first)?;
+    let whole_default = first[inner.len() + 2..].trim_start().starts_with('=');
     let mut out = vec![];
-    for part in split_top(balanced(first)?) {
+    for part in split_top(inner) {
         let part = part.trim();
         if part.is_empty() || part.starts_with("...") {
             continue;
@@ -287,7 +309,7 @@ pub fn params(src: &str) -> Option<Vec<Arg>> {
             continue;
         }
         let default = default.map(|d| d.chars().take(40).collect::<String>());
-        out.push(Arg { name: name.to_string(), optional: default.is_some(), default, about: None });
+        out.push(Arg { name: name.to_string(), optional: default.is_some() || whole_default, default, about: None });
     }
     Some(out)
 }
@@ -408,6 +430,7 @@ pub(crate) mod tests {
             ("vaults", r#"
               export function apply(ctx) {
                 if (!ctx.terminal) ctx.store.write('started.txt', 'x')
+                ctx.store.write('always.txt', 'x')
                 ctx.command('refresh', () => 1)
                 const api = ctx.expose('Search and links across the vaults')
                 api.command('search', async ({query, limit = 10}) => [query, limit], {description: 'Find notes by words', reads: true, args: {query: 'what to find'}})
@@ -438,13 +461,22 @@ pub(crate) mod tests {
         assert!(found.problems.iter().any(|p| p.contains("only what it offered before that counts")));
         // The dry run started nothing of it.
         assert!(!plugins::data_dir("vaults").join("started.txt").exists());
+        assert!(!plugins::data_dir("vaults").join("always.txt").exists(), "its services did nothing");
         // Kept per installed version, read again without a run.
         assert_eq!(of("vaults"), Some(o));
         assert!(record_file("vaults").exists());
         assert_eq!(of("quiet"), None);
-        // A host half that never ends its apply offers nothing, and says why.
+        // A host half that never ends its apply offers nothing, and says why; tried again, and after TRIES runs over in
+        // a row it is left alone (kept as offering nothing) until it or Echo changes.
         let b = discover("broken", &plugins::plugin_dir(&plugins::enabled().into_iter().find(|p| p.id == "broken").unwrap()));
-        assert!(b.offer.is_none() && b.problems[0].contains("ran over"), "{:?}", b.problems);
+        assert!(b.offer.is_none() && b.over && b.problems[0].contains("ran over"), "{:?}", b.problems);
+        let kept = || serde_json::from_slice::<Value>(&std::fs::read(record_file("broken")).unwrap()).unwrap();
+        for n in 1..TRIES {
+            assert_eq!(of("broken"), None);
+            assert_eq!((kept()["over"].as_u64(), kept().get("offer").is_some()), (Some(n), false), "not kept yet: tried again");
+        }
+        assert_eq!(of("broken"), None);
+        assert!(kept().get("offer").is_some(), "{}", kept());
         assert_eq!(all().into_iter().map(|(id, _)| id).collect::<Vec<_>>(), ["vaults"]);
         // Switched off: offers nothing.
         plugins::set_enabled("vaults", false).unwrap();
@@ -460,6 +492,7 @@ pub(crate) mod tests {
                 const api = ctx.expose('Search across the vaults')
                 api.command('search', ({query, limit = 2}, how) => ({query, limit, from: how.from || null}), {description: 'Find notes by words', reads: true})
                 api.command('echo', (a) => a, {description: 'Answers what it was given'})
+                api.command('pick', async () => await ctx.system.pickFolder('a vault'), {description: 'Asks the user for a folder'})
                 ctx.command('secret', () => 'mine')
               }"#),
             ("ping", json!({"plugins": true}), r#"
@@ -498,6 +531,8 @@ pub(crate) mod tests {
         refused("ping", json!({"id": "quiet", "name": "x", "args": {}}), "no plugin “quiet”");
         refused("ping", json!({"id": "ping", "name": "ping", "args": {}}), "calls its own commands itself");
         refused("nosy", json!({}), "didn't ask for “plugins”");
+        // No one at the screen asked for a call from another plugin: no picker opens in it.
+        refused("ping", json!({"id": "vaults", "name": "pick", "args": {}}), "not from a timer, an event or another plugin's or Claude's call");
         // Two plugins calling each other stop at the limit, said.
         let e = call("ping", "ping", json!({})).unwrap_err();
         assert!(e.contains("calls between plugins are waiting at once"), "{e}");
@@ -512,7 +547,8 @@ pub(crate) mod tests {
         assert_eq!(names("({ path }) => x"), Some(vec![s("path", false, None)]));
         assert_eq!(names("function ({a, b: c = 'x,y', ...rest}, files) { }"), Some(vec![s("a", false, None), s("b", true, Some("'x,y'"))]));
         assert_eq!(names("async function search({q = {a: 1}}) {}"), Some(vec![s("q", true, Some("{a: 1}"))]));
-        assert_eq!(names("({opts} = {}) => 1"), Some(vec![s("opts", false, None)]));
+        assert_eq!(names("({opts} = {}) => 1"), Some(vec![s("opts", true, None)]));
+        assert_eq!(names("function bound search() {\n    [native code]\n}"), None);
         assert_eq!(names("() => 1"), Some(vec![]));
         assert_eq!(names("(args) => args.q"), None);
         assert_eq!(names("a => a"), None);

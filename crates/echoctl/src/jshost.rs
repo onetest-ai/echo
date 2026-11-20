@@ -442,7 +442,8 @@ fn run(rx: Receiver<Msg>, tx: Sender<Msg>) {
                 current.lock().unwrap().providing = command == "__work";
                 current.lock().unwrap().widget = command.starts_with("__widget:");
                 // Echo's own asks (its work rows, a widget's data) aren't the user's: no picker from them.
-                current.lock().unwrap().unattended = command == "__work" || command.starts_with("__widget:");
+                // …nor a call from another plugin or Claude in Echo (`from`): no one at the screen asked for it.
+                current.lock().unwrap().unattended = command == "__work" || command.starts_with("__widget:") || !from.is_empty();
                 let ctx = p.ctx.clone();
                 slice(&mut || {
                     ctx.with(|c| {
@@ -653,7 +654,7 @@ fn host_async(id: &str, tx: &Sender<Msg>, op: String, arg: String, unattended: b
     std::thread::spawn(move || {
         let arg: Value = serde_json::from_str(&arg).unwrap_or(Value::Null);
         let picker = op == "system.pick_folder" || op == "system.pick_files";
-        let out = match if picker && unattended { Err(anyhow!("a picker opens only for what you asked, not from a timer or an event")) } else { service_async(&id, &op, &arg) } {
+        let out = match if picker && unattended { Err(anyhow!("a picker opens only for what you asked, not from a timer, an event or another plugin's or Claude's call")) } else { service_async(&id, &op, &arg) } {
             Ok(v) => json!({ "value": v }),
             Err(e) => json!({ "error": format!("{e:#}") }),
         };

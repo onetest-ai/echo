@@ -1090,9 +1090,20 @@ pub fn rows() -> Vec<Row> {
 
 /// The core as Markdown: Echo's template (the data folder `home` in it), then the plugins' table — under `BUDGET`
 /// characters, rows dropped from the end when over (and said how many). About me isn't in it: the window's own
-/// SessionStart hook gives it whole (`view::hook`); the template says where it is.
+/// SessionStart hook gives it whole (`view::hook`); the template says where it is. (Tests; Echo uses `render_with`.)
+#[cfg(test)]
 pub fn render(home: &Path, rows: &[Row]) -> String {
+    render_with(home, rows, &[])
+}
+
+/// How much of the core the plugins that offer commands may take, first: the rest are found through the tools.
+const OFFERS_ROOM: usize = 1500;
+
+/// `render` with the plugins that offer commands (`ctx.expose`: `(id, description)`) first, after the template — at
+/// most `OFFERS_ROOM` characters, the rest left to the `plugins` tool — then the table in what is left of `BUDGET`.
+pub fn render_with(home: &Path, rows: &[Row], offers: &[(String, String)]) -> String {
     let mut s = include_str!("../../assets/context.md").replace("{home}", &home.display().to_string());
+    s.push_str(&offers_block(offers));
     s.push_str("\n## Plugins\n\n");
     if rows.is_empty() {
         s.push_str("No plugin gives you a guide now.\n");
@@ -1121,19 +1132,18 @@ pub fn render(home: &Path, rows: &[Row]) -> String {
     s
 }
 
-/// `render`, then the plugins that offer commands (`ctx.expose`: `(id, description)`) in what is left of `BUDGET` —
-/// after the table, so they never push a plugin's row out — the rest counted.
-pub fn render_with(home: &Path, rows: &[Row], offers: &[(String, String)]) -> String {
-    let mut s = render(home, rows);
+/// The plugins that offer commands, one line each within `OFFERS_ROOM`, the rest counted; nothing when none does.
+fn offers_block(offers: &[(String, String)]) -> String {
     if offers.is_empty() {
-        return s;
+        return String::new();
     }
-    s.push_str("\n## Plugins' commands\n\nThe `echo_plugins` tools call what these plugins offer: plugins → plugin(id) for its commands → command(id, name) for its arguments → call.\n\n");
-    let note = |left: usize| format!("\n{left} more: the plugins tool lists them all.\n");
+    let mut s = "\n## Plugins' commands\n\nThe `echo_plugins` tools call what these plugins offer: plugins → plugin(id) for its commands → command(id, name) for its arguments → call.\n\n".to_string();
+    let head = s.chars().count();
+    let note = |left: usize| format!("{left} more: the plugins tool lists them all.\n");
     let lines: Vec<String> = offers.iter().map(|(id, d)| format!("- `{}`: {}\n", cell(id, 40), cell(d, MAX_SUMMARY))).collect();
     let fits = |n: usize| {
         let left = lines.len() - n;
-        s.chars().count() + lines[..n].iter().map(|l| l.chars().count()).sum::<usize>() + if left > 0 { note(left).chars().count() } else { 0 } < BUDGET
+        head + lines[..n].iter().map(|l| l.chars().count()).sum::<usize>() + if left > 0 { note(left).chars().count() } else { 0 } <= OFFERS_ROOM
     };
     let n = (0..=lines.len()).rev().find(|&n| fits(n)).unwrap_or(0);
     for l in &lines[..n] {
@@ -1785,12 +1795,16 @@ mod tests {
         assert_eq!(render_with(home, &[row(0)], &[]), render(home, &[row(0)]));
         let s = render_with(home, &[], &[("vaults".into(), "Search | across\nthe vaults <b>".into())]);
         assert!(s.contains("No plugin gives you a guide now.") && s.contains("## Plugins' commands") && s.contains("- `vaults`: Search \\| across the vaults ‹b›\n"), "{s}");
-        // The table first: its rows as without offers, the offers in what is left, the rest counted.
-        let many: Vec<Row> = (0..5).map(row).collect();
+        // The offers first, within their own room, the rest counted; then a full table in what is left, under the budget.
+        let many: Vec<Row> = (0..200).map(row).collect();
         let offers: Vec<(String, String)> = (0..200).map(|i| (format!("o{i}"), "word ".repeat(30))).collect();
         let s = render_with(home, &many, &offers);
-        assert!(s.starts_with(&render(home, &many)) && s.chars().count() < BUDGET, "{}", s.chars().count());
-        let shown = s.lines().filter(|l| l.starts_with("- `o")).count();
-        assert!(shown > 0 && s.contains(&format!("{} more: the plugins tool lists them all.", 200 - shown)), "{shown}");
+        assert!(s.chars().count() < BUDGET, "{}", s.chars().count());
+        let (block, table) = s.split_at(s.find("\n## Plugins\n").unwrap());
+        assert!(block.contains("## Plugins' commands") && offers_block(&offers).chars().count() <= OFFERS_ROOM);
+        let shown = block.lines().filter(|l| l.starts_with("- `o")).count();
+        assert!(shown > 0 && block.contains(&format!("{} more: the plugins tool lists them all.", 200 - shown)), "{shown}");
+        let rows_shown = table.lines().filter(|l| l.starts_with("| Plugin ") && !l.starts_with("| Plugin |")).count();
+        assert!(rows_shown > 0 && table.contains(&format!("{} more left out for room", 200 - rows_shown)), "{rows_shown}");
     }
 }

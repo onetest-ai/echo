@@ -31,7 +31,15 @@ fn run(name: &str, a: &Value, reading: bool) -> Result<Value> {
         "plugins" => Ok(offers::listing()),
         "plugin" => offers::detail(&s("id")),
         "command" => offers::command_detail(&s("id"), &s("name")),
-        "call" => offers::call(&s("id"), &s("name"), &a["args"], "claude", reading),
+        "call" => {
+            let (id, cmd) = (s("id"), s("name"));
+            let r = offers::call(&id, &cmd, &a["args"], "claude", reading);
+            // In a routine's or Yolo's outcome as `echoctl plugin call` is: a command that may change things.
+            if !offers::reads(&id, &cmd) {
+                crate::notes::note("change", &format!("plugin call {id} {cmd}"), r.as_ref().err().map(|e| format!("failed: {e:#}")).as_deref());
+            }
+            r
+        }
         t => anyhow::bail!("no tool {t}"),
     }
 }
@@ -122,6 +130,19 @@ mod tests {
         let r = call("note", true);
         assert!(r["isError"] == json!(true) && r["content"][0]["text"].as_str().unwrap().contains("this run only reads"), "{r}");
         assert_eq!(call("note", false)["content"][0]["text"], json!("\"written\""));
+        // Echo's sessions get it: a reading run with --read, its tools allowed without asking.
+        let claude = crate::ai::Profile { id: "work".into(), name: "Work".into(), kind: crate::ai::Kind::Claude, base_url: None, token: None, live_model: None, notes_model: None, account: None, email: None, sso: false, models: Default::default(), wrapper: None };
+        for (place, args) in [(crate::folder_args::Place::Read, json!(["plugins-mcp", "--read"])), (crate::folder_args::Place::Data, json!(["plugins-mcp"]))] {
+            let a = crate::folder_args::session_as(&claude, Path::new("/x/echoctl"), &root.join("s.json"), "routine", None, crate::folder_args::Who::Run(crate::config::Permissions::Auto), place).unwrap();
+            let f = a.windows(2).filter(|w| w[0] == "--mcp-config").map(|w| w[1].clone()).find(|f| f.contains("echo-plugins-mcp")).unwrap();
+            let v: Value = serde_json::from_slice(&std::fs::read(f).unwrap()).unwrap();
+            assert_eq!(v["mcpServers"][SERVER]["args"], args);
+            assert!(a.windows(2).any(|w| w[0] == "--allowedTools" && w[1] == "mcp__echo_plugins"), "{a:?}");
+        }
+        // Showing what plugins offer is no change of a run's; calling a command that may change things is noted.
+        let argv = |a: &[&str]| a.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert_eq!((crate::notes::action_kind(&argv(&["plugins-mcp", "--read"])), crate::notes::action_kind(&argv(&["plugin", "commands", "vaults"]))), (None, None));
+        assert!(!offers::reads("vaults", "note") && offers::reads("vaults", "search"));
         crate::jshost::unload_all();
     }
 }

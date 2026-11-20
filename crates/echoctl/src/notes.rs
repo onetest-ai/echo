@@ -167,7 +167,7 @@ pub fn action_kind(argv: &[String]) -> Option<&'static str> {
     let w: Vec<&str> = argv.iter().map(String::as_str).filter(|a| !a.starts_with('-')).collect();
     let first = *w.first()?;
     // Echo's own hooks and servers, and what only reads.
-    const QUIET: [&str; 16] = ["view-hook", "onedrive-hook", "plugins-hook", "run-guard", "wrapper-run", "proof", "core", "mcp", "live-mcp", "context", "attention", "previous", "status", "read", "templates", "me"];
+    const QUIET: [&str; 17] = ["view-hook", "onedrive-hook", "plugins-hook", "run-guard", "wrapper-run", "proof", "core", "mcp", "live-mcp", "plugins-mcp", "context", "attention", "previous", "status", "read", "templates", "me"];
     if QUIET.contains(&first) {
         return None;
     }
@@ -182,7 +182,7 @@ pub fn action_kind(argv: &[String]) -> Option<&'static str> {
         "project" if second == "ledger" && matches!(w.get(3).copied(), Some("tree" | "status" | "pending" | "context" | "list")) => None,
         "project" if second == "work" && w.len() < 4 => None,
         "client" | "org" if matches!(second, "list" | "people" | "show") => None,
-        "plugin" if matches!(second, "list" | "mine" | "guide" | "check") => None,
+        "plugin" if matches!(second, "list" | "mine" | "guide" | "check" | "commands") => None,
         "dashboard" if matches!(second, "list" | "presets" | "export") => None,
         "vocab" | "series" | "ai" | "model" | "config" | "home" | "intake" | "brain" | "jobs" if matches!(second, "" | "list" | "show") => None,
         "jobs" if second == "runs" || second == "routines" => None,
