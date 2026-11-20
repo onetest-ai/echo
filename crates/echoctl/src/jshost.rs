@@ -505,10 +505,12 @@ fn run(rx: Receiver<Msg>, tx: Sender<Msg>) {
                 }
             }
             Ok(Msg::Settle(id, token, out)) => {
+                // Taken whether or not its plugin is still loaded: none is kept for one switched off meanwhile.
+                let was = UNATTENDED.lock().unwrap_or_else(|e| e.into_inner()).remove(&token);
                 if let Some(p) = plugins.get(&id) {
                     set_current(&current, &id);
                     // What goes on after an await is as unattended as what started it.
-                    if let Some((unattended, called)) = UNATTENDED.lock().unwrap_or_else(|e| e.into_inner()).remove(&token) {
+                    if let Some((unattended, called)) = was {
                         let mut c = current.lock().unwrap();
                         (c.unattended, c.called) = (unattended, called);
                     }

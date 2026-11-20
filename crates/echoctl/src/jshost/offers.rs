@@ -488,8 +488,11 @@ pub(crate) mod tests {
     fn a_plugin_that_asked_calls_what_another_offers_and_is_told_who_called() {
         let (_env, root) = paths::testenv::folders("offers-call");
         install_with(&root, &[
-            ("vaults", json!({}), r#"
+            ("vaults", json!({"events": {"on": ["call_ended"]}, "folders": {"what": "vaults"}}), r#"
               export function apply(ctx) {
+                let heard = 'waiting'
+                ctx.on('call_ended', async () => { try { await ctx.plugins.list() } catch (e) {} try { await ctx.system.pickFolder('x') } catch (e) { heard = e.message } })
+                ctx.command('heard', () => heard)
                 const api = ctx.expose('Search across the vaults')
                 api.command('search', ({query, limit = 2}, how) => ({query, limit, from: how.from || null}), {description: 'Find notes by words', reads: true})
                 api.command('echo', (a) => a, {description: 'Answers what it was given'})
@@ -536,6 +539,17 @@ pub(crate) mod tests {
         // No one at the screen asked for a call from another plugin: no picker opens in it.
         refused("ping", json!({"id": "vaults", "name": "pick", "args": {}}), "not in another plugin's or Claude's call");
         refused("ping", json!({"id": "vaults", "name": "pick_later", "args": {}}), "not in another plugin's or Claude's call");
+        // The same command called by the user (its window, a terminal) picks, after its await too; an event handler
+        // doesn't, after its await either.
+        let vault = root.join("acme-vault");
+        std::fs::create_dir_all(&vault).unwrap();
+        std::env::set_var("ECHOCTL_PICK_FOLDER", &vault);
+        let own = call("vaults", "pick_later", json!({}));
+        crate::jshost::event("call_ended", &json!({}));
+        let heard = (0..100).find_map(|_| call("vaults", "heard", json!({})).ok().filter(|v| v != "waiting").or_else(|| { std::thread::sleep(Duration::from_millis(50)); None }));
+        std::env::remove_var("ECHOCTL_PICK_FOLDER");
+        assert!(own.is_ok(), "{own:?}");
+        assert_eq!(heard, Some(json!("a picker opens only for what you asked, not from a timer or an event")));
         // Two plugins calling each other stop at the limit, said.
         let e = call("ping", "ping", json!({})).unwrap_err();
         assert!(e.contains("calls between plugins are waiting at once"), "{e}");
