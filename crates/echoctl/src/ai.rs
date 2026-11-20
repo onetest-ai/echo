@@ -524,8 +524,12 @@ fn shell_script(names: Option<&[&'static str]>, telemetry: &[&'static str]) -> S
         }
     }
     if !telemetry.is_empty() {
-        // No `grep` after the start-up files: can't tell, so none of Echo's.
-        s.push_str("if command -v grep >/dev/null 2>&1 && ! env | grep -q -e '^OTEL_' -e '^CLAUDE_CODE_ENABLE_TELEMETRY=' -e '^CLAUDE_CODE_ENHANCED_TELEMETRY_BETA='; then ");
+        // No `grep` after the start-up files: can't tell, so none of Echo's. The settings folder the start-up files
+        // name (`CLAUDE_CONFIG_DIR`, which Echo may not see) counts too: its settings, and the organisation's
+        // server-managed settings Claude Code cached there.
+        s.push_str("if command -v grep >/dev/null 2>&1 && ! env | grep -q -e '^OTEL_' -e '^CLAUDE_CODE_ENABLE_TELEMETRY=' -e '^CLAUDE_CODE_ENHANCED_TELEMETRY_BETA=' \
+                    && ! { [ -n \"$CLAUDE_CONFIG_DIR\" ] && cat \"$CLAUDE_CONFIG_DIR/settings.json\" \"$CLAUDE_CONFIG_DIR/remote-settings.json\" 2>/dev/null \
+                    | grep -q -e '\"OTEL_' -e '\"CLAUDE_CODE_ENABLE_TELEMETRY\"' -e '\"CLAUDE_CODE_ENHANCED_TELEMETRY_BETA\"'; }; then ");
         for k in telemetry {
             s.push_str(&format!("export {k}=\"${TELEMETRY_PASS}{k}\"; "));
         }
@@ -1366,6 +1370,16 @@ mod tests {
             // A start-up file that sets the company's: Echo's stay out, the company's stays.
             let company = seen(Some("export OTEL_EXPORTER_OTLP_ENDPOINT=https://collector.acme.example; "));
             assert!(company.contains("OTEL_EXPORTER_OTLP_ENDPOINT=https://collector.acme.example") && !company.contains("TRACEPARENT=") && !company.contains("ECHOCTL_T_"), "{sh}: {company}");
+            // A start-up file that names another settings folder: the organisation's settings cached there count.
+            let dir = std::env::temp_dir().join(format!("echo-shell-cfg-{}", std::process::id()));
+            fs::create_dir_all(&dir).unwrap();
+            let named = format!("export CLAUDE_CONFIG_DIR='{}'; ", dir.display());
+            fs::write(dir.join("remote-settings.json"), r#"{"settings": {"env": {"OTEL_METRICS_EXPORTER": "otlp"}}}"#).unwrap();
+            let theirs = seen(Some(&named));
+            assert!(!theirs.contains("TRACEPARENT=") && !theirs.contains("OTEL_EXPORTER_OTLP_ENDPOINT=") && !theirs.contains("ECHOCTL_T_"), "{sh}: {theirs}");
+            fs::write(dir.join("remote-settings.json"), r#"{"settings": {"env": {"MY_OWN": "1"}}}"#).unwrap();
+            assert!(seen(Some(&named)).contains("TRACEPARENT=00-t-s-01"), "{sh}: none there: Echo's");
+            fs::remove_dir_all(&dir).unwrap();
         }
     }
 

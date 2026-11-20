@@ -161,7 +161,8 @@ routing-policy check.
   the server-managed `remote-settings.json` in the profile's folder, its `env` or `settings.env`) — a policy source that
   is there but can't be read counts too), nor on a wrapper profile (`echo.telemetry` "the wrapper's own": it may set its own where
   Echo can't see); through the login shell they pass as `ECHOCTL_T_<name>` and are exported only when the start-up
-  files set none and `grep` is there to tell (`ai::shell_script`).
+  files set none, the settings folder they name (`CLAUDE_CONFIG_DIR`: its `settings.json` and `remote-settings.json`)
+  mentions none, and `grep` is there to tell (`ai::shell_script`).
 - The receiver takes only `application/json` sent to its own address (`Host` 127.0.0.1 or localhost with its port),
   and files only traces of runs this process started in the last two days (`telemetry::known`); at most 8
   connections at once, a minute each, 10 s between reads, 16 KB a line, 16 MB a body; a span keeps only its
