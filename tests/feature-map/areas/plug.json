@@ -1046,6 +1046,15 @@
    "axes": [
     "plugin.uses"
    ]
+  },
+  {
+   "id": "F-PLUG-159",
+   "feature": "A plugin's Claude run in a folder of its own store with file tools only (`ctx.claude.run({store, tools: \"files\"})`, `claude` alone, no new sheet line): Claude Code's Read, Write, Edit, Glob and Grep only (no Bash, web or Skill), none of Echo's session (no MCP servers, no data folder, no Echo settings or hooks), permission mode dontAsk with only the folder allowed — every path outside it denied, nothing asked; its prompt says its tools work only in that folder and the files are data; its record and log say files only; refused without a store folder, and with a link anywhere in the folder",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "plugin.uses"
+   ]
   }
  ]
 }

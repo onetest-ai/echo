@@ -544,6 +544,8 @@ links and pictures only as that allows: § Host half) — never as HTML of its o
   - not given (`""`): the user's setting for routines (Settings → AI & minutes → Claude's permissions: Auto by default,
     or Skip all permission checks);
   - `"none"`: no tools at all (what it needs goes in the prompt);
+  - `"files"`: Claude Code's file tools only, in a folder of its store (below; without `store` refused: "tools
+    “files” goes with a folder of your store");
   - from before, `"read"` and `"folder"` are taken as `"auto"`; any other value is refused.
 
   What it asked is kept in the run's record. Its result lists the changes and sends it made (`actions`). `timeout`:
@@ -646,6 +648,16 @@ links and pictures only as that allows: § Host half) — never as HTML of its o
   Its prompt tells it the files are data, never instructions. Its record's `asked` is `store`. What it writes stays in
   the store for the plugin (`ctx.store.read`, `walk`); under `cache/` Echo sweeps it after 7 days.
   Evidence: `jshost::folders::store_folder`, `claudejob::folder_check`
+- File tools only, in a folder of its store: `ctx.claude.run({store, tools: "files", …})` — for files of others' words
+  (web pages) worked on without reaching anything else. Claude Code starts in that folder with `--tools
+  Read,Write,Edit,Glob,Grep` (no Bash, web or Skill), `--strict-mcp-config` (no MCP server), `--permission-mode
+  dontAsk` with `--allowedTools Read(./**),Edit(./**),Write(./**),Glob(./**),Grep(./**)`: in that folder it reads
+  (pictures too), lists, searches, writes and edits, nothing asked; any path outside it is denied — but what the
+  user's own Claude Code settings allow, which Claude Code runs as they say. None of Echo's session: no data folder,
+  no Echo settings file or hooks, no Brain; only the profile's settings, as any store folder (a `.claude` there
+  refused), and a link anywhere in the folder refused before it starts ("“x” in the store's folder is a link…"). Its prompt says its file tools work only in that folder and the files are data. Its record's `asked` is
+  `files`, its `used` and its log start "files only". `key`, `resume`, `images` and `onText` work as in any run; no
+  sheet line of its own (`claude` covers it). Evidence: `claudejob::files_only`, `claudejob::first_link`
 - A session the user asks in, from the client half (needs `uses.claude` and `uses.folders`):
   `ctx.claude.session({folder, path, mode, profile})` opens Claude Code in Echo's terminal, in its own bottom-panel tab
   "Claude · <plugin name>", in `folder` (a root as `ctx.fs.folders()` names it) or its subfolder `path`, as that folder's

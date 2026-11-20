@@ -596,6 +596,9 @@ pub(super) fn snapshot(id: &str, root: &str, o: &Value) -> Result<Value> {
 pub(super) fn claude_folder(id: &str, arg: &Value, spec: &mut crate::claudejob::Spec) -> Result<Option<Value>> {
     use crate::claudejob::{FolderMode, InFolder};
     let (root, path) = (arg["folder"].as_str().unwrap_or(""), arg["path"].as_str().unwrap_or(""));
+    if spec.tools == crate::claudejob::Tools::Files && arg["store"].is_null() {
+        bail!("tools “files” goes with a folder of your store (store: \"cache/pages\"): file tools only there");
+    }
     if !arg["store"].is_null() {
         if !root.is_empty() || !path.is_empty() || !arg["exclude"].is_null() {
             bail!("a run goes in a folder you were given (folder, path) or in one of your store (store), not both");
@@ -1228,12 +1231,15 @@ mod tests {
             claude("asker", json!({"store": "runs/x"})),
             claude("asker", json!({"store": "Runs./x"})),
             service_async("asker", "claude.run", &json!({"prompt": "x", "store": "cache/pages", "dir": "Cache/Pages/r1"})),
+            service_async("asker", "claude.run", &json!({"prompt": "x", "tools": "files"})),
+            claude("reader", json!({"folder": v, "tools": "files"})),
         ];
         let why: Vec<String> = refused.into_iter().map(|r| r.unwrap_err().to_string()).collect();
         assert!(why[0].contains("never the store itself") && why[1].contains("never the store itself") && why[2].contains("isn't a path inside"), "{why:?}");
         assert!(why[3].contains("isn't a folder in your store") && why[4].contains("isn't a folder in your store") && why[5].contains("is a link"), "{why:?}");
         assert!(why[6].contains("mode goes with a folder") && why[7].contains("not both") && why[8].contains("runs/ keeps Echo's records") && why[9].contains("runs/ keeps Echo's records"), "{why:?}");
         assert!(why[10].contains("keeps its records (dir) in that folder"), "{why:?}");
+        assert!(why[11].contains("“files” goes with a folder of your store") && why[12].contains("“files” goes with a folder of your store"), "{why:?}");
         assert!(!started(), "nothing started");
         for id in ["reader", "writer", "asker"] {
             plugins::remove(id, true).unwrap();
