@@ -52,6 +52,7 @@ auto: [tests/auto/specs/S-33.spec.mjs]
 | 10 | `traces/TC-002_a-yolo-run-leaves-a-trace-and-telemetry-configured-elsewhere-is-left-alone.md` | 8 (its runs) | — (after stage 9: its run would change stages 8 and 9's lists) |
 | 11 | `traces/TC-005_a-command-that-fails-leaves-a-trace-with-its-words-and-error.md` | — | — |
 | 12 | `traces/TC-006_settings-activity-shows-the-runs-and-a-runs-timeline-step-by-step.md` | 1, 4, 8, 11 (their runs) | — |
+| 13 | `traces/TC-007_send-traces-elsewhere-to-an-otlp-collector-without-identity-or-text.md` | 4 (its sync's trace) | Start the stand-in collector (its Preconditions) |
 
 ## Teardown
 - `tests/fixtures/serve.sh down <dir>` (it stops the virtual model too)

@@ -60,6 +60,13 @@
    "priority": "high",
    "check": "agent",
    "axes": []
+  },
+  {
+   "id": "F-TRACE-09",
+   "feature": "Settings → Activity → Send traces elsewhere (off until set up): to Langfuse (host, public key, secret key) or an OTLP collector (its address, headers); https://, or http:// on this computer only; the secret and the headers' values kept readable only by the user and never shown again; Save, Turn off, Send a test (the newest trace, its outcome said); the app sends each run that ended since sending was turned on, a minute after it ended, as OTLP/JSON with Langfuse's names (model calls as generations, tokens, cost) — never the account's identity or a path on this computer, what went in and came out only with its switch on; a failure is said and tried again later; `echoctl traces export` shows it, `--off` stops it",
+   "priority": "critical",
+   "check": "agent",
+   "axes": []
   }
  ]
 }

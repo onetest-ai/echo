@@ -142,6 +142,31 @@ reads the data folder's files.
   run or a timeline's step in the right panel (`PANEL_VIEWS` `activity`). A tool's row is named by what it ran from
   Echo's own stream events (`tool_use` by its id, Claude Code's `gen_ai.tool.call.id`). The index line also carries
   `cached` (cache-read tokens) and `requests` (its `http.request` spans).
+- Sending traces elsewhere (`telemetry::export`): `<config dir>/telemetry-export.json` (0600: `on`, `kind` `langfuse` /
+  `otlp`, `endpoint` — `https://<host>`, or `http://` to `127.0.0.1`, `localhost` or `[::1]` only, never a user or password in it (`export::address_ok`) —, `public_key`, `secret_key`, `headers`, `text`), changed by
+  `export::set` (the page's `activity_export`; an empty secret or headers keep the kept ones) and shown by
+  `export::status` (the secret as `secret_key_set`, headers by name). The app's exporter (`export::start`, from
+  `app::run`) makes a pass every 30 s (after a failure, 5 min): each trace whose index line ended after
+  `sent_until` (`telemetry/export-state.json`, tied to the settings' `since` — the moment sending was turned on, set by
+  `set`: a state of another `since` restarts from it, so never what ran while it was off, and a run that ended in that
+  very millisecond counts as before it; a pass stops without saving when `since` changes under it; `sent_at_end` the
+  ids sent at that very end, so none ending in the same millisecond is skipped)
+  and a minute ago or more, at most 50, oldest first by end then id, its records read from every day folder
+  (`telemetry::records`: a run across midnight), the settings read again before each send (turned off: it stops), as
+  `export::to_otlp` (Echo's and Claude Code's spans under `service.name` `echo` / `claude-code`, their events): identity
+  — `user.*`, `organization.*`, `anthropic.*`, `cwd`, `terminal.type`, `host.name` — never; with `text` off only
+  numbers, yes/no and the text of `export::plain_attr`'s names (what ran, on which model, how it went), a name the user
+  chose as its kind (a plugin's routine `job.routine` / `routine`, an MCP tool `mcp`: `export::plain_name`), an error as
+  "failed", none of Echo's own events; with it on everything else, identity taken out at any depth — inside JSON held
+  as text too — and this computer's home folder written `~` in each of its forms (as it is, forward slashes,
+  JSON-escaped, `/c/Users/…`; on Windows whatever its case: `export::scrub`); `langfuse.trace.name` on the root, `langfuse.observation.type`
+  `generation`, `gen_ai.request.model` and `gen_ai.usage.*` on Claude Code runs and model calls, their input and output
+  with `text`. Posted by `curl -q -K` (never the user's `~/.curlrc`; this computer never through a proxy) with the URL,
+  headers and body in 0600 files removed after (one a crash left, ten minutes old, is removed by a later pass): Langfuse at `<host>/api/public/otel/v1/traces` with Basic
+  `public:secret` and `x-langfuse-ingestion-version: 4`, OTLP at its URL (`/v1/traces` added). A failure is kept
+  (`error`, `error_at`) and the trace tried again next pass. The page's "Send a test" (`activity_export_test`) sends the
+  newest trace now (`export::send_newest`); `/api/activity/export` gives the status and that test's outcome.
+  `echoctl traces export [--off]`.
 - The page polls a call's revision, `/api/call/<name>/rev` (`window::call::call_rev`), and fetches the call only when it
   changed.
 

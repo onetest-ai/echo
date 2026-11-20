@@ -3,7 +3,7 @@
 // steps, Claude Code's requests and tools, requests to other services — with what went in and came out. The chosen run
 // or step is in the right panel.
 
-S.ac = { days: 7, data: null, at: 0, show: 'all', sel: null, trace: null, traces: {}, step: null }
+S.ac = { days: 7, data: null, at: 0, show: 'all', sel: null, trace: null, traces: {}, step: null, export: null, exportOpen: false, form: null }
 
 // ── activity: words, sums and the timeline's rows (no DOM: `activity.test.mjs`)
 const AC_JOBS = { thread_sync: 'Thread sync', minutes: 'Minutes', live_notes: 'Live notes', needs: 'Needs you now', prep: 'Prep', brain_reader: 'Intake', fetch: 'Mail & chat fetch', yolo: 'Yolo', plugin_run: 'A plugin’s Claude run' }
@@ -271,18 +271,78 @@ async function loadActivityTrace(id) {
 // Read when the section is entered, then every 30 s while it is open (a month or more: every 5 min).
 setInterval(() => {
   if (S.view !== 'settings' || S.setSection !== 'activity' || document.hidden) return
-  if (!S.ac.data || Date.now() - S.ac.at > (S.ac.days > 7 ? 300000 : 30000)) loadActivity()
+  if (!S.ac.data || Date.now() - S.ac.at > (S.ac.days > 7 ? 300000 : 30000)) { loadActivity(); loadActivityExport() }
+  // A test send's outcome, as soon as it is there.
+  if (S.ac.exportOpen && S.ac.export && S.ac.export.test && S.ac.export.test.busy) loadActivityExport()
 }, 1000)
 
 const acDot = (ok) => `<span class="ac-dot ${ok === false ? 'bad' : 'ok'}"${ok === false ? ' aria-label="failed"' : ''}></span>`
 const acTrace = (id) => ((S.ac.data && S.ac.data.traces) || []).find((t) => t.id === id)
 
-/** Settings → Activity: the list, or a run's timeline. */
+/** Settings → Activity: the list, a run's timeline, or where traces are sent. */
 function activitySettings() {
   const d = S.ac.data
+  if (S.ac.exportOpen) return activityExport()
   if (!d) return `<div class="ac"><div class="skeleton" style="padding:20px">${'<i></i>'.repeat(5)}</div></div>`
   return S.ac.trace && acTrace(S.ac.trace) ? activityTimeline(acTrace(S.ac.trace)) : activityList(d)
 }
+async function loadActivityExport() {
+  try { S.ac.export = await get('api/activity/export') } catch { /* app restarting */ }
+  // The form follows what is kept, unless the user is changing it — or saved it and it was refused (kept as typed).
+  const x = S.ac.export, sent = S.ac.saving
+  if (sent && x && x.on === sent.on && (!sent.on || (x.kind === sent.kind && x.endpoint === sent.endpoint))) { S.ac.formDirty = false; S.ac.saving = null }
+  if (!S.ac.formDirty) S.ac.form = null
+  if (S.view === 'settings' && S.setSection === 'activity') render()
+}
+/** Where traces are sent, in words: "Sending to Langfuse", or nothing when off. */
+const acSending = (x) => (x && x.on ? `Sending to ${x.kind === 'langfuse' ? 'Langfuse' : 'your collector'}${x.error ? ' · failing' : ''}` : '')
+/** The form as the user edits it, from what is kept (the secret never: only whether one is). */
+function acForm() {
+  if (!S.ac.form) {
+    const x = S.ac.export || {}
+    S.ac.form = { kind: x.kind || 'langfuse', endpoint: x.endpoint || (x.kind === 'otlp' ? '' : 'https://cloud.langfuse.com'), public_key: x.public_key || '', secret_key: '', headers: '', text: !!x.text }
+  }
+  return S.ac.form
+}
+function activityExport() {
+  const x = S.ac.export, f = acForm()
+  const head = `<nav class="ac-crumb"><button class="link-btn" data-ac-export-close>Activity</button><span>›</span><span>Send traces elsewhere</span></nav>
+    <header class="ac-head"><div><h2>Send traces elsewhere</h2><div class="set-sub">Off until you set it up. Echo sends each run once it ended — to your Langfuse, or any OpenTelemetry (OTLP) collector. Never your account’s identity; what went in and came out only if you say so.</div></div></header>`
+  if (!x) return `<div class="ac">${head}<div class="skeleton" style="padding:20px">${'<i></i>'.repeat(3)}</div></div>`
+  const inp = (key, label, attrs = '') => `<input class="ac-in" data-ac-f="${key}" value="${esc(f[key])}" aria-label="${esc(label)}" ${attrs}>`
+  const lf = f.kind === 'langfuse'
+  const rows = [
+    setRow('Send to', '', `<div class="seg" role="group" aria-label="Send to">${[['langfuse', 'Langfuse'], ['otlp', 'OTLP collector']].map(([v, l]) => `<button data-ac-kind="${v}" aria-pressed="${f.kind === v}">${l}</button>`).join('')}</div>`),
+    setRow(lf ? 'Langfuse host' : 'Collector', lf ? 'Cloud: https://cloud.langfuse.com (EU) or https://us.cloud.langfuse.com; or your own.' : 'Its traces URL, or its base (/v1/traces is added). https://…, or http:// on this computer.', inp('endpoint', 'Address', 'placeholder="https://…"')),
+    ...(lf ? [
+      setRow('Public key', '', inp('public_key', 'Public key', 'placeholder="pk-lf-…"')),
+      setRow('Secret key', x.secret_key_set && x.kind === 'langfuse' ? 'Kept — type a new one to change it.' : 'Kept on this computer, readable only by you.', inp('secret_key', 'Secret key', `type="password" placeholder="${x.secret_key_set && x.kind === 'langfuse' ? '•••••• kept' : 'sk-lf-…'}"`)),
+    ] : [
+      setRow('Headers', x.headers && x.headers.length && x.kind === 'otlp' ? `Kept: ${esc(x.headers.join(', '))} — type them again to change them.` : 'One a line, Name: value (an API key for your collector).', `<textarea class="ac-in" data-ac-f="headers" rows="2" aria-label="Headers" placeholder="Authorization: Bearer …">${esc(f.headers)}</textarea>`),
+    ]),
+    setRow('What went in and came out', 'Prompts, replies, tool calls and results, instructions. Off: only what ran, how long, tokens and cost.', `<button class="sw${f.text ? ' on' : ''}" role="switch" aria-checked="${f.text}" aria-label="Send what went in and came out" data-ac-text></button>`),
+  ]
+  const t = x.test || {}
+  const state = x.on ? `<p class="set-sub">${esc(acSending(x))}${x.last_sent ? ` · last sent ${esc(acWhen(x.last_sent, new Date()))}` : ''}${x.sent ? ` · ${x.sent} sent` : ''}</p>${x.error ? `<p class="error">${esc(x.error)}</p>` : ''}` : '<p class="set-sub">Not sending.</p>'
+  const test = t.busy ? '<span class="set-sub">Sending…</span>' : t.ok ? '<span class="set-ok">Sent ✓</span>' : t.error ? `<span class="error">${esc(t.error)}</span>` : ''
+  return `<div class="ac ac-export">${head}${setCard('', rows)}
+    <div class="ac-btns"><button class="btn primary" data-ac-export-save>${x.on ? 'Save' : 'Turn on'}</button>${x.on ? '<button class="btn" data-ac-export-off>Turn off</button><button class="btn" data-ac-export-test>Send a test</button>' : ''}${test}</div>${state}</div>`
+}
+/** Keep the form as it is, sending on (`on`) or off. */
+function acExportSave(on) {
+  const f = acForm()
+  const settings = { on, kind: f.kind, endpoint: f.endpoint, public_key: f.public_key, secret_key: f.secret_key, text: f.text,
+    headers: String(f.headers || '').split('\n').map((h) => h.trim()).filter(Boolean), keep_headers: !String(f.headers || '').trim() }
+  send({ cmd: 'activity_export', settings })
+  // Kept as typed until what is kept shows it was taken (a refusal leaves the form as it was).
+  S.ac.saving = { on, kind: f.kind, endpoint: String(f.endpoint || '').trim().replace(/\/+$/, '') }
+  S.ac.formDirty = true
+  setTimeout(loadActivityExport, 400)
+}
+document.addEventListener('input', (e) => {
+  const k = e.target && e.target.dataset && e.target.dataset.acF
+  if (k) { acForm()[k] = e.target.value; S.ac.formDirty = true }
+})
 /** The list's sums, kept until the data or the day changes (Settings draws again every few seconds). */
 let acMemo = { data: null, day: '', sums: null }
 function acSums(d, now) {
@@ -308,7 +368,7 @@ function activityList(d) {
     || `<p class="set-sub ac-none">${traces.length ? 'Nothing here.' : 'Nothing yet: runs show here as Echo runs its jobs.'}</p>`
   const chips = (list, cur, attr) => `<div class="ac-chips" role="group">${list.map(([v, l]) => `<button class="ac-chip${cur === v ? ' on' : ''}" ${attr}="${esc(String(v))}" aria-pressed="${cur === v}">${esc(l)}</button>`).join('')}</div>`
   return `<div class="ac">
-    <header class="ac-head"><div><h2>Activity</h2><div class="set-sub">What Echo ran, step by step, on this computer — each run's detail kept ${d.kept_days || 7} days, its numbers ${d.numbers_days || 90}</div></div>${chips(AC_PERIODS, S.ac.days, 'data-ac-days')}</header>
+    <header class="ac-head"><div><h2>Activity</h2><div class="set-sub">What Echo ran, step by step, on this computer — each run's detail kept ${d.kept_days || 7} days, its numbers ${d.numbers_days || 90} · <button class="link-btn" data-ac-export-open>${esc(acSending(S.ac.export) || 'Send traces elsewhere…')}</button></div></div>${chips(AC_PERIODS, S.ac.days, 'data-ac-days')}</header>
     <div class="ac-facts" aria-label="${esc((AC_PERIODS.find(([n]) => n === S.ac.days) || [0, ''])[1])}">
       <div><b class="num">${s.runs}</b><span>runs${s.failed ? ` · ${s.failed} failed` : ''}</span></div>
       <div><b class="num">${acNum(s.tokens)}</b><span>tokens${s.tokens ? ` · ${Math.round((s.cached / s.tokens) * 100)}% from cache` : ''}</span></div>
@@ -369,9 +429,16 @@ function acReveal() {
   layoutChanged()
 }
 document.addEventListener('click', (e) => {
-  const t = e.target.closest && e.target.closest('[data-ac-days],[data-ac-show],[data-ac-run],[data-ac-open],[data-ac-back],[data-ac-step]')
+  const t = e.target.closest && e.target.closest('[data-ac-days],[data-ac-show],[data-ac-run],[data-ac-open],[data-ac-back],[data-ac-step],[data-ac-export-open],[data-ac-export-close],[data-ac-kind],[data-ac-text],[data-ac-export-save],[data-ac-export-off],[data-ac-export-test]')
   if (!t) return
   const d = t.dataset
+  if (d.acExportOpen !== undefined) { S.ac.exportOpen = true; S.ac.form = null; S.ac.formDirty = false; render(); return loadActivityExport() }
+  if (d.acExportClose !== undefined) { S.ac.exportOpen = false; return render() }
+  if (d.acKind) { const f = acForm(); if (f.kind !== d.acKind) Object.assign(f, { kind: d.acKind, endpoint: d.acKind === 'langfuse' ? 'https://cloud.langfuse.com' : '', headers: '' }); S.ac.formDirty = true; return render() }
+  if (d.acText !== undefined) { acForm().text = !acForm().text; S.ac.formDirty = true; return render() }
+  if (d.acExportSave !== undefined) return acExportSave(true)
+  if (d.acExportOff !== undefined) return acExportSave(false)
+  if (d.acExportTest !== undefined) { send({ cmd: 'activity_export_test' }); S.ac.export = { ...S.ac.export, test: { busy: true } }; render(); return setTimeout(loadActivityExport, 500) }
   if (d.acDays) { const n = Number(d.acDays); S.ac.days = AC_PERIODS.some(([x]) => x === n) ? n : 7; S.ac.data = null; render(); return loadActivity() }
   if (d.acShow) { S.ac.show = d.acShow; return render() }
   if (d.acRun) { S.ac.sel = d.acRun; acReveal(); render(); const t = acTrace(S.ac.sel); return t && t.detail !== false ? loadActivityTrace(S.ac.sel) : undefined }

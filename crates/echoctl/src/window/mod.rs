@@ -730,6 +730,9 @@ pub fn handle(msg: &str) -> Handled {
     if let Some(r) = settings::handle(&v) {
         return r;
     }
+    if let Some(r) = activity::handle(&v) {
+        return r;
+    }
     if let Some(r) = threads::handle(&v) {
         return r;
     }

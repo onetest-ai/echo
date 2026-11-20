@@ -26,6 +26,7 @@ use std::sync::mpsc::{sync_channel, Receiver, SyncSender};
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
+pub mod export;
 mod receiver;
 
 const DIR: &str = "telemetry";
@@ -743,13 +744,21 @@ pub fn list(days: i64, job: Option<&str>, kind: Option<&str>, limit: usize) -> V
     json!({"traces": out, "kept_days": KEEP_DAYS, "numbers_days": NUMBERS_DAYS, "dropped": dropped()})
 }
 
+/// One trace's records as written, from every day it has lines in (a run across midnight), oldest day first.
+pub(crate) fn records(id: &str) -> Vec<Value> {
+    if !valid_id(id, 32) {
+        return Vec::new();
+    }
+    day_dirs().into_iter().rev().flat_map(|d| lines(&d.join(format!("{id}.jsonl")))).collect()
+}
+
 /// `echoctl traces show <id>`: one trace's spans, nested, each with its events in order; events of no span it has last.
 pub fn show(id: &str) -> anyhow::Result<Value> {
     let id = &id.to_ascii_lowercase();
     if !valid_id(id, 32) {
         anyhow::bail!("“{id}” isn't a trace id (32 hex digits, as `echoctl traces` lists them)");
     }
-    let mut recs: Vec<Value> = day_dirs().into_iter().rev().flat_map(|d| lines(&d.join(format!("{id}.jsonl")))).collect();
+    let mut recs = records(id);
     if recs.is_empty() {
         anyhow::bail!("no trace “{id}” (a trace's detail is kept {KEEP_DAYS} days, its numbers {NUMBERS_DAYS})");
     }
