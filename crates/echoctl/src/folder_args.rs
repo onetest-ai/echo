@@ -132,13 +132,19 @@ pub fn build(managed: bool, exe: &Path, settings: &Path, who: Who) -> Result<Vec
 /// (`terminal::start_folder`), and — but for `-p`, its prompt and its model — a routine's and a Yolo task's
 /// (`claudejob::run`, `who`).
 pub fn session(p: &crate::ai::Profile, exe: &Path, settings: &Path, usage: &str, model: Option<&str>, who: Who) -> Result<Vec<String>> {
+    session_as(p, exe, settings, usage, model, who, true)
+}
+
+/// `session` for a run that may edit (`may_edit`) or only read: a plugin's run in a folder (`claudejob::in_folder`),
+/// whose `read` asks nothing where auto mode doesn't work (`permission_args`).
+pub fn session_as(p: &crate::ai::Profile, exe: &Path, settings: &Path, usage: &str, model: Option<&str>, who: Who, may_edit: bool) -> Result<Vec<String>> {
     let mut args: Vec<String> = vec![];
     if let Some(m) = model {
         args.extend(["--model".into(), m.to_string()]);
     }
     args.extend(build(p.kind.managed(), exe, settings, who)?);
     // The user's choice (Settings → AI & minutes) as this profile and model can run it.
-    args.extend(permission_args(who.permissions(), p, model, true).0);
+    args.extend(permission_args(who.permissions(), p, model, may_edit).0);
     // The Brain beside the user's own MCP servers (read-only; its tools allowed without asking).
     #[cfg(feature = "tray")]
     if let Some(f) = crate::terminal::brain_mcp_config(exe, &["--profile".into(), p.id.clone(), "--who".into(), usage.into()]) {

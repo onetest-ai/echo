@@ -591,20 +591,23 @@ pub(super) fn snapshot(id: &str, root: &str, o: &Value) -> Result<Value> {
 /// `ctx.claude.run({folder, path, mode})`: the run goes into a folder given to the plugin (`uses.folders`; `edit` also
 /// `folders.write`), at `path` inside it — or, for `copy`, into a snapshot of it (`snapshot`, dot names too, so the
 /// folder's `.claude` comes along; less the paths `exclude` names, as `ctx.fs.snapshot`'s), whose answer is the run's
-/// `snapshot` for the plugin to compare and apply. No `folder`: the run as before (`mode`, `path` and `exclude` then
-/// refused); `exclude` only with `copy`.
+/// `snapshot` for the plugin to compare and apply. Or into a folder of its own store (`store`, no `mode`). No
+/// `folder` or `store`: the run as before (`mode`, `path` and `exclude` then refused); `exclude` only with `copy`; never
+/// `tools: "none"` (a run in a folder works with its files).
 pub(super) fn claude_folder(id: &str, arg: &Value, spec: &mut crate::claudejob::Spec) -> Result<Option<Value>> {
     use crate::claudejob::{FolderMode, InFolder};
     let (root, path) = (arg["folder"].as_str().unwrap_or(""), arg["path"].as_str().unwrap_or(""));
+    if (!root.is_empty() || !arg["store"].is_null()) && spec.tools == crate::claudejob::Tools::None {
+        bail!("tools “none” goes without a folder: a run in a folder (folder, store) works with its files");
+    }
     if !arg["store"].is_null() {
         if !root.is_empty() || !path.is_empty() || !arg["exclude"].is_null() {
             bail!("a run goes in a folder you were given (folder, path) or in one of your store (store), not both");
         }
-        let mode = match FolderMode::parse(arg["mode"].as_str().unwrap_or(""))? {
-            FolderMode::Copy => bail!("mode “copy” goes with a folder you were given: in your store a run reads (read) or edits (edit)"),
-            m => m,
-        };
-        spec.folder = Some(InFolder { cwd: store_folder(id, arg["store"].as_str().unwrap_or(""))?, mode, store: true });
+        if !arg["mode"].is_null() {
+            bail!("a run in your store works with its files as it needs: mode goes with a folder you were given");
+        }
+        spec.folder = Some(InFolder { cwd: store_folder(id, arg["store"].as_str().unwrap_or(""))?, mode: FolderMode::Edit, store: true });
         spec.session = false;
         return Ok(None);
     }
@@ -1176,6 +1179,36 @@ mod tests {
         assert!(e.to_string().contains("isn't in the copy of") && !started(), "{e}");
         let kept: Vec<_> = std::fs::read_dir(plugins::data_dir("reader").join("cache/snapshots")).unwrap().flatten().map(|e| e.file_name()).collect();
         assert_eq!(kept.len(), 1, "no snapshot left by the refused run: {kept:?}");
+        // In a folder of its own store (`claude` alone on its sheet): there, every tool.
+        let store = plugins::data_dir("asker");
+        std::fs::create_dir_all(store.join("cache/pages")).unwrap();
+        std::fs::write(store.join("cache/pages/acme.md"), "# Acme\n").unwrap();
+        std::fs::write(crate::ai::fake::file(&p, "p.result"), json!({"type": "result", "subtype": "success", "result": "Tidied", "usage": {}}).to_string() + "\n").unwrap();
+        let out = claude("asker", json!({"store": "cache/pages"})).unwrap();
+        assert_eq!(out["answer"], "Tidied");
+        assert_eq!(cwd(), dunce::canonicalize(store.join("cache/pages")).unwrap().display().to_string());
+        assert!(!std::fs::read_to_string(crate::ai::fake::file(&p, "p.args")).unwrap().split('\0').any(|a| a == "--tools"), "every tool");
+        // Refused before anything starts: the store itself, a folder out of it or not there, a file, a link out, a
+        // mode, a folder given too, no tools.
+        std::os::unix::fs::symlink(&other, store.join("cache/out")).unwrap();
+        forget();
+        let refused = [
+            claude("asker", json!({"store": ""})),
+            claude("asker", json!({"store": "."})),
+            claude("asker", json!({"store": "../reader"})),
+            claude("asker", json!({"store": "cache/none"})),
+            claude("asker", json!({"store": "cache/pages/acme.md"})),
+            claude("asker", json!({"store": "cache/out"})),
+            claude("asker", json!({"store": "cache/pages", "mode": "read"})),
+            claude("reader", json!({"store": "cache", "folder": v})),
+            claude("asker", json!({"store": "cache/pages", "tools": "none"})),
+            claude("asker", json!({"folder": v, "tools": "none"})),
+        ];
+        let why: Vec<String> = refused.into_iter().map(|r| r.unwrap_err().to_string()).collect();
+        assert!(why[0].contains("never the store itself") && why[1].contains("never the store itself") && why[2].contains("isn't a path inside"), "{why:?}");
+        assert!(why[3].contains("isn't a folder in your store") && why[4].contains("isn't a folder in your store") && why[5].contains("is a link"), "{why:?}");
+        assert!(why[6].contains("mode goes with a folder") && why[7].contains("not both") && why[8].contains("tools “none”") && why[9].contains("tools “none”"), "{why:?}");
+        assert!(!started(), "nothing started");
         for id in ["reader", "writer", "asker"] {
             plugins::remove(id, true).unwrap();
         }

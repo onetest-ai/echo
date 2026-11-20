@@ -1065,15 +1065,16 @@ mod tests {
         let argv = |c: &CommandBuilder| c.get_argv().iter().map(|a| a.to_string_lossy().into_owned()).collect::<Vec<String>>();
         let after = |a: &[String], k: &str| a.iter().position(|x| x == k).and_then(|i| a.get(i + 1).cloned());
         let start = |id: &str, req: serde_json::Value, profile: Option<&str>| plugin_command(id, &req, profile, None).map(|(c, _ready, _, _, about)| (argv(&c), c.get_cwd().map(|d| d.to_string_lossy().into_owned()), about));
-        // In the folder (or a subfolder), its own project last, the mode's tools, no MCP server, a conversation of its
-        // own; the folder session's setting — Ask each time: Claude Code's own prompts, no mode of Echo's.
+        // In the folder (or a subfolder), its own project last, the mode's tools (read: reading and the web), the user's
+        // MCP servers, a conversation of its own; the folder session's setting — Ask each time: Claude Code's own
+        // prompts, no mode of Echo's.
         set(Permissions::Ask);
         let (a, cwd, about) = start("vault", json!({"folder": v}), None).unwrap();
         assert_eq!(cwd.as_deref(), Some(v.as_str()));
         assert!(a.ends_with(&["--setting-sources".to_string(), "user,project".to_string()]), "{a:?}");
-        assert_eq!(after(&a, "--tools").as_deref(), Some("Read,Grep,Glob,Skill"));
-        assert!(a.contains(&"--strict-mcp-config".to_string()) && after(&a, "--session-id").is_some(), "{a:?}");
-        for no in ["--permission-mode", "--dangerously-skip-permissions", "--no-session-persistence", "--settings", "--plugin-dir", "--mcp-config", "--add-dir", "--allowedTools", "-p"] {
+        assert_eq!(after(&a, "--tools").as_deref(), Some("Read,Grep,Glob,Skill,WebFetch,WebSearch"));
+        assert!(after(&a, "--session-id").is_some(), "{a:?}");
+        for no in ["--strict-mcp-config", "--permission-mode", "--dangerously-skip-permissions", "--no-session-persistence", "--settings", "--plugin-dir", "--mcp-config", "--add-dir", "--allowedTools", "-p"] {
             assert!(!a.contains(&no.to_string()), "{no}: {a:?}");
         }
         assert_eq!((about["name"].as_str(), about["mode"].as_str(), about["permissions"].as_str(), about["profile"].as_str()), (Some("Acme vault"), Some("read"), Some("asks each time"), Some("work")));
@@ -1095,7 +1096,7 @@ mod tests {
         set(Permissions::Auto);
         let (a, cwd, _) = start("writer", json!({"folder": v, "path": "Notes", "mode": "edit"}), None).unwrap();
         assert_eq!(cwd, Some(vault.join("Notes").display().to_string()));
-        assert_eq!((after(&a, "--tools").as_deref(), after(&a, "--permission-mode").as_deref()), (Some("Read,Grep,Glob,Skill,Edit,Write"), Some("auto")));
+        assert_eq!((after(&a, "--tools").as_deref(), after(&a, "--permission-mode").as_deref()), (None, Some("auto")));
         assert!(after(&a, "--session-id").is_some_and(|x| x != id), "{a:?}");
         set(Permissions::Skip);
         let (a, ..) = start("vault", json!({"folder": v}), None).unwrap();

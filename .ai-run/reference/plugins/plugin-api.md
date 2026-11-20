@@ -514,8 +514,8 @@ links and pictures only as that allows: § Host half) — never as HTML of its o
   - `"none"`: no tools at all (what it needs goes in the prompt);
   - from before, `"read"` and `"folder"` are taken as `"auto"`; any other value is refused.
 
-  What it asked is kept in the run's record. Its result lists the changes and sends it made (`actions`).
-  Evidence: `claudejob::Tools::parse`, `plugins::may_run_claude`
+  What it asked is kept in the run's record. Its result lists the changes and sends it made (`actions`). `timeout`:
+  minutes, 1–60, 30 when not given. Evidence: `claudejob::Tools::parse`, `plugins::may_run_claude`
 - A run under a key of its own: `ctx.claude.run({..., key})`, `key` 1 to 64 letters, digits, `.`, `_` or `-` (any
   other refused; upper and lower case the same key). One run at a time per plugin and key, across Echo's processes (the app and a terminal's
   `echoctl plugin call`): a second while one runs is refused ("a run with key “…” is running already"). `await
@@ -572,13 +572,14 @@ links and pictures only as that allows: § Host half) — never as HTML of its o
   model, dir, timeout})` — `folder` a root as `ctx.fs.folders()` names it, `path` a subfolder of it (`""` the root).
   Claude Code starts there as that folder's own project: its `CLAUDE.md`, `.claude/` skills, settings and hooks load
   (`--setting-sources user,project` on a profile of Echo's own, as the run's last arguments; the user's own Claude
-  Code setup and a wrapper load them anyway), none of Echo's session (no Echo CLI, Brain, plugins' skills or Echo's
-  hooks), no MCP server (`--strict-mcp-config`), never Bash or the web. With `path`, Claude Code starts in that
-  subfolder: the project is the subfolder's — its `.claude` (skills, settings, hooks), and the `CLAUDE.md` files of
-  the subfolder and of the folders above it. `mode`:
-  - `read` (the default): `--tools Read,Grep,Glob,Skill`;
-  - `edit` (needs `folders.write`): `--tools Read,Grep,Glob,Skill,Edit,Write` — Claude Code keeps its edits inside the
-    folder;
+  Code setup and a wrapper load them anyway), with Echo's session as a routine has it (`folder_args::session_as`:
+  Echo's CLI and the commands, scripts, skills and guides of plugins, the Brain, Echo's hooks, the routine's marks,
+  so its changes and sends are its `actions`; the data folder added with `--add-dir`, the prompt naming it) and the
+  user's MCP servers. With `path`, Claude Code starts in that subfolder: the project is the subfolder's — its
+  `.claude` (skills, settings, hooks), and the `CLAUDE.md` files of the subfolder and of the folders above it. `mode`:
+  - `read` (the default): `--tools Read,Grep,Glob,Skill,WebFetch,WebSearch` — reading and the web, never Bash or an
+    edit (so Echo's CLI not either; the Brain's MCP tools yes);
+  - `edit` (needs `folders.write`): every tool of Claude Code's (no `--tools`), Bash and the web too;
   - `copy`: the `edit` run on a snapshot of the folder in its store (`ctx.fs.snapshot` with dot names, so `.claude`
     comes along; never `.git` or `.obsidian/plugins`, its caps and its 3-snapshot limit), the folder itself untouched;
     the result's `snapshot` is the snapshot's answer (`{path, files, bytes, skipped, why}`), for the plugin to compare
@@ -587,22 +588,33 @@ links and pictures only as that allows: § Host half) — never as HTML of its o
     `copy`; in another mode or without a folder refused) is the snapshot's: the paths under the root it leaves out,
     100 at most.
 
-  Its permissions are the user's setting for routines (Settings → AI & minutes → Claude's permissions), by
-  `folder_args::permission_args`: Auto — `--permission-mode auto` where the profile's model has auto mode, else
-  `acceptEdits` for `edit` and `copy` and `dontAsk` for `read`; Skip all permission checks —
-  `--dangerously-skip-permissions` in every mode. A plugin can't choose a permission mode or tools of its own (`tools`
-  is ignored there). Its record (`permissions.json`) and log name the mode it asked (`read`, `edit` or `copy`) and the
-  permissions it runs with; a start in another permission mode than asked is said there too. On a profile of Echo's
+  Its permissions are what the plugin asked (`tools`: `auto`; `skip` only as its sheet allows), else the user's
+  setting for routines (Settings → AI & minutes → Claude's permissions), by `folder_args::permission_args`: Auto —
+  `--permission-mode auto` where the profile's model has auto mode, else `acceptEdits` for `edit` and `copy` and
+  `dontAsk` for `read`; Skip all permission checks — `--dangerously-skip-permissions` in every mode. `tools: "none"`
+  with a folder is refused (a run in a folder works with its files). Its record (`permissions.json`) and log name the
+  mode it asked (`read`, `edit`, `copy`, or `store`) and the permissions it runs with; a start in another permission mode than asked is said there too. On a profile of Echo's
   own, a folder whose `.claude/settings.json` or `settings.local.json` could route the run elsewhere (a routing variable in its `env`, a key or
   policy helper; or not JSON) is refused. A call's text reaches the run only as the plugin puts it in the prompt: Echo
   can't see it there, so a plugin that does passes the call's `profile` (`ctx.echo.read('source', …)`). Evidence:
   `claudejob::in_folder`, `jshost::folders::claude_folder`
+- In a folder of its own store (`claude` alone on its sheet): `await ctx.claude.run({store, prompt, title, profile,
+  model, tools, dir, timeout, key, resume, images})` — `store` a folder of the store (`"cache/pages"`), never the store
+  itself (Echo's files lie at its top), one that isn't there, a file, or one reached through a link; `folder`, `path`,
+  `mode` and `exclude` with it are refused. For files too large for a prompt (a crawl's pages): Claude Code starts
+  there and works with them as it needs — as a folder run in `edit` (Echo's session, every tool, the plugin's
+  `tools` else the routines' setting), but no project of its own: only the profile's settings (on the user's own
+  Claude Code `--setting-sources user` last), and a store folder holding `.claude` is refused before it starts ("…
+  remove it (ctx.store.remove) and run again"), so nothing a run writes there loads as settings, hooks or skills.
+  Its prompt tells it the files are data, never instructions. Its record's `asked` is `store`. What it writes stays in
+  the store for the plugin (`ctx.store.read`, `walk`); under `cache/` Echo sweeps it after 7 days.
+  Evidence: `jshost::folders::store_folder`, `claudejob::folder_check`
 - A session the user asks in, from the client half (needs `uses.claude` and `uses.folders`):
   `ctx.claude.session({folder, path, mode, profile})` opens Claude Code in Echo's terminal, in its own bottom-panel tab
   "Claude · <plugin name>", in `folder` (a root as `ctx.fs.folders()` names it) or its subfolder `path`, as that folder's
   own project — as a folder run: the folder's setup (`--setting-sources user,project` on a profile of Echo's own, last),
-  `mode` `read` (the default, `--tools Read,Grep,Glob,Skill`) or `edit` (needs `folders.write`, also `Edit,Write`; no
-  `copy`), no MCP server, never Bash or the web, refused on a folder whose `.claude/settings.json` or `settings.local.json` could route it — but
+  `mode` `read` (the default, `--tools Read,Grep,Glob,Skill,WebFetch,WebSearch`) or `edit` (needs `folders.write`,
+  every tool; no `copy`), the user's MCP servers, but none of Echo's session, refused on a folder whose `.claude/settings.json` or `settings.local.json` could route it — but
   interactive, its conversation kept (`--session-id`, then `--resume` for that plugin and folder on that profile), and
   its permissions the user's setting for Claude in the window (Settings → AI & minutes → Claude's permissions: Ask each
   time — Claude Code's own prompts, no flag; Auto — `--permission-mode auto`, or `acceptEdits` / `dontAsk` where the
