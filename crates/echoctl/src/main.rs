@@ -243,7 +243,7 @@ enum Cmd {
         #[command(subcommand)]
         cmd: Option<JobsCmd>,
     },
-    /// What Echo ran, step by step, kept 7 days on this computer (JSON): `echoctl traces` lists them, newest first — each
+    /// What Echo ran, step by step, on this computer (JSON; detail 7 days, numbers 90): `echoctl traces` lists them, newest first — each
     /// job run or Claude Code run with its job, start and end, how it ended, its Claude Code runs, tokens, cost and model;
     /// `echoctl traces show <id>` gives one — its spans, the run's input and stream, Claude Code's model requests and tools
     #[command(args_conflicts_with_subcommands = true)]

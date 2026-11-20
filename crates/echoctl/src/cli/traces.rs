@@ -9,7 +9,7 @@ use crate::telemetry;
 /// `echoctl traces`: which traces to list.
 #[derive(Args)]
 pub struct ListArgs {
-    /// The last N days, today included (at most the 7 kept)
+    /// The last N days, today included: a run's detail is kept 7 days, its numbers 90
     #[arg(long, default_value_t = telemetry::KEEP_DAYS)]
     days: i64,
     /// Only this job's (`thread_sync`, `minutes`, a routine's `<plugin>.<routine>`, …)

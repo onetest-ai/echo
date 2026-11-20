@@ -19,7 +19,7 @@ in the same PR. The rules are in `.ai-run/guides/architecture/architecture.md`.
 | Recall (Intake and search) | `intake/` (feature `intake`; `brain` is its alias) |
 | Echo plugins | `plugins.rs`, `jshost.rs`, `web/` (a page read as Markdown, the public-address check, the render gate proxy, the render child `web/render/`), `netif/` (this computer's own addresses), `claudejob.rs`, `share.rs` (feature `js`) |
 | Claude Code plugin | `plugin/` |
-| Traces | `telemetry.rs`, `telemetry/receiver.rs`, `cli/traces.rs` |
+| Traces | `telemetry.rs`, `telemetry/receiver.rs`, `cli/traces.rs`; Settings → Activity: `window/activity.rs`, `ui/app/35-activity.js`, `ui/css/35-activity.css` |
 
 ## Feature gates
 
@@ -120,7 +120,7 @@ reads the data folder's files.
   never waited for) that a thread appends to `<config dir>/telemetry/<YYYY-MM-DD>/<trace>.jsonl` under the day's
   `.lock`, a batch of up to 1,000 lines at once; past 512 MB in a day only spans and the index are written (events
   dropped and counted); a trace's root span ending is also a line of that day's `index.jsonl` (`telemetry::list`); day folders 7
-  days old go (`telemetry::KEEP_DAYS`, swept by the writer once a day). A CLI command waits up to 500 ms for its
+  days old keep only their `index.jsonl` — a run's numbers — and go at 90 (`telemetry::KEEP_DAYS`, `NUMBERS_DAYS`; swept by the writer once a day); a listed run says whether its detail is kept (`detail`). A CLI command waits up to 500 ms for its
   records at its end (`telemetry::flush`). `echoctl traces [--job --kind --days --limit]` lists, `echoctl traces show
   <id>` gives one nested; each index line has a `kind` (`job`, `claude`, `request`, `model`, `transcription`,
   `command`, from its name).
@@ -136,6 +136,12 @@ reads the data folder's files.
   as before). A span's ended children wait on their thread until their trace's root ends (`HELD`): a discarded root
   drops them, a discarded step the ones under it. A CLI command that fails is a span `cli.<command>` with its command
   words (`command`, at most two, before any option) and `error`, never its arguments (`main`).
+- Settings → Activity (`35-activity.js`, its no-DOM block tested by `activity.test.mjs`) reads `/api/activity?days=1|7|30|90` (every 30 s while open; past a week, every 5 min)
+  (every index line of those days, `telemetry::list`) and `/api/activity/trace?id=` (`telemetry::show`) from
+  `window::activity`; it sums by day, job and kind in the page, reads again every 30 s while open, and shows the chosen
+  run or a timeline's step in the right panel (`PANEL_VIEWS` `activity`). A tool's row is named by what it ran from
+  Echo's own stream events (`tool_use` by its id, Claude Code's `gen_ai.tool.call.id`). The index line also carries
+  `cached` (cache-read tokens) and `requests` (its `http.request` spans).
 - The page polls a call's revision, `/api/call/<name>/rev` (`window::call::call_rev`), and fetches the call only when it
   changed.
 

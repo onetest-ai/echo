@@ -32,6 +32,8 @@ const DIR: &str = "telemetry";
 const INDEX: &str = "index.jsonl";
 /// Detail is kept this many days, today included.
 pub const KEEP_DAYS: i64 = 7;
+/// A run's numbers (its line of the day's index) are kept this many days.
+pub const NUMBERS_DAYS: i64 = 90;
 const QUEUE: usize = 20_000;
 
 // ── the queue and the store ──────────────────────────────────────────────────────────────────
@@ -155,13 +157,19 @@ fn append(day_dir: &Path, files: &BTreeMap<String, String>) {
     }
 }
 
-/// Remove the day folders `KEEP_DAYS` old or older.
+/// A day `KEEP_DAYS` old or older keeps only its numbers (its index); one `NUMBERS_DAYS` old or older goes.
 fn sweep(dir: &Path, today: NaiveDate) {
     for e in std::fs::read_dir(dir).into_iter().flatten().flatten() {
         let name = e.file_name().to_string_lossy().to_string();
-        if let Ok(d) = NaiveDate::parse_from_str(&name, "%Y-%m-%d") {
-            if (today - d).num_days() >= KEEP_DAYS {
-                let _ = std::fs::remove_dir_all(e.path());
+        let Ok(d) = NaiveDate::parse_from_str(&name, "%Y-%m-%d") else { continue };
+        let age = (today - d).num_days();
+        if age >= NUMBERS_DAYS {
+            let _ = std::fs::remove_dir_all(e.path());
+        } else if age >= KEEP_DAYS {
+            for f in std::fs::read_dir(e.path()).into_iter().flatten().flatten() {
+                if f.file_name() != INDEX && f.file_name() != ".lock" {
+                    let _ = std::fs::remove_file(f.path());
+                }
             }
         }
     }
@@ -210,6 +218,10 @@ thread_local! {
 struct Totals {
     runs: u64,
     tokens: u64,
+    /// Of `tokens`, read from the prompt cache.
+    cached: u64,
+    /// Requests to other services (`http.request` spans).
+    requests: u64,
     cost_usd: f64,
     models: Vec<String>,
 }
@@ -322,6 +334,9 @@ impl Span {
             end_run(&r, None);
         }
         let end = Utc::now();
+        if self.name == "http.request" {
+            TOTALS.lock().unwrap_or_else(|e| e.into_inner()).entry(self.trace.clone()).or_default().requests += 1;
+        }
         let line = json!({"t": "span", "source": "echo", "trace": self.trace, "span": self.id, "parent": self.parent, "name": self.name,
                           "start": ts(self.start), "end": ts(end), "attrs": self.attrs});
         if root_open {
@@ -372,6 +387,7 @@ pub fn count_usage(model: &str, v: &Value) {
     let mut totals = TOTALS.lock().unwrap_or_else(|e| e.into_inner());
     let t = totals.entry(trace).or_default();
     t.tokens += n("input_tokens") + n("output_tokens") + n("cache_read_input_tokens") + n("cache_creation_input_tokens");
+    t.cached += n("cache_read_input_tokens");
     t.cost_usd += v["total_cost_usd"].as_f64().unwrap_or(0.0);
     if !model.is_empty() && !t.models.iter().any(|x| x == model) {
         t.models.push(model.to_string());
@@ -397,7 +413,7 @@ fn index(trace: &str, name: &str, start: DateTime<Utc>, end: DateTime<Utc>, attr
     let job = attrs.get("echo.job").cloned().or_else(|| name.strip_prefix("job.").map(|j| json!(j)));
     let line = json!({"id": trace, "name": name, "kind": kind_of(name), "job": job, "start": ts(start), "end": ts(end), "duration_ms": (end - start).num_milliseconds().max(0),
         "ok": attrs.get("ok").cloned().unwrap_or(json!(true)), "summary": attrs.get("summary"), "error": attrs.get("error"),
-        "runs": t.runs, "tokens": t.tokens, "cost_usd": (t.cost_usd * 1e6).round() / 1e6, "model": t.models.join(", ")});
+        "runs": t.runs, "tokens": t.tokens, "cached": t.cached, "requests": t.requests, "cost_usd": (t.cost_usd * 1e6).round() / 1e6, "model": t.models.join(", ")});
     queue(INDEX.into(), line);
 }
 
@@ -633,13 +649,14 @@ fn end_run(run: &str, result: Option<&Value>) {
         }
     });
     let mut attrs = r.attrs;
-    let mut tokens = 0;
+    let (mut tokens, mut cached) = (0, 0);
     let mut cost = 0.0;
     match result {
         Some(v) => {
             let u = &v["usage"];
             let n = |k: &str| u[k].as_u64().unwrap_or(0);
             tokens = n("input_tokens") + n("output_tokens") + n("cache_read_input_tokens") + n("cache_creation_input_tokens");
+            cached = n("cache_read_input_tokens");
             cost = v["total_cost_usd"].as_f64().unwrap_or(0.0);
             attrs.insert("ok".into(), json!(v["is_error"] != true));
             for (k, val) in [("input", n("input_tokens")), ("output", n("output_tokens")), ("cache_read", n("cache_read_input_tokens")), ("cache_write", n("cache_creation_input_tokens"))] {
@@ -659,6 +676,7 @@ fn end_run(run: &str, result: Option<&Value>) {
         let t = totals.entry(r.trace.clone()).or_default();
         t.runs += 1;
         t.tokens += tokens;
+        t.cached += cached;
         t.cost_usd += cost;
         if let Some(m) = attrs.get("model").and_then(Value::as_str).filter(|m| !m.is_empty()) {
             if !t.models.iter().any(|x| x == m) {
@@ -693,18 +711,22 @@ fn lines(p: &Path) -> Vec<Value> {
     std::fs::read_to_string(p).unwrap_or_default().lines().filter_map(|l| serde_json::from_str(l).ok()).collect()
 }
 
-/// `echoctl traces`: the traces of the last `days` days (today included), newest first, at most `limit`; of one job.
+/// `echoctl traces`: the traces of the last `days` days (today included, at most `NUMBERS_DAYS`), newest first, at most
+/// `limit`; of one job, of one kind. Each says whether its detail is still kept (`detail`: younger than `KEEP_DAYS`).
 pub fn list(days: i64, job: Option<&str>, kind: Option<&str>, limit: usize) -> Value {
-    let oldest = Local::now().date_naive() - chrono::Duration::days(days.max(1) - 1);
+    let today = Local::now().date_naive();
+    let oldest = today - chrono::Duration::days(days.clamp(1, NUMBERS_DAYS) - 1);
     let mut out: Vec<Value> = Vec::new();
     for d in day_dirs() {
         let day = d.file_name().and_then(|n| n.to_str()).and_then(|n| NaiveDate::parse_from_str(n, "%Y-%m-%d").ok());
         if day.is_none_or(|x| x < oldest) {
             continue;
         }
+        let detail = day.is_some_and(|x| (today - x).num_days() < KEEP_DAYS);
         let mut of_day: Vec<Value> = lines(&d.join(INDEX))
             .into_iter()
             .map(|mut v| {
+                v["detail"] = json!(detail);
                 // A line written before kinds: its kind from its name.
                 if v["kind"].is_null() {
                     v["kind"] = json!(kind_of(v["name"].as_str().unwrap_or("")));
@@ -718,7 +740,7 @@ pub fn list(days: i64, job: Option<&str>, kind: Option<&str>, limit: usize) -> V
     }
     out.sort_by(|a, b| b["end"].as_str().cmp(&a["end"].as_str()));
     out.truncate(limit);
-    json!({"traces": out, "kept_days": KEEP_DAYS, "dropped": dropped()})
+    json!({"traces": out, "kept_days": KEEP_DAYS, "numbers_days": NUMBERS_DAYS, "dropped": dropped()})
 }
 
 /// `echoctl traces show <id>`: one trace's spans, nested, each with its events in order; events of no span it has last.
@@ -729,7 +751,7 @@ pub fn show(id: &str) -> anyhow::Result<Value> {
     }
     let mut recs: Vec<Value> = day_dirs().into_iter().rev().flat_map(|d| lines(&d.join(format!("{id}.jsonl")))).collect();
     if recs.is_empty() {
-        anyhow::bail!("no trace “{id}” (traces are kept {KEEP_DAYS} days)");
+        anyhow::bail!("no trace “{id}” (a trace's detail is kept {KEEP_DAYS} days, its numbers {NUMBERS_DAYS})");
     }
     let at = |v: &Value| v["start"].as_str().or(v["at"].as_str()).unwrap_or("").to_string();
     recs.sort_by_key(at);
@@ -1048,17 +1070,42 @@ mod tests {
     }
 
     #[test]
-    fn day_folders_seven_days_old_go_and_newer_stay() {
+    fn a_days_detail_goes_after_seven_days_its_numbers_after_ninety() {
         let (_env, root) = testenv::folders("telemetry-sweep");
         let dir = root.join("t");
         let today = NaiveDate::from_ymd_opt(2026, 11, 20).unwrap();
-        for d in ["2026-11-14", "2026-11-13", "2026-10-01", "notes"] {
+        for d in ["2026-11-14", "2026-11-13", "2026-08-23", "2026-08-22", "notes"] {
             std::fs::create_dir_all(dir.join(d)).unwrap();
+            std::fs::write(dir.join(d).join(INDEX), "{}\n").unwrap();
+            std::fs::write(dir.join(d).join("0123456789abcdef0123456789abcdef.jsonl"), "{}\n").unwrap();
         }
         sweep(&dir, today);
-        let mut left: Vec<String> = std::fs::read_dir(&dir).unwrap().flatten().map(|e| e.file_name().to_string_lossy().to_string()).collect();
-        left.sort();
-        assert_eq!(left, ["2026-11-14", "notes"]);
+        let files = |d: &str| {
+            let mut v: Vec<String> = std::fs::read_dir(dir.join(d)).map(|r| r.flatten().map(|e| e.file_name().to_string_lossy().to_string()).collect()).unwrap_or_default();
+            v.sort();
+            v
+        };
+        assert_eq!(files("2026-11-14").len(), 2, "6 days old: all of it");
+        assert_eq!(files("2026-11-13"), [INDEX], "7 days old: its numbers only");
+        assert_eq!(files("2026-08-23"), [INDEX], "89 days old: its numbers only");
+        assert!(!dir.join("2026-08-22").exists(), "90 days old: gone");
+        assert_eq!(files("notes").len(), 2, "not a day's: left alone");
+    }
+
+    #[test]
+    fn a_run_past_seven_days_is_listed_by_its_numbers_without_its_detail() {
+        let (_env, root) = testenv::folders("telemetry-numbers");
+        let base = root.join("config/telemetry");
+        let day = |n: i64| (Local::now().date_naive() - chrono::Duration::days(n)).format("%Y-%m-%d").to_string();
+        for (n, id) in [(0, "a"), (10, "b"), (95, "c")] {
+            std::fs::create_dir_all(base.join(day(n))).unwrap();
+            std::fs::write(base.join(day(n)).join(INDEX), format!("{}\n", json!({"id": id, "name": "job.minutes", "job": "minutes", "tokens": 10, "end": format!("{}T12:00:00.000Z", day(n))}))).unwrap();
+        }
+        let l = list(NUMBERS_DAYS, None, None, 10);
+        let got: Vec<(Value, Value)> = l["traces"].as_array().unwrap().iter().map(|t| (t["id"].clone(), t["detail"].clone())).collect();
+        assert_eq!(got, [(json!("a"), json!(true)), (json!("b"), json!(false))], "95 days old: past the numbers too");
+        assert_eq!((l["kept_days"].clone(), l["numbers_days"].clone()), (json!(7), json!(90)));
+        assert_eq!(list(500, None, None, 10)["traces"].as_array().unwrap().len(), 2, "at most 90 days");
     }
 
     #[test]
