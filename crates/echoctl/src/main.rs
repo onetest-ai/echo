@@ -377,6 +377,14 @@ enum Cmd {
         #[arg(long)]
         who: Option<String>,
     },
+    /// Echo's MCP server of what plugins offer (`ctx.expose`), for Claude sessions in Echo (stdio)
+    #[cfg(feature = "js")]
+    #[command(hide = true)]
+    PluginsMcp {
+        /// A run that only reads: only commands marked reads run
+        #[arg(long)]
+        read: bool,
+    },
     /// What Echo holds behind an echo:// link, as text (for Claude): a call's minutes and the turns around its moment,
     /// a thread, a client, a person, a mail's facts. Read-only
     Read { link: String },
@@ -828,6 +836,8 @@ fn main() -> Result<()> {
         Cmd::M365 { cmd } => cli::m365::run(cmd),
         #[cfg(feature = "intake")]
         Cmd::Mcp { profile, client, thread, call, who } => cli::intake::mcp(profile, client, thread, call, who),
+        #[cfg(feature = "js")]
+        Cmd::PluginsMcp { read } => jshost::mcp::serve(read),
         Cmd::Read { link } => {
             print!("{}", links::read(&link)?);
             Ok(())

@@ -859,6 +859,15 @@ mod tests {
         assert!(!exp.none());
         assert!(exp.check(&init("2.1.400", "default", &["mcp__echo_live__wait_for_new_lines"], &["echo_live"])).is_ok());
         assert!(exp.check(&init("2.1.400", "default", &["mcp__echo_livex__w"], &["echo_live"])).is_err(), "only its own server's tools");
+        // Echo's and the plugins' servers, each from its own file: both expected, neither taken for the other.
+        let (a, b) = (root.join("echo.json"), root.join("plugins.json"));
+        fs::write(&a, r#"{"mcpServers": {"echo": {"command": "x"}}}"#).unwrap();
+        fs::write(&b, r#"{"mcpServers": {"echo_plugins": {"command": "x"}}}"#).unwrap();
+        let both = Expected::of(&args(&["-p", "--mcp-config", a.to_str().unwrap(), "--mcp-config", b.to_str().unwrap(), "--strict-mcp-config"]));
+        assert_eq!(both.mcp, Some(args(&["echo", "echo_plugins"])));
+        assert!(both.check(&init("2.1.400", "default", &["mcp__echo__search_sources", "mcp__echo_plugins__call"], &["echo", "echo_plugins"])).is_ok());
+        let one = Expected::of(&args(&["-p", "--mcp-config", a.to_str().unwrap(), "--strict-mcp-config"]));
+        assert!(one.check(&init("2.1.400", "default", &["mcp__echo_plugins__call"], &["echo", "echo_plugins"])).is_err(), "not set by Echo: refused");
     }
 
     #[test]

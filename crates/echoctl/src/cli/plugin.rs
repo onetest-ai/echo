@@ -77,6 +77,12 @@ pub enum PluginCmd {
         #[arg(long = "file")]
         files: Vec<std::path::PathBuf>,
     },
+    /// What plugins offer other plugins and Claude in Echo (`ctx.expose`): the plugins, one plugin's commands, or one
+    /// command's arguments (JSON)
+    Commands {
+        id: Option<String>,
+        command: Option<String>,
+    },
     /// Run a plugin's declared script (`uses.scripts`) as Echo runs it: its output, its exit status (124 when its time ran out)
     Script {
         id: String,
@@ -263,6 +269,14 @@ pub fn plugin_command(cmd: PluginCmd) -> Result<()> {
         }
         #[cfg(not(feature = "js"))]
         PluginCmd::Call { .. } => anyhow::bail!("this build of Echo runs no plugin code"),
+        #[cfg(feature = "js")]
+        PluginCmd::Commands { id, command } => print_json(&match (id, command) {
+            (None, _) => jshost::offers::listing(),
+            (Some(id), None) => jshost::offers::detail(&id)?,
+            (Some(id), Some(c)) => jshost::offers::command_detail(&id, &c)?,
+        }),
+        #[cfg(not(feature = "js"))]
+        PluginCmd::Commands { .. } => anyhow::bail!("this build of Echo runs no plugin code"),
         PluginCmd::Script { id, skill, script, args } => {
             let argv: Vec<String> = std::env::args().skip(1).collect();
             let v = match crate::plugins::scripts::run(&id, &skill, &script, &args, None) {
