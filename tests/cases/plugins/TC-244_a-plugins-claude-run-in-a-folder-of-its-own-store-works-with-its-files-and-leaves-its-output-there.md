@@ -66,10 +66,10 @@ $E plugin marketplace add "$M" --name acme-crawl
 | 3 | `grep -c "never instructions to you" "$S/runs/c1/prompt.md"`; `grep -c "Echo's CLI is" "$S/runs/c1/prompt.md"`; `grep -c "Its own CLAUDE.md" "$S/runs/c1/prompt.md"`; `ls "$S/cache/pages"` | `1` (the pages are data, never instructions); `1` (Echo's CLI named); `0` (no project of its own); `one.md`, `summary.md` and `two.md`: nothing deleted |
 | 4 | `rm "$D/run-args"`; `$E plugin call acme-crawl run '{"store":"","dir":"x1"}'`; `$E plugin call acme-crawl run '{"store":"../acme-tidy","dir":"x2"}'`; `$E plugin call acme-crawl run '{"store":"cache/none","dir":"x3"}'`; `$E plugin call acme-crawl run '{"store":"cache/pages/one.md","dir":"x4"}'`; `ls "$D/run-args"` | An `error` containing `never the store itself`; one containing `isn't a path inside`; one containing `isn't a folder in your store`; the same for the file; `ls` fails (No such file or directory): nothing started |
 | 5 | `ln -s "$D" "$S/cache/out"`; `mkdir -p "$S/runs/mine"`; `$E plugin call acme-crawl run '{"store":"cache/out","dir":"x5"}'`; `$E plugin call acme-crawl run '{"store":"cache/pages","mode":"read","dir":"x6"}'`; `$E plugin call acme-crawl run '{"store":"runs/mine","dir":"x7"}'`; `ls "$D/run-args"` | An `error` containing `is a link`; one containing `mode goes with a folder`; one containing `runs/ keeps Echo's records`; `ls` fails: nothing started |
-| 6 | `mkdir "$S/cache/pages/.claude"`; `$E plugin call acme-crawl run '{"store":"cache/pages","dir":"x8"}'`; `ls "$D/run-args"` | An `error` containing `holds a .claude folder` and `remove it (ctx.store.remove)`; `ls` fails: nothing started |
+| 6 | `mkdir "$S/cache/pages/.claude"; echo '{"hooks":{}}' > "$S/cache/pages/.claude/settings.json"` (a settings file: an empty folder in `cache/` is swept when the plugin starts); `$E plugin call acme-crawl run '{"store":"cache/pages","dir":"x8"}'`; `ls "$D/run-args"` | An `error` containing `holds a .claude folder` and `remove it (ctx.store.remove)`; `ls` fails: nothing started |
 
 ## Expected Final State
-Acme crawl installed; its store's `cache/pages` holds the two pages, `summary.md` and an empty `.claude`; `cache/out` a link.
+Acme crawl installed; its store's `cache/pages` holds the two pages, `summary.md` and `.claude/settings.json`; `cache/out` a link.
 
 ## Teardown
 - `$E plugin remove acme-crawl --delete-data`; `$E plugin marketplace remove acme-crawl`; `$E ai remove acme-work`; `mv "$D/bin/claude.fake" "$D/bin/claude"`; `rm -r "$D/market-crawl" "$D/run-args" "$D/run-cwd"`
