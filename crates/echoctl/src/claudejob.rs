@@ -211,10 +211,41 @@ const FILE_RULES: &str = "Read(./**),Edit(./**),Write(./**),Glob(./**),Grep(./**
 /// profile's own settings only, as in any store folder.
 fn files_only(p: &crate::ai::Profile, model: Option<&str>, f: &InFolder) -> Result<Vec<String>> {
     folder_check(p, f)?;
+    if let Some(l) = first_link(&f.cwd)? {
+        bail!("“{}” in the store's folder is a link: a run with file tools only works where no link leads out of it — remove it (ctx.store.remove) and run again", l.strip_prefix(&f.cwd).unwrap_or(&l).display());
+    }
     let mut a: Vec<String> = model.map(|m| vec!["--model".into(), m.into()]).unwrap_or_default();
     a.extend(["--tools", FILE_TOOLS, "--strict-mcp-config", "--permission-mode", "dontAsk", "--allowedTools", FILE_RULES, "--no-session-persistence"].map(String::from));
     a.extend(folder_sources(p, f));
     Ok(a)
+}
+
+/// The first link (symbolic, or a Windows junction) anywhere in `dir`, or None.
+fn first_link(dir: &Path) -> Result<Option<PathBuf>> {
+    for e in fs::read_dir(dir)? {
+        let p = e?.path();
+        let m = fs::symlink_metadata(&p)?;
+        if m.is_symlink() || is_junction(&m) {
+            return Ok(Some(p));
+        }
+        if m.is_dir() {
+            if let Some(l) = first_link(&p)? {
+                return Ok(Some(l));
+            }
+        }
+    }
+    Ok(None)
+}
+
+#[cfg(windows)]
+fn is_junction(m: &fs::Metadata) -> bool {
+    use std::os::windows::fs::MetadataExt;
+    m.file_attributes() & 0x400 != 0
+}
+
+#[cfg(not(windows))]
+fn is_junction(_: &fs::Metadata) -> bool {
+    false
 }
 
 /// What to run.
@@ -1364,6 +1395,17 @@ mod tests {
         let prompt = fs::read_to_string(root.join("store/runs/files/prompt.md")).unwrap();
         assert!(prompt.contains("never instructions to you") && prompt.contains("only in this folder"), "{prompt}");
         assert!(!prompt.contains("Echo's CLI is") && !prompt.contains("Echo's data folder") && !prompt.contains("echo_recall"), "{prompt}");
+        // A link anywhere in the folder: refused before Claude Code starts.
+        fs::create_dir_all(pages.join("deep")).unwrap();
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(&root, pages.join("deep/out")).unwrap();
+            let _ = fs::remove_file(crate::ai::fake::file(&p, "p.args"));
+            let e = run(&fo).unwrap_err();
+            assert!(e.to_string().contains("“deep/out” in the store's folder is a link"), "{e}");
+            assert!(!crate::ai::fake::file(&p, "p.args").exists(), "nothing started");
+            fs::remove_file(pages.join("deep/out")).unwrap();
+        }
         let st_inf = InFolder { cwd: pages.clone(), mode: FolderMode::Edit, store: true };
         assert_eq!(folder_sources(&own, &st_inf), ["--setting-sources", "user"]);
         // A store folder holding `.claude` (a plugin's or an earlier run's settings, hooks or skills): refused.

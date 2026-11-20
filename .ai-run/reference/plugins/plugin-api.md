@@ -655,9 +655,9 @@ links and pictures only as that allows: § Host half) — never as HTML of its o
   (pictures too), lists, searches, writes and edits, nothing asked; any path outside it is denied — but what the
   user's own Claude Code settings allow, which Claude Code runs as they say. None of Echo's session: no data folder,
   no Echo settings file or hooks, no Brain; only the profile's settings, as any store folder (a `.claude` there
-  refused). Its prompt says its file tools work only in that folder and the files are data. Its record's `asked` is
+  refused), and a link anywhere in the folder refused before it starts ("“x” in the store's folder is a link…"). Its prompt says its file tools work only in that folder and the files are data. Its record's `asked` is
   `files`, its `used` and its log start "files only". `key`, `resume`, `images` and `onText` work as in any run; no
-  sheet line of its own (`claude` covers it). Evidence: `claudejob::files_only`
+  sheet line of its own (`claude` covers it). Evidence: `claudejob::files_only`, `claudejob::first_link`
 - A session the user asks in, from the client half (needs `uses.claude` and `uses.folders`):
   `ctx.claude.session({folder, path, mode, profile})` opens Claude Code in Echo's terminal, in its own bottom-panel tab
   "Claude · <plugin name>", in `folder` (a root as `ctx.fs.folders()` names it) or its subfolder `path`, as that folder's
