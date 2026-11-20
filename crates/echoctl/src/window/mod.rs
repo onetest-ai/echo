@@ -25,6 +25,7 @@ use wry::{WebView, WebViewBuilder};
 
 use crate::{calls, paths, watch};
 
+mod activity;
 mod assets;
 mod call;
 mod calendar;
@@ -488,6 +489,9 @@ fn respond(req: &Request<Vec<u8>>) -> Response<Cow<'static, [u8]>> {
         return r;
     }
     if let Some(r) = settings::route(&path, req) {
+        return r;
+    }
+    if let Some(r) = activity::route(&path, req) {
         return r;
     }
     if let Some(r) = threads::route(&path, req) {

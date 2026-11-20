@@ -121,6 +121,7 @@ node crates/echoctl/ui/sent-mail.test.mjs
 node crates/echoctl/ui/drafts.test.mjs
 # Yolo runs: which runs the filters let through, their choices, and the list's words (the yolo runs block).
 node crates/echoctl/ui/yolo-runs.test.mjs
+node crates/echoctl/ui/activity.test.mjs
 node crates/echoctl/ui/layout-save.test.mjs
 # Today's widgets in rows, in its layout's order (todayRows, #323).
 node crates/echoctl/ui/today-rows.test.mjs

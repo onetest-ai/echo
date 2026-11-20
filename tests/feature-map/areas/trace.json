@@ -3,11 +3,11 @@
  "name": "Traces",
  "order": 310,
  "status": "new",
- "notes": "What Echo ran, step by step, kept 7 days on this computer: `echoctl traces` (#859)",
+ "notes": "What Echo ran, step by step, kept 7 days on this computer: `echoctl traces`, Settings → Activity (#859)",
  "features": [
   {
    "id": "F-TRACE-01",
-   "feature": "Each background job's run that did something (the thread sync, minutes, Needs you now, prep, Recall, live notes, a plugin's routine), each Yolo run and each plugin's Claude run leaves a trace on this computer: its job's span and under it each Claude Code run with its arguments, the instruction files it named, what went in and every stream event in full, how it ended, its tokens, cost and model; a pass that did nothing leaves none; `echoctl traces` lists the last 7 days' newest first (job, start, end, ok, runs, tokens, cost, model; `--job`, `--days`, `--limit`), `echoctl traces show <id>` gives one, nested; a trace's detail goes after 7 days",
+   "feature": "Each background job's run that did something (the thread sync, minutes, Needs you now, prep, Recall, live notes, a plugin's routine), each Yolo run and each plugin's Claude run leaves a trace on this computer: its job's span and under it each Claude Code run with its arguments, the instruction files it named, what went in and every stream event in full, how it ended, its tokens, cost and model; a pass that did nothing leaves none; `echoctl traces` lists the last 7 days' newest first (job, start, end, ok, runs, tokens, cost, model; `--job`, `--days`, `--limit`), `echoctl traces show <id>` gives one, nested; a trace's detail goes after 7 days, its numbers (its line in the list) after 90",
    "priority": "high",
    "check": "agent",
    "axes": []
@@ -44,6 +44,20 @@
    "id": "F-TRACE-06",
    "feature": "A CLI command that fails leaves a trace of its own: its command words (`server use`) and its error, never its arguments (a `--key`, a `--token`, a setting's value) (`echoctl traces --kind command`)",
    "priority": "medium",
+   "check": "agent",
+   "axes": []
+  },
+  {
+   "id": "F-TRACE-07",
+   "feature": "Settings → Activity shows today, the last 7, 30 or 90 days: runs and how many failed, tokens and the share from cache, cost as Claude Code estimates it, requests to other services; tokens a day by job (thread sync, minutes, live notes, other; past a week Mondays dated); a table by job (runs, a failed mark, tokens, cost, models); the runs newest first, filtered All / Failed / Jobs / Requests / Commands; a run chosen opens in the right panel — one past 7 days says its steps are gone, its numbers kept 90 days — (when, how long, its Claude Code runs, model, tokens, cost, its steps; Open timeline, Copy id); read again every 30 s while open; with the panel open the table and the runs stack",
+   "priority": "high",
+   "check": "agent",
+   "axes": []
+  },
+  {
+   "id": "F-TRACE-08",
+   "feature": "A run's timeline in Settings → Activity: its steps nested on one time axis — Echo's, each Claude Code run (named by its instructions), each model request with its tokens, each tool named by what it ran (refused ones red), requests to other services; a step chosen opens in the right panel with how long it took, its tokens, cost, model, and what went in and came out (instructions, input, Claude's text, tool calls and results, refusals, the answer); Activity › goes back",
+   "priority": "high",
    "check": "agent",
    "axes": []
   }

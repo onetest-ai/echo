@@ -791,7 +791,7 @@ mod tests {
         let held = crate::app::FileLock::try_take(&lock_path(id)).unwrap().unwrap();
         assert!(running(id) && due(now).is_empty());
         drop(held);
-        assert!(!running(id));
+        crate::paths::testenv::eventually("its lock released", || !running(id));
         // Its plugin off: not run, its settings kept.
         set_enabled("acme-routine", false).unwrap();
         assert!(due(now).is_empty());
