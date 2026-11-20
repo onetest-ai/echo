@@ -142,6 +142,22 @@ reads the data folder's files.
   run or a timeline's step in the right panel (`PANEL_VIEWS` `activity`). A tool's row is named by what it ran from
   Echo's own stream events (`tool_use` by its id, Claude Code's `gen_ai.tool.call.id`). The index line also carries
   `cached` (cache-read tokens) and `requests` (its `http.request` spans).
+- Sending traces elsewhere (`telemetry::export`): `<config dir>/telemetry-export.json` (0600: `on`, `kind` `langfuse` /
+  `otlp`, `endpoint` — https://, or http:// on this computer —, `public_key`, `secret_key`, `headers`, `text`), changed by
+  `export::set` (the page's `activity_export`; an empty secret or headers keep the kept ones) and shown by
+  `export::status` (the secret as `secret_key_set`, headers by name). The app's exporter (`export::start`, from
+  `app::run`) makes a pass every 30 s (after a failure, 5 min): each trace whose index line ended after
+  `sent_until` (`telemetry/export-state.json`; set to now when first on — never the past) and a minute ago or more, at
+  most 50, oldest first, as `export::to_otlp` (Echo's and Claude Code's spans under `service.name` `echo` /
+  `claude-code`, their events; identity — `user.*`, `organization.*`, `anthropic.*`, `cwd`, `terminal.type` — never;
+  text — `args`, `files`, `system`, `input`, `output`, `query`, `prompt`, `response`, `used`, `title`, Echo's own events —
+  only with `text`; `langfuse.trace.name` on the root, `langfuse.observation.type` `generation`, `gen_ai.request.model`
+  and `gen_ai.usage.*` on Claude Code runs and model calls, their input and output with `text`), posted by `curl -K` with
+  the URL, headers and body in 0600 files removed after: Langfuse at `<host>/api/public/otel/v1/traces` with Basic
+  `public:secret` and `x-langfuse-ingestion-version: 4`, OTLP at its URL (`/v1/traces` added). A failure is kept
+  (`error`, `error_at`) and the trace tried again next pass. The page's "Send a test" (`activity_export_test`) sends the
+  newest trace now (`export::send_newest`); `/api/activity/export` gives the status and that test's outcome.
+  `echoctl traces export [--off]`.
 - The page polls a call's revision, `/api/call/<name>/rev` (`window::call::call_rev`), and fetches the call only when it
   changed.
 

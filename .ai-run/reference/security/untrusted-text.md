@@ -144,7 +144,7 @@ the answer, so the client gets the answer rather than a reset connection.
 
 ## Secrets
 
-`ai.json` and `plugins/secrets/<id>.json` are written 0600; a profile's values reach Claude Code as `ECHOCTL_P_<name>`
+`ai.json`, `plugins/secrets/<id>.json` and `telemetry-export.json` (with the files `telemetry::export` hands curl) are written 0600; a profile's values reach Claude Code as `ECHOCTL_P_<name>`
 variables (`ai::PASS`).
 
 ## Updates

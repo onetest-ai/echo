@@ -26,6 +26,7 @@ use std::sync::mpsc::{sync_channel, Receiver, SyncSender};
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
+pub mod export;
 mod receiver;
 
 const DIR: &str = "telemetry";

@@ -105,6 +105,8 @@ pub fn run(app: TargetApp, tray: bool, background: bool) -> Result<()> {
     crate::prep::start_scheduler();
     // Today → Needs you now: Teams and mail of the last day, every 5 minutes (`needs.rs`).
     crate::needs::start_scheduler();
+    // Traces sent where the user set them to go, if anywhere (`telemetry::export`).
+    crate::telemetry::export::start();
     // What plugins tell Claude, in the data folder (`.plugins/`): as installed and on now.
     crate::plugins::agent::sync_all();
     // No Claude terminal of an earlier run of Echo is alive: their wrapper marks go (`ai::wrapper`).
