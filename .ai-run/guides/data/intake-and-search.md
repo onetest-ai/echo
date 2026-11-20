@@ -20,6 +20,6 @@ changes with the code; these rules change only by a `Rules:` PR.
 - R6. The search index is built only from the call folders, Intake's facts, thread documents and the dictionary; a rebuild or a schema change loses nothing. Evidence: `intake::store::open`
 - R7. A record leaves the index when its source is gone (deleted or removed from its thread), when its thread is closed (its call card stays), or past its kind's horizon; leaving the index never deletes a source or an Intake fact. Evidence: `intake::store::remove` (ref: Retention)
 - R8. Serve indexed data and Intake's facts to a session, job or plugin only through an access scoped to its profile; sources of other profiles answer "not found". Evidence: `intake::access::Access` (ref: Access)
-- R9. The MCP server is read-only, and its tools are allowed only in a call session's ask mode, never in a minutes run. Evidence: `guard::BRAIN_TOOLS` (ref: Access)
+- R9. The MCP server is read-only and answers only within the access of the session or run it serves (R8); a minutes run never gets it. Evidence: `guard::BRAIN_TOOLS` (ref: Access)
 - R10. Record ids stay the same across rebuilds. Evidence: `intake::chunk::chunk_id`
 - R11. A change to how search ranks or what it returns keeps the made-up regression set passing, and its PR reports a blind evaluation at depth 5 against the current search on the held-out real queries kept on the developer's machine (never in the repo, testing R8). Evidence: `intake::store::search_in` tests (ref: Evaluation)
