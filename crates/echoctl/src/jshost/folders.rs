@@ -603,7 +603,17 @@ pub(super) fn claude_folder(id: &str, arg: &Value, spec: &mut crate::claudejob::
         if !arg["mode"].is_null() {
             bail!("a run in your store works with its files as it needs: mode goes with a folder you were given");
         }
-        spec.folder = Some(InFolder { cwd: store_folder(id, arg["store"].as_str().unwrap_or(""))?, mode: FolderMode::Edit, store: true });
+        let cwd = store_folder(id, arg["store"].as_str().unwrap_or(""))?;
+        // Not where the run keeps its own records (`dir`), nor inside them.
+        let base = plugins::data_dir(id);
+        let records = match spec.run_dir.strip_prefix(&base) {
+            Ok(rel) => dunce::canonicalize(&base)?.join(rel),
+            Err(_) => spec.run_dir.clone(),
+        };
+        if records.starts_with(&cwd) || cwd.starts_with(&records) {
+            bail!("the run keeps its records (dir) in that folder: give it a dir outside it");
+        }
+        spec.folder = Some(InFolder { cwd, mode: FolderMode::Edit, store: true });
         spec.session = false;
         return Ok(None);
     }
@@ -648,7 +658,12 @@ fn store_folder(id: &str, rel: &str) -> Result<std::path::PathBuf> {
     }
     let at = store_path(id, rel)?;
     let rel = rel.trim_start_matches("./");
-    if Path::new(rel).components().next().is_some_and(|c| c.as_os_str().eq_ignore_ascii_case("runs")) {
+    // Its first name as `not_echos` reads one (a file system may fold a name onto another): plain ASCII, never `runs`.
+    let first = Path::new(rel).components().next().map(|c| c.as_os_str().to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
+    if !first.is_ascii() {
+        bail!("“{first}”: a name at the top of your store is plain ASCII (letters, digits, - _ .)");
+    }
+    if first.trim_end_matches(['.', ' ']) == "runs" {
         bail!("“{rel}”: runs/ keeps Echo's records of your runs — a run in your store goes in a folder of your own");
     }
     let base = plugins::data_dir(id);
@@ -1209,11 +1224,14 @@ mod tests {
             claude("asker", json!({"store": "cache/pages", "mode": "read"})),
             claude("reader", json!({"store": "cache", "folder": v})),
             claude("asker", json!({"store": "runs/x"})),
+            claude("asker", json!({"store": "Runs./x"})),
+            service_async("asker", "claude.run", &json!({"prompt": "x", "store": "cache/pages", "dir": "cache/pages/r1"})),
         ];
         let why: Vec<String> = refused.into_iter().map(|r| r.unwrap_err().to_string()).collect();
         assert!(why[0].contains("never the store itself") && why[1].contains("never the store itself") && why[2].contains("isn't a path inside"), "{why:?}");
         assert!(why[3].contains("isn't a folder in your store") && why[4].contains("isn't a folder in your store") && why[5].contains("is a link"), "{why:?}");
-        assert!(why[6].contains("mode goes with a folder") && why[7].contains("not both") && why[8].contains("runs/ keeps Echo's records"), "{why:?}");
+        assert!(why[6].contains("mode goes with a folder") && why[7].contains("not both") && why[8].contains("runs/ keeps Echo's records") && why[9].contains("runs/ keeps Echo's records"), "{why:?}");
+        assert!(why[10].contains("keeps its records (dir) in that folder"), "{why:?}");
         assert!(!started(), "nothing started");
         for id in ["reader", "writer", "asker"] {
             plugins::remove(id, true).unwrap();

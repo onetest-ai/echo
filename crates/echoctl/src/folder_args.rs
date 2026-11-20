@@ -54,9 +54,9 @@ pub enum Place {
     Read,
 }
 
-/// The reading commands of `FREE_COMMANDS`: what a run that changes nothing may run (`Place::Read`).
-const READ_COMMANDS: usize = 14;
-const _: () = assert!(FREE_COMMANDS.len() == READ_COMMANDS + 2, "the reading commands come first");
+/// What a run that changes nothing may run of Echo's CLI (`Place::Read`): `FREE_COMMANDS`' reading ones, but `prep`
+/// (`--write` writes one) and `project people` (`--refresh` asks Microsoft 365 and keeps what it says).
+const READ_COMMANDS: [&str; 12] = ["context", "attention", "previous", "status", "calendar events", "read", "project list", "project show", "project of", "project tasks", "client list", "org list"];
 
 /// The arguments, its settings file first (`--settings <settings>`, written here): `managed` — a profile of its own,
 /// given Echo's plugin (a profile on the user's own Claude Code has it installed already); `who` — a routine's or
@@ -93,7 +93,7 @@ pub fn build(managed: bool, exe: &Path, settings: &Path, who: Who, place: Place)
     }
     // Echo's reads and its own data's edits, by Echo's own CLI (its plugin's launcher, `echoctl` on PATH).
     for cli in crate::notes::plugin_dir().map(|d| crate::notes::run_clis(&d)).unwrap_or_else(|| vec!["echoctl".into()]) {
-        for c in &FREE_COMMANDS[..if place == Place::Read { READ_COMMANDS } else { FREE_COMMANDS.len() }] {
+        for c in if place == Place::Read { &READ_COMMANDS[..] } else { &FREE_COMMANDS[..] } {
             args.extend(["--allowedTools".into(), format!("Bash({cli} {c}:*)")]);
         }
     }
@@ -327,7 +327,8 @@ mod tests {
         // plugin's script; one that edits keeps them all.
         let read = build(false, exe, &root.join("s.json"), Who::Run(Permissions::Auto), Place::Read).unwrap();
         assert!(read.iter().any(|a| a.ends_with(" project show:*)")) && read.iter().any(|a| a.ends_with(" context:*)")), "{read:?}");
-        assert!(!read.iter().any(|a| a.ends_with(" project work:*)") || a.ends_with(" compose:*)") || a.contains("/scripts/read.sh") || a.contains("/scripts/write.sh")), "{read:?}");
+        assert!(READ_COMMANDS.iter().all(|c| FREE_COMMANDS.contains(c)));
+        assert!(!read.iter().any(|a| a.ends_with(" project work:*)") || a.ends_with(" compose:*)") || a.ends_with(" prep:*)") || a.ends_with(" project people:*)") || a.contains("/scripts/read.sh") || a.contains("/scripts/write.sh")), "{read:?}");
         assert!(has(Who::Run(Permissions::Auto), "write.sh"));
         let edit = build(false, exe, &root.join("s.json"), Who::Run(Permissions::Auto), Place::Edit).unwrap();
         assert!(edit.iter().any(|a| a.ends_with(" compose:*)")) && edit.iter().any(|a| a.contains("/scripts/write.sh:*)")), "{edit:?}");

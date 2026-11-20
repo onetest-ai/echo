@@ -580,8 +580,9 @@ links and pictures only as that allows: § Host half) — never as HTML of its o
   `.claude` (skills, settings, hooks), and the `CLAUDE.md` files of the subfolder and of the folders above it. `mode`:
   - `read` (the default): `--tools Bash,Read,Grep,Glob,Skill,WebFetch,WebSearch` and `--permission-mode dontAsk`
     whatever the setting (`folder_args::read_only_args`): only reading, Echo's reading commands (`echoctl context`,
-    `project show`… — never `project work`, `compose`, a plugin's command or script) and the web run, anything else
-    refused without asking;
+    `project show`… — never `project work`, `compose`, `prep`, `project people`, a plugin's command or script) and the
+    web run, with the CLI's limits for runs (no routine's marks), and anything else refused without asking — but what
+    the user's own Claude Code settings or the folder's `.claude` allow, which Claude Code runs as they say;
   - `edit` (needs `folders.write`): every tool of Claude Code's (no `--tools`), Bash and the web too;
   - `copy`: the `edit` run on a snapshot of the folder in its store (`ctx.fs.snapshot` with dot names, so `.claude`
     comes along; never `.git` or `.obsidian/plugins`, its caps and its 3-snapshot limit), the folder itself untouched;
@@ -602,8 +603,8 @@ links and pictures only as that allows: § Host half) — never as HTML of its o
   `claudejob::in_folder`, `jshost::folders::claude_folder`
 - In a folder of its own store (`claude` alone on its sheet): `await ctx.claude.run({store, prompt, title, profile,
   model, tools, dir, timeout, key, resume, images})` — `store` a folder of the store (`"cache/pages"`), never the store
-  itself (Echo's files lie at its top), `runs/` (Echo's records of its runs), one that isn't there, a file, or one
-  reached through a link; `folder`, `path`, `mode` and `exclude` with it are refused. It is no sandbox: like any run
+  itself (Echo's files lie at its top), `runs/` (Echo's records of its runs; its first name read as Echo's own files'
+  are), the run's own `dir` or one holding it, one that isn't there, a file, or one reached through a link; `folder`, `path`, `mode` and `exclude` with it are refused. It is no sandbox: like any run
   with tools it reaches the data folder, so the store's top and Echo's files there are the plugin's to keep out of its
   prompt. For files too large for a prompt (a crawl's pages): Claude Code starts
   there and works with them as it needs — as a folder run in `edit` (Echo's session, every tool, the plugin's
