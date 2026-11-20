@@ -1099,9 +1099,7 @@ fn run_in_place(dir: &Path, place: &mut Option<crate::app::FileLock>, mut r: Run
                             kill(pid);
                         }
                     }
-                    for l in crate::run_log::describe(&ev) {
-                        let _ = writeln!(log, "{}  {l}", stamp());
-                    }
+                    crate::run_log::write(&mut log, &ev);
                     answered |= model_answered(&ev);
                     if ev["type"] == "result" {
                         result = Some(ev);

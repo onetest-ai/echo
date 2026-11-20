@@ -507,15 +507,31 @@ pub fn routing_env(p: &Profile) -> Vec<(&'static str, String)> {
     v
 }
 
+/// Echo's telemetry values reach the shell under this prefix, exported under their real names only when the start-up
+/// files set no telemetry of their own (`telemetry::telemetry_var`).
+const TELEMETRY_PASS: &str = "ECHOCTL_T_";
+
 /// The `sh -c` script that starts Claude Code after the login shell's start-up files ran: the
 /// Echo CLI first on PATH, then (managed profiles) the routing variables removed and the profile's
-/// values (passed as `ECHOCTL_P_<name>`) exported.
-fn shell_script(names: Option<&[&'static str]>) -> String {
+/// values (passed as `ECHOCTL_P_<name>`) exported, then Echo's telemetry (`ECHOCTL_T_<name>`) unless the start-up
+/// files configured Claude Code's telemetry themselves.
+fn shell_script(names: Option<&[&'static str]>, telemetry: &[&'static str]) -> String {
     let mut s = String::from("export PATH=\"$ECHOCTL_BIN_DIR:$PATH\"; ");
     if let Some(names) = names {
         s.push_str(UNSET_ROUTING);
         for k in names {
             s.push_str(&format!("export {k}=\"${PASS}{k}\"; unset {PASS}{k}; "));
+        }
+    }
+    if !telemetry.is_empty() {
+        // No `grep` after the start-up files: can't tell, so none of Echo's.
+        s.push_str("if command -v grep >/dev/null 2>&1 && ! env | grep -q -e '^OTEL_' -e '^CLAUDE_CODE_ENABLE_TELEMETRY=' -e '^CLAUDE_CODE_ENHANCED_TELEMETRY_BETA='; then ");
+        for k in telemetry {
+            s.push_str(&format!("export {k}=\"${TELEMETRY_PASS}{k}\"; "));
+        }
+        s.push_str("fi; ");
+        for k in telemetry {
+            s.push_str(&format!("unset {TELEMETRY_PASS}{k}; "));
         }
     }
     s.push_str("exec \"$0\" \"$@\"");
@@ -564,8 +580,9 @@ const PARENT_SESSION: &[&str] = &[
     crate::notes::RUN_ACTIONS,
 ];
 
-/// The command for Claude Code with profile `p` (built, not started; tested).
-fn build_command(p: &Profile, claude: &Path, args: &[String], cwd: &Path, stdin: bool, use_shell: bool) -> Command {
+/// The command for Claude Code with profile `p` (built, not started; tested), with Echo's `telemetry` for it
+/// (`telemetry::claude_run`; through the login shell only when its start-up files set none).
+fn build_command(p: &Profile, claude: &Path, args: &[String], cwd: &Path, stdin: bool, use_shell: bool, telemetry: &[(&'static str, String)]) -> Command {
     let managed = p.kind.managed();
     let env = managed.then(|| routing_env(p));
     let mut args = args.to_vec();
@@ -579,11 +596,13 @@ fn build_command(p: &Profile, claude: &Path, args: &[String], cwd: &Path, stdin:
     let mut c = if use_shell {
         let shell = std::env::var("SHELL").ok().filter(|s| !s.is_empty()).unwrap_or_else(|| "/bin/zsh".into());
         let names: Option<Vec<&'static str>> = env.as_ref().map(|e| e.iter().map(|(k, _)| *k).collect());
+        let tel: Vec<&'static str> = telemetry.iter().map(|(k, _)| *k).collect();
         let mut c = Command::new(shell);
-        c.args(["-l", "-i", "-c", &shell_script(names.as_deref())]).arg(claude).args(&args);
+        c.args(["-l", "-i", "-c", &shell_script(names.as_deref(), &tel)]).arg(claude).args(&args);
         if let Some(env) = &env {
             c.envs(env.iter().map(|(k, v)| (format!("{PASS}{k}"), v)));
         }
+        c.envs(telemetry.iter().map(|(k, v)| (format!("{TELEMETRY_PASS}{k}"), v)));
         c
     } else {
         let mut c = Command::new(claude);
@@ -601,6 +620,7 @@ fn build_command(p: &Profile, claude: &Path, args: &[String], cwd: &Path, stdin:
             }
             c.envs(env.iter().map(|(k, v)| (*k, v)));
         }
+        c.envs(telemetry.iter().map(|(k, v)| (*k, v)));
         c
     };
     for k in PARENT_SESSION {
@@ -643,18 +663,21 @@ pub fn prepare_claude(p: &Profile, args: &[String], cwd: &Path, stdin: bool) -> 
         }
         fs::create_dir_all(p.config_folder())?;
     }
+    // A print run is a trace's Claude Code run (`telemetry`), its telemetry Echo's unless something else configures it.
+    let telemetry = if wrapper::is_print(args) { crate::telemetry::claude_run(p, cwd, args) } else { Vec::new() };
     // A print run through a wrapper goes through `echoctl wrapper-run`, its prompt never on a command line (R14).
     if p.kind == Kind::Wrapper && wrapper::is_print(args) {
         let (relayed, prompt) = wrapper::relay_args(&claude, args);
         let exe = std::env::current_exe().context("Echo's own program can't be found")?;
-        let mut c = build_command(p, &exe, &relayed, cwd, stdin, use_shell() && fake.is_none());
+        let mut c = build_command(p, &exe, &relayed, cwd, stdin, use_shell() && fake.is_none(), &telemetry);
         if let Some(t) = prompt {
+            crate::telemetry::claude_input(&t);
             c.env(wrapper::PROMPT_VAR, t);
         }
         detach(&mut c);
         return Ok(c);
     }
-    let mut c = build_command(p, &claude, args, cwd, stdin, use_shell() && fake.is_none());
+    let mut c = build_command(p, &claude, args, cwd, stdin, use_shell() && fake.is_none(), &telemetry);
     detach(&mut c);
     Ok(c)
 }
@@ -699,7 +722,7 @@ pub fn terminal_command(p: &Profile, args: &[String], cwd: &Path, env: &[(&str, 
         }
         fs::create_dir_all(p.config_folder())?;
     }
-    let c = build_command(p, &claude, args, cwd, false, use_shell() && fake.is_none());
+    let c = build_command(p, &claude, args, cwd, false, use_shell() && fake.is_none(), &[]);
     let mut b = portable_pty::CommandBuilder::new(c.get_program());
     b.args(c.get_args());
     for (k, v) in c.get_envs() {
@@ -1296,12 +1319,63 @@ mod tests {
     }
 
     #[test]
+    fn a_print_run_reports_its_telemetry_to_echo_and_nothing_else_echo_starts_does() {
+        let (_env, root) = crate::paths::testenv::folders("ai-telemetry");
+        let _fake = fake::install(&root);
+        struct Restore(Vec<(std::ffi::OsString, std::ffi::OsString)>);
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                for (k, v) in &self.0 {
+                    std::env::set_var(k, v);
+                }
+            }
+        }
+        let had = Restore(std::env::vars_os().filter(|(k, _)| k.to_str().is_some_and(crate::telemetry::telemetry_var)).collect());
+        for (k, _) in &had.0 {
+            std::env::remove_var(k);
+        }
+        let p = fake::profile("work", None, fake::SIGNED_OUT);
+        let envs = |c: &Command| c.get_envs().filter_map(|(k, v)| Some((k.to_str()?.to_string(), v?.to_str()?.to_string()))).collect::<std::collections::HashMap<_, _>>();
+        let run = envs(&prepare_claude(&p, &["-p".into(), "x".into()], &root, false).unwrap());
+        assert_eq!(run.get("CLAUDE_CODE_ENABLE_TELEMETRY").map(String::as_str), Some("1"));
+        assert!(run.get("TRACEPARENT").is_some_and(|t| t.starts_with("00-")) && run.contains_key("OTEL_EXPORTER_OTLP_ENDPOINT"), "{run:?}");
+        for other in [vec!["--version"], vec!["auth", "status"]] {
+            let a: Vec<String> = other.iter().map(|s| s.to_string()).collect();
+            let e = envs(&prepare_claude(&p, &a, &root, false).unwrap());
+            assert!(!e.keys().any(|k| crate::telemetry::telemetry_var(k) || k == "TRACEPARENT"), "{other:?}: {e:?}");
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn through_the_login_shell_echos_telemetry_goes_only_where_its_start_up_files_set_none() {
+        let script = shell_script(None, &["OTEL_EXPORTER_OTLP_ENDPOINT", "TRACEPARENT"]);
+        for sh in ["/bin/sh", "/bin/zsh", "/bin/bash"].into_iter().filter(|s| Path::new(s).exists()) {
+            let seen = |preset: Option<&str>| {
+                let mut c = Command::new(sh);
+                c.args(["-c", &format!("{}{script}", preset.unwrap_or(""))]).arg("/usr/bin/env");
+                c.env("ECHOCTL_BIN_DIR", "/nowhere").env("ECHOCTL_T_OTEL_EXPORTER_OTLP_ENDPOINT", "http://127.0.0.1:1").env("ECHOCTL_T_TRACEPARENT", "00-t-s-01");
+                for (k, _) in std::env::vars_os().filter(|(k, _)| k.to_str().is_some_and(crate::telemetry::telemetry_var)) {
+                    c.env_remove(k);
+                }
+                String::from_utf8(c.output().unwrap().stdout).unwrap()
+            };
+            let none = seen(None);
+            assert!(none.contains("OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:1\n") && none.contains("TRACEPARENT=00-t-s-01"), "{sh}: {none}");
+            assert!(!none.contains("ECHOCTL_T_"), "{sh}: the passing names are gone");
+            // A start-up file that sets the company's: Echo's stay out, the company's stays.
+            let company = seen(Some("export OTEL_EXPORTER_OTLP_ENDPOINT=https://collector.acme.example; "));
+            assert!(company.contains("OTEL_EXPORTER_OTLP_ENDPOINT=https://collector.acme.example") && !company.contains("TRACEPARENT=") && !company.contains("ECHOCTL_T_"), "{sh}: {company}");
+        }
+    }
+
+    #[test]
     fn the_script_removes_routing_and_passes_values_outside_its_text() {
         let env = [("CLAUDE_CONFIG_DIR", "/Users/me/Library/Application Support/echo/claude/a".to_string()), ("ANTHROPIC_AUTH_TOKEN", "it's \"secret\"".to_string())];
         // `system`: the user's environment as it is.
-        assert_eq!(shell_script(None), "export PATH=\"$ECHOCTL_BIN_DIR:$PATH\"; exec \"$0\" \"$@\"");
+        assert_eq!(shell_script(None, &[]), "export PATH=\"$ECHOCTL_BIN_DIR:$PATH\"; exec \"$0\" \"$@\"");
         let names: Vec<&'static str> = env.iter().map(|(k, _)| *k).collect();
-        let script = shell_script(Some(&names));
+        let script = shell_script(Some(&names), &[]);
         assert!(!script.contains("secret"), "values never in the script's text (or `ps`)");
         #[cfg(unix)]
         // Run it in each shell a user may have: what the started program sees.
@@ -1346,7 +1420,7 @@ mod tests {
         USERS.iter().for_each(|k| std::env::set_var(k, "the user's own"));
         std::env::set_var("ANTHROPIC_BASE_URL", "https://gateway.example");
         let local = Profile { id: "q".into(), name: "Q".into(), kind: Kind::Local, base_url: Some("http://localhost:11434".into()), token: None, live_model: Some("m".into()), notes_model: Some("m".into()), account: None, email: None, sso: false, models: Default::default(), wrapper: None };
-        let c = build_command(&local, Path::new("/bin/claude"), &["-p".into()], &root, false, false);
+        let c = build_command(&local, Path::new("/bin/claude"), &["-p".into()], &root, false, false, &[]);
         let envs: HashMap<String, Option<String>> = c.get_envs().map(|(k, v)| (k.to_string_lossy().into_owned(), v.map(|v| v.to_string_lossy().into_owned()))).collect();
         assert_eq!(envs.get("ANTHROPIC_BASE_URL"), Some(&Some("http://localhost:11434".into())), "the profile's, not the shell's");
         assert_eq!(envs.get("ANTHROPIC_DEFAULT_HAIKU_MODEL"), Some(&Some("m".into())));
@@ -1359,21 +1433,21 @@ mod tests {
         // A run naming its own sources last (a plugin's folder run) keeps them; the words elsewhere (a plugin's model or
         // prompt) are no sources: the profile's own only, still.
         let argv = |a: &[&str]| a.iter().map(|s| s.to_string()).collect::<Vec<String>>();
-        let built = |a: &[&str]| build_command(&local, Path::new("/bin/claude"), &argv(a), &root, false, false).get_args().map(|a| a.to_string_lossy().into_owned()).collect::<Vec<String>>();
+        let built = |a: &[&str]| build_command(&local, Path::new("/bin/claude"), &argv(a), &root, false, false, &[]).get_args().map(|a| a.to_string_lossy().into_owned()).collect::<Vec<String>>();
         assert_eq!(built(&["-p", "x", "--setting-sources", "user,project"]), argv(&["-p", "x", "--setting-sources", "user,project"]));
         for a in [&["-p", "x", "--model", "--setting-sources", "--tools", ""][..], &["-p", "--setting-sources", "--model", "user,project", "--verbose"], &["-p", "x", "--model", "--setting-sources", "user,project", "--verbose"]] {
             assert!(built(a).ends_with(&argv(&["--setting-sources", "user"])), "{a:?}");
         }
         let claude = Profile { id: "c".into(), name: "C".into(), kind: Kind::Claude, base_url: None, token: None, live_model: None, notes_model: None, account: None, email: None, sso: false, models: Default::default(), wrapper: None };
-        let c = build_command(&claude, Path::new("/bin/claude"), &["-p".into()], &root, false, false);
+        let c = build_command(&claude, Path::new("/bin/claude"), &["-p".into()], &root, false, false, &[]);
         let envs: HashMap<String, Option<String>> = c.get_envs().map(|(k, v)| (k.to_string_lossy().into_owned(), v.map(|v| v.to_string_lossy().into_owned()))).collect();
         for k in USERS {
             assert_eq!(envs.get(k), Some(&None), "{k}: removed for a Claude account");
         }
         assert_eq!(envs.get("CLAUDE_CONFIG_DIR"), Some(&Some(claude.config_folder().display().to_string())));
-        let auth = build_command(&local, Path::new("/bin/claude"), &["auth".into(), "status".into()], &root, false, false);
+        let auth = build_command(&local, Path::new("/bin/claude"), &["auth".into(), "status".into()], &root, false, false, &[]);
         assert_eq!(auth.get_args().count(), 2, "`claude auth` takes no --setting-sources");
-        let system = build_command(&system_profile(), Path::new("/bin/claude"), &["-p".into()], &root, false, false);
+        let system = build_command(&system_profile(), Path::new("/bin/claude"), &["-p".into()], &root, false, false, &[]);
         assert!(!system.get_envs().any(|(k, _)| k == "ANTHROPIC_BASE_URL"), "system: the user's own setup");
         // Started from inside a Claude Code session, Echo's are still sessions of their own (transcripts saved).
         assert!(system.get_envs().any(|(k, v)| k == "CLAUDE_CODE_CHILD_SESSION" && v.is_none()), "not a child of the session Echo came from");
@@ -1390,7 +1464,7 @@ mod tests {
         std::env::set_var(crate::notes::RUN_SESSION, "acts");
         std::env::set_var(crate::notes::RUN_ACTIONS, root.join("actions.jsonl"));
         let p = Profile { id: "c".into(), name: "C".into(), kind: Kind::Claude, base_url: None, token: None, live_model: None, notes_model: None, account: None, email: None, sso: false, models: Default::default(), wrapper: None };
-        let c = build_command(&p, Path::new("/bin/echo"), &["-p".into()], &root, false, false);
+        let c = build_command(&p, Path::new("/bin/echo"), &["-p".into()], &root, false, false, &[]);
         std::env::remove_var(crate::notes::RUN_SESSION);
         std::env::remove_var(crate::notes::RUN_ACTIONS);
         let removed: Vec<String> = c.get_envs().filter(|(_, v)| v.is_none()).map(|(k, _)| k.to_string_lossy().to_string()).collect();
@@ -1411,7 +1485,7 @@ mod tests {
             fs::set_permissions(&stand_in, fs::Permissions::from_mode(0o755)).unwrap();
         }
         let p = Profile { id: "c".into(), name: "C".into(), kind: Kind::Claude, base_url: None, token: None, live_model: None, notes_model: None, account: None, email: None, sso: false, models: Default::default(), wrapper: None };
-        let mut c = build_command(&p, &stand_in, &["-p".into()], &root, false, true);
+        let mut c = build_command(&p, &stand_in, &["-p".into()], &root, false, true, &[]);
         // The user's login shell (no start-up files of theirs here) and their own routing.
         c.env("HOME", &root).env_remove("ZDOTDIR").env("ANTHROPIC_API_KEY", "the user's own").env("CLAUDE_CODE_USE_BEDROCK", "1");
         detach(&mut c);

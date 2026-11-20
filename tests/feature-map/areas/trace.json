@@ -1,0 +1,37 @@
+{
+ "prefix": "TRACE",
+ "name": "Traces",
+ "order": 310,
+ "status": "new",
+ "notes": "What Echo ran, step by step, kept 7 days on this computer: `echoctl traces` (#859)",
+ "features": [
+  {
+   "id": "F-TRACE-01",
+   "feature": "Each background job's run that did something (the thread sync, minutes, Needs you now, prep, Recall, live notes, a plugin's routine), each Yolo run and each plugin's Claude run leaves a trace on this computer: its job's span and under it each Claude Code run with its arguments, the instruction files it named, what went in and every stream event in full, how it ended, its tokens, cost and model; a pass that did nothing leaves none; `echoctl traces` lists the last 7 days' newest first (job, start, end, ok, runs, tokens, cost, model; `--job`, `--days`, `--limit`), `echoctl traces show <id>` gives one, nested; a trace's detail goes after 7 days",
+   "priority": "high",
+   "check": "agent",
+   "axes": []
+  },
+  {
+   "id": "F-TRACE-02",
+   "feature": "Claude Code reports its own telemetry to Echo for those runs, nested under Echo's run: its interaction, each model request (model, tokens, time to first token) and each tool (its permission decision and run), with their events; its own logging of prompts and replies stays off; Echo's receiver takes only Claude Code's JSON, sent to its own address, for traces of runs Echo started",
+   "priority": "high",
+   "check": "agent",
+   "axes": []
+  },
+  {
+   "id": "F-TRACE-03",
+   "feature": "When anything else configures Claude Code's telemetry for a run — Echo's environment, the login shell's start-up files, the managed, user (the profile's own) or project settings' `env` — Echo leaves it as configured: the run's trace has Echo's part only and says \"configured elsewhere\"; sign-ins, version checks and terminal sessions never get Echo's telemetry",
+   "priority": "critical",
+   "check": "agent",
+   "axes": []
+  },
+  {
+   "id": "F-TRACE-04",
+   "feature": "On a wrapper profile (a command the user installed in place of `claude`, which may set telemetry of its own where Echo can't see it), Echo leaves Claude Code's telemetry to the wrapper: the run's trace has Echo's part only and says \"the wrapper's own\"",
+   "priority": "medium",
+   "check": "person",
+   "axes": []
+  }
+ ]
+}

@@ -64,13 +64,40 @@ fn save_state(id: &str, v: &Value) {
 /// Sync one project now: evidence, extract, verify. One at a time per project.
 /// Sync now (the window's, `ledger <id> run`): everything waiting is read at once, mail and chat too.
 pub fn run(id: &str) -> Result<Value> {
-    run_with(id, false)
+    let span = crate::telemetry::start("job.thread_sync", json!({"echo.job": "thread_sync"}));
+    let v = run_with(id, false);
+    traced(span, &v);
+    v
+}
+
+/// A sync's trace is kept when it went to the model or failed (a sync with nothing to read leaves none).
+fn traced(mut span: crate::telemetry::Span, v: &Result<Value>) {
+    match v {
+        Ok(v) if v.get("run").is_none() => span.discard(),
+        Err(e) if format!("{e:#}").contains("being synced already") => span.discard(),
+        Ok(v) => {
+            span.set("ok", v["state"] == "done");
+            span.set("summary", format!("{} read", v["read"].as_u64().unwrap_or(0)));
+        }
+        Err(e) => {
+            span.set("ok", false);
+            span.set("error", format!("{e:#}"));
+        }
+    }
 }
 
 /// As the app's scheduler syncs (`echoctl project ledger <id> run --scheduled`): mail and chat wait for their batch.
 pub fn run_scheduled(id: &str) -> Result<Value> {
     let started = Local::now();
-    let v = match run_with(id, true) {
+    let span = crate::telemetry::start("job.thread_sync", json!({"echo.job": "thread_sync"}));
+    let v = scheduled_outcome(started, run_with(id, true));
+    traced(span, &v);
+    v
+}
+
+/// A scheduled sync's run of the thread sync job (`jobs`).
+fn scheduled_outcome(started: chrono::DateTime<Local>, v: Result<Value>) -> Result<Value> {
+    let v = match v {
         Ok(v) => v,
         Err(e) => {
             // A sync that failed: a run of the thread sync job too (said in Echo's words; the thread says why).
@@ -782,6 +809,7 @@ fn claude(profile: &crate::ai::Profile, model: Option<&str>, plugin: &Path, cwd:
     // Its message, one stream-json line on stdin (never on a command line: it is long, and through a wrapper the run's
     // text goes only there), then stdin closed; written aside, as the run's output is read meanwhile.
     let line = format!("{}\n", json!({"type": "user", "message": {"role": "user", "content": pass.message}}));
+    crate::telemetry::claude_input(&line);
     let stdin = child.stdin.take();
     let writer = std::thread::spawn(move || {
         if let Some(mut i) = stdin {
@@ -963,9 +991,7 @@ pub fn finish_run_watched(mut child: std::process::Child, log: &mut fs::File, ti
                 stopped = Some(format!("Claude Code is too old to {what} — update it to {x}.{y}.{z} or later"));
                 crate::ai::stop_group(pid);
             }
-            for l in crate::run_log::describe(&ev) {
-                let _ = writeln!(log, "{}  {l}", Local::now().format("%H:%M:%S"));
-            }
+            crate::run_log::write(log, &ev);
             on_event(&ev, log);
             if ev["type"] == "result" {
                 result = Some(ev);

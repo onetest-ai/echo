@@ -369,6 +369,8 @@ pub fn run(id: &str) -> Result<Value> {
         std::thread::sleep(std::time::Duration::from_millis(100));
     }
     let Some(_lock) = lock else { bail!("“{}” is running already", r.name) };
+    // Its trace: the routine's span, its Claude Code run under it (`jobs::record` says how it ended).
+    let _span = crate::telemetry::start(&format!("job.{id}"), serde_json::json!({"echo.job": id}));
     let last = crate::jobs::runs(id, 1).ok().and_then(|v| v.into_iter().next()).and_then(|x| x["started"].as_str().map(str::to_owned));
     let started = chrono::Local::now();
     let base = started.format("%Y%m%d-%H%M%S").to_string();

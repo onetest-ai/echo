@@ -157,7 +157,7 @@ pub(super) fn login_with(p: &Profile, claude: &Path, terminal: bool, stopped: &d
     // In this terminal's foreground, not `detach`ed: it reads the paste code, and Ctrl-C reaches
     // it. No login shell (its job control would take the terminal): the terminal's environment is
     // already the user's; the profile's routing is applied on top.
-    let mut c = build_command(p, claude, &login_args(p), &paths::config_dir(), false, false);
+    let mut c = build_command(p, claude, &login_args(p), &paths::config_dir(), false, false, &[]);
     if terminal {
         c.stdin(Stdio::inherit()).stdout(Stdio::inherit()).stderr(Stdio::inherit());
     } else {

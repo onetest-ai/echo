@@ -91,7 +91,11 @@ pub(crate) fn complete_claude_with(p: &Profile, model: &str, system: &str, user:
     };
     let asked = p.model(model);
     let mut child = command(p, &args(&asked, system, blocks.is_some())?)?.spawn()?;
+    crate::telemetry::claude_input(&input);
     let (out, err, _, wrote) = ai::wait_output_with(&mut child, Some(input.into_bytes()), deadline, cancelled).map_err(|e| anyhow!("{}: {e:#}", p.name))?;
+    for ev in out.lines().filter_map(|l| serde_json::from_str::<Value>(l.trim()).ok()) {
+        crate::telemetry::claude_event(&ev);
+    }
     let result = out.lines().rev().filter_map(|l| serde_json::from_str::<Value>(l.trim()).ok()).find(|v| v["type"] == "result");
     if let Some(v) = &result {
         set_usage(v, None);

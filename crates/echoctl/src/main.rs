@@ -64,6 +64,7 @@ mod boards;
 mod widgets;
 mod yolo;
 mod teams_transcript;
+mod telemetry;
 mod view;
 mod vocab;
 mod permissions;
@@ -241,6 +242,16 @@ enum Cmd {
     Jobs {
         #[command(subcommand)]
         cmd: Option<JobsCmd>,
+    },
+    /// What Echo ran, step by step, kept 7 days on this computer (JSON): `echoctl traces` lists them, newest first — each
+    /// job run or Claude Code run with its job, start and end, how it ended, its Claude Code runs, tokens, cost and model;
+    /// `echoctl traces show <id>` gives one — its spans, the run's input and stream, Claude Code's model requests and tools
+    #[command(args_conflicts_with_subcommands = true)]
+    Traces {
+        #[command(subcommand)]
+        cmd: Option<cli::traces::TracesCmd>,
+        #[command(flatten)]
+        list: cli::traces::ListArgs,
     },
     /// Live notes during a call: ask a question, pause or resume them, show them (JSON)
     Live {
@@ -911,6 +922,7 @@ fn main() -> Result<()> {
             println!("{}", serde_json::to_string_pretty(&v)?);
             Ok(())
         }
+        Cmd::Traces { cmd, list } => cli::traces::traces(cmd, list),
         Cmd::Live { cmd } => cli::capture::live(cmd),
         Cmd::Prep { call, upcoming, show, write } => cli::calendar::prep(call, upcoming, show, write),
         Cmd::Pending { session } => calls::pending(session.as_deref()),
@@ -927,6 +939,8 @@ fn main() -> Result<()> {
     };
     // A change that failed is noted too, with why.
     notes::note_action(&argv, out.as_ref().err().map(|e| format!("failed: {e:#}")).as_deref());
+    // What this command traced is written before it ends (a moment at most: never waits on a full disk).
+    telemetry::flush(std::time::Duration::from_millis(500));
     out
 }
 

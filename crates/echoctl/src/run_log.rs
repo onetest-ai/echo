@@ -2,6 +2,16 @@
 
 use serde_json::Value;
 
+/// One stream-json event of the run this thread started: its lines in the run's log, the event itself in its trace
+/// (`telemetry`).
+pub(crate) fn write(log: &mut impl std::io::Write, ev: &Value) {
+    let at = chrono::Local::now().format("%H:%M:%S");
+    for l in describe(ev) {
+        let _ = writeln!(log, "{at}  {l}");
+    }
+    crate::telemetry::claude_event(ev);
+}
+
 /// One stream-json event as log lines a person can follow.
 pub(crate) fn describe(ev: &Value) -> Vec<String> {
     let clip = |s: &str, n: usize| -> String {

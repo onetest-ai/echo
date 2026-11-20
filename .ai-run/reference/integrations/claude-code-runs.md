@@ -137,6 +137,40 @@ routing-policy check.
   within 90 s), never on the command line. The call session's version check asks the
   wrapper (`ai::wrapper::claude_version`).
 
+## Telemetry and traces
+
+- A print run (`-p`) is a Claude Code run of a trace (`telemetry::claude_run`, called by `ai::prepare_claude`): a span
+  `claude.run`, a child of its thread's current span (a job's, `job.<id>`), else a trace of its own; its attributes
+  the run's arguments, the text of the `--system-prompt-file` / `--append-system-prompt-file` it names, the profile,
+  the folder and `echo.telemetry` (`echo`, `configured elsewhere` or `off`). Its stdin message (or, through a wrapper,
+  its prompt) is an event `claude.input` (`telemetry::claude_input`); each stream-json event, whole, an event
+  `claude.<type>[.<subtype>]` (`run_log::write`, `claude_session`, the live notes agent through
+  `telemetry::claude_event_of`); its result ends the span with its tokens, cost, turns and model. `--version`,
+  sign-ins and terminal sessions get none.
+- Claude Code's own telemetry is pointed at this process (`telemetry::receiver`: OTLP over HTTP, JSON only, on
+  `127.0.0.1` and a port the system picks): `CLAUDE_CODE_ENABLE_TELEMETRY=1`, `CLAUDE_CODE_ENHANCED_TELEMETRY_BETA=1`
+  (its traces), `OTEL_TRACES_EXPORTER` / `OTEL_LOGS_EXPORTER` `otlp`, `OTEL_EXPORTER_OTLP_PROTOCOL` `http/json`,
+  `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_LOGS_EXPORT_INTERVAL` 2000, `OTEL_RESOURCE_ATTRIBUTES`
+  (`echo.trace`, `echo.span`, `echo.job`) and `TRACEPARENT` (the run's span: Claude Code's `claude_code.interaction`
+  is its child). No `OTEL_LOG_*`: its prompt and reply logging stays off. None of them when something else configures
+  its telemetry (`telemetry::configured_elsewhere`: a `telemetry::telemetry_var` — `OTEL_*`,
+  `CLAUDE_CODE_ENABLE_TELEMETRY`, `CLAUDE_CODE_ENHANCED_TELEMETRY_BETA` — in this process's environment or in the
+  `env` of the managed settings (and `managed-settings.d/`), the profile's own settings (a `local` / `claude`
+  profile's folder, else `CLAUDE_CONFIG_DIR` or `~/.claude`) or the folder's `.claude/settings.json` /
+  `settings.local.json`), nor on a wrapper profile (`echo.telemetry` "the wrapper's own": it may set its own where
+  Echo can't see); through the login shell they pass as `ECHOCTL_T_<name>` and are exported only when the start-up
+  files set none and `grep` is there to tell (`ai::shell_script`).
+- The receiver takes only `application/json` sent to its own address (`Host` 127.0.0.1 or localhost with its port),
+  and files only traces of runs this process started in the last two days (`telemetry::known`); at most 8
+  connections at once, a minute each, 10 s between reads, 16 KB a line, 16 MB a body; a span keeps only its
+  resource's `service.*` and `echo.*`. A run left without a result ends with its parent span (`ok` false, "Claude
+  Code ended without a result"), or after two days; the live notes session is detached from its job
+  (`telemetry::detach_last_run`: its own trace's root, ended by its stream's result) and its job line written by
+  `jobs::record_run`. A streamed run's partial-text events (`stream_event`) aren't kept.
+- Measured on Claude Code 2.1.329 (#859): a settings file's `env` overrides the process environment (Echo's endpoint
+  and a `--settings` file naming another: everything went to the other, with its resource attributes); log records
+  carry `traceId` and `spanId`; `TRACEPARENT` makes its root span a child; through the CodeMie wrapper the same.
+
 ## Tests
 
 `ai::fake::install(root)` installs a scripted fake Claude Code.
