@@ -596,6 +596,18 @@ pub(super) fn snapshot(id: &str, root: &str, o: &Value) -> Result<Value> {
 pub(super) fn claude_folder(id: &str, arg: &Value, spec: &mut crate::claudejob::Spec) -> Result<Option<Value>> {
     use crate::claudejob::{FolderMode, InFolder};
     let (root, path) = (arg["folder"].as_str().unwrap_or(""), arg["path"].as_str().unwrap_or(""));
+    if !arg["store"].is_null() {
+        if !root.is_empty() || !path.is_empty() || !arg["exclude"].is_null() {
+            bail!("a run goes in a folder you were given (folder, path) or in one of your store (store), not both");
+        }
+        let mode = match FolderMode::parse(arg["mode"].as_str().unwrap_or(""))? {
+            FolderMode::Copy => bail!("mode “copy” goes with a folder you were given: in your store a run reads (read) or edits (edit)"),
+            m => m,
+        };
+        spec.folder = Some(InFolder { cwd: store_folder(id, arg["store"].as_str().unwrap_or(""))?, mode, store: true });
+        spec.session = false;
+        return Ok(None);
+    }
     if root.is_empty() {
         if !arg["mode"].is_null() || !path.is_empty() || !arg["exclude"].is_null() {
             bail!("a run's mode, path and exclude go with a folder it was given (folder)");
@@ -623,9 +635,25 @@ pub(super) fn claude_folder(id: &str, arg: &Value, spec: &mut crate::claudejob::
         }
         _ => (dunce::canonicalize(&cwd)?, None),
     };
-    spec.folder = Some(InFolder { cwd, mode });
+    spec.folder = Some(InFolder { cwd, mode, store: false });
     spec.session = false;
     Ok(snap)
+}
+
+/// Where a run in plugin `id`'s store goes (`ctx.claude.run({store})`): a folder there, never the store itself (Echo's
+/// files lie at its top), nor one reached through a link.
+fn store_folder(id: &str, rel: &str) -> Result<std::path::PathBuf> {
+    let rel = rel.trim().trim_end_matches('/');
+    if rel.is_empty() || rel == "." {
+        bail!("a run in your store goes in a folder of it (store: \"cache/pages\"), never the store itself");
+    }
+    let at = store_path(id, rel)?;
+    let base = dunce::canonicalize(plugins::data_dir(id))?;
+    match dunce::canonicalize(&at) {
+        Ok(c) if c.is_dir() && c.starts_with(&base) && c != base && c == base.join(rel.trim_start_matches("./")) => Ok(c),
+        Ok(c) if c.is_dir() => bail!("“{rel}” is a link: a run in your store goes in a folder of it"),
+        _ => bail!("“{rel}” isn't a folder in your store"),
+    }
 }
 
 /// Where Claude Code goes in a folder given to plugin `id` (`uses.folders`; `edit` also `folders.write`): `path` inside
@@ -658,7 +686,7 @@ pub fn session_folder(id: &str, arg: &Value) -> Result<crate::claudejob::InFolde
         m => m,
     };
     let cwd = granted_cwd(id, root, arg["path"].as_str().unwrap_or(""), mode)?;
-    Ok(InFolder { cwd: dunce::canonicalize(&cwd)?, mode })
+    Ok(InFolder { cwd: dunce::canonicalize(&cwd)?, mode, store: false })
 }
 
 #[cfg(test)]
