@@ -10,7 +10,7 @@ The CLI commands each guarded mode may call (the guard refuses any other Bash ca
 | Mode | Allowlist | Commands (on main) |
 |---|---|---|
 | minutes run | `notes::RUN_COMMANDS` | `context`, `actions`, `speakers`, `title`, `type`, `vocab add`, `frames`, `transcribe`, `memo threads` |
-| project sync | `guard::PROJECT_STEPS` | `apply`, `done`, `people-apply` (what it reads is in its prompt; its verify run has no tools) |
+| project sync | `guard::PROJECT_STEPS` | `apply`, `done`, `people-apply`; the sync's own runs have no tools (Echo applies their answers), so the list holds for a run started with the project mode's variables |
 | the window's session on a call (ask) | `guard::ASK_COMMANDS` | `context` |
 
 A routine's or Yolo's run has no run guard: it runs as the folder session (One builder, below).

@@ -6,81 +6,25 @@
   {
    "when": [
     "# Echo: a thread's sync — extract",
+    "## What Echo rejected"
+   ],
+   "steps": [
+    {
+     "text": "{\n \"items\": [],\n \"report\": \"Tom Becker's role is the one the user set: left as it is.\"\n}"
+    }
+   ]
+  },
+  {
+   "when": [
+    "# Echo: a thread's sync — extract",
     "strictly in this order:"
    ],
    "vars": {
-    "run": "This run's folder: `([^`]+)`",
     "evid": "strictly in this order: ([0-9_-]+)"
    },
    "steps": [
     {
-     "blocks": [
-      {
-       "type": "tool_use",
-       "id": "toolu_sync_1",
-       "name": "Bash",
-       "input": {
-        "command": "echoctl project ledger globex-pilot context",
-        "description": "Another thread's tree"
-       }
-      },
-      {
-       "type": "tool_use",
-       "id": "toolu_sync_2",
-       "name": "Bash",
-       "input": {
-        "command": "echoctl project ledger acme-rollout context",
-        "description": "The tree again: it is in the prompt"
-       }
-      }
-     ]
-    },
-    {
-     "blocks": [
-      {
-       "type": "tool_use",
-       "id": "toolu_sync_3",
-       "name": "Write",
-       "input": {
-        "file_path": "{run}/{evid}.json",
-        "content": "[\n {\n  \"op\": \"create\",\n  \"ref\": \"r1\",\n  \"kind\": \"risk\",\n  \"parent\": \"E01\",\n  \"title\": \"Second-phase budget not approved yet\",\n  \"quote\": \"the budget for the second phase is not approved yet, finance meets on the twentieth\"\n },\n {\n  \"op\": \"create\",\n  \"ref\": \"t1\",\n  \"kind\": \"task\",\n  \"parent\": \"S001\",\n  \"title\": \"Nominate two help desk observers\",\n  \"type\": \"dependency\",\n  \"client_owed\": true,\n  \"client_owner\": \"Omar Haddad\",\n  \"quote\": \"I will nominate two people from the service desk and send their names to you tomorrow morning\"\n },\n {\n  \"op\": \"status\",\n  \"node\": \"T008\",\n  \"effect\": \"due\",\n  \"due_text\": \"November 27\",\n  \"quote\": \"Tom plans the dry run for the last week of the month, with a rollback rehearsal the day before\"\n },\n {\n  \"op\": \"status\",\n  \"node\": \"T003\",\n  \"effect\": \"reassign\",\n  \"internal_owner\": \"Priya\",\n  \"delegated_by\": \"Me\",\n  \"quote\": \"I will ask Priya to prepare a short training deck and a frequently asked questions page for the help desk\"\n }\n]"
-       }
-      },
-      {
-       "type": "tool_use",
-       "id": "toolu_sync_4",
-       "name": "Write",
-       "input": {
-        "file_path": "{run}/{evid}_people.json",
-        "content": "[\n {\n  \"who\": \"Priya Nair\",\n  \"field\": \"role\",\n  \"value\": \"help desk training\",\n  \"quote\": \"I will ask Priya to prepare a short training deck and a frequently asked questions page for the help desk\"\n },\n {\n  \"who\": \"Priya Nair\",\n  \"field\": \"fact\",\n  \"value\": \"Prepares the help desk training deck and its FAQ page for the Acme rollout.\",\n  \"quote\": \"I will ask Priya to prepare a short training deck and a frequently asked questions page for the help desk\"\n },\n {\n  \"who\": \"Tom Becker\",\n  \"field\": \"role\",\n  \"value\": \"dry run owner\",\n  \"quote\": \"Tom plans the dry run for the last week of the month, with a rollback rehearsal the day before\"\n }\n]"
-       }
-      }
-     ]
-    },
-    {
-     "blocks": [
-      {
-       "type": "tool_use",
-       "id": "toolu_sync_5",
-       "name": "Bash",
-       "input": {
-        "command": "echoctl project ledger acme-rollout apply --evidence '{evid}' --proposals '{run}/{evid}.json' --done 'a risk, a client dependency, a date and an owner'",
-        "description": "Apply the proposals, the item done"
-       }
-      },
-      {
-       "type": "tool_use",
-       "id": "toolu_sync_6",
-       "name": "Bash",
-       "input": {
-        "command": "echoctl project ledger acme-rollout people-apply --evidence '{evid}' --file '{run}/{evid}_people.json'",
-        "description": "Propose who's who"
-       }
-      }
-     ]
-    },
-    {
-     "text": "Extract (virtual model): 1 item read; created a risk and a client-owed task, proposed T008's date and T003's owner; proposed Priya Nair's role, added a fact about her; Tom Becker's role is the user's."
+     "text": "{\n \"items\": [\n  {\n   \"id\": \"{evid}\",\n   \"work\": [\n    {\n     \"op\": \"create\",\n     \"ref\": \"r1\",\n     \"kind\": \"risk\",\n     \"parent\": \"E01\",\n     \"title\": \"Second-phase budget not approved yet\",\n     \"quote\": \"the budget for the second phase is not approved yet, finance meets on the twentieth\"\n    },\n    {\n     \"op\": \"create\",\n     \"ref\": \"t1\",\n     \"kind\": \"task\",\n     \"parent\": \"S001\",\n     \"title\": \"Nominate two help desk observers\",\n     \"type\": \"dependency\",\n     \"client_owed\": true,\n     \"client_owner\": \"Omar Haddad\",\n     \"quote\": \"I will nominate two people from the service desk and send their names to you tomorrow morning\"\n    },\n    {\n     \"op\": \"status\",\n     \"node\": \"T008\",\n     \"effect\": \"due\",\n     \"due_text\": \"November 27\",\n     \"quote\": \"Tom plans the dry run for the last week of the month, with a rollback rehearsal the day before\"\n    },\n    {\n     \"op\": \"status\",\n     \"node\": \"T003\",\n     \"effect\": \"reassign\",\n     \"internal_owner\": \"Priya\",\n     \"delegated_by\": \"Me\",\n     \"quote\": \"I will ask Priya to prepare a short training deck and a frequently asked questions page for the help desk\"\n    }\n   ],\n   \"note\": \"a risk, a client dependency, a date and an owner\",\n   \"people\": [\n    {\n     \"who\": \"Priya Nair\",\n     \"field\": \"role\",\n     \"value\": \"help desk training\",\n     \"quote\": \"I will ask Priya to prepare a short training deck and a frequently asked questions page for the help desk\"\n    },\n    {\n     \"who\": \"Priya Nair\",\n     \"field\": \"fact\",\n     \"value\": \"Prepares the help desk training deck and its FAQ page for the Acme rollout.\",\n     \"quote\": \"I will ask Priya to prepare a short training deck and a frequently asked questions page for the help desk\"\n    },\n    {\n     \"who\": \"Tom Becker\",\n     \"field\": \"role\",\n     \"value\": \"dry run owner\",\n     \"quote\": \"Tom plans the dry run for the last week of the month, with a rollback rehearsal the day before\"\n    }\n   ]\n  }\n ],\n \"report\": \"Extract (virtual model): 1 item read; created a risk and a client-owed task, proposed T008's date and T003's owner; proposed Priya Nair's role, added a fact about her; Tom Becker's role is the user's.\"\n}"
     }
    ]
   },
@@ -105,7 +49,6 @@
     "Items to read for people only:"
    ],
    "vars": {
-    "run": "This run's folder: `([^`]+)`",
     "p1": "Items to read for people only: ([0-9a-z_-]+)",
     "p2": "Items to read for people only: [0-9a-z_-]+, ([0-9a-z_-]+)",
     "p3": "Items to read for people only: [0-9a-z_-]+, [0-9a-z_-]+, ([0-9a-z_-]+)",
@@ -115,72 +58,7 @@
    },
    "steps": [
     {
-     "tool": "Write",
-     "input": {
-      "file_path": "{run}/none_people.json",
-      "content": "[]"
-     }
-    },
-    {
-     "blocks": [
-      {
-       "type": "tool_use",
-       "id": "toolu_people_1",
-       "name": "Bash",
-       "input": {
-        "command": "echoctl project ledger acme-rollout people-apply --evidence '{p1}' --file '{run}/none_people.json'",
-        "description": "Nothing to propose about people"
-       }
-      },
-      {
-       "type": "tool_use",
-       "id": "toolu_people_2",
-       "name": "Bash",
-       "input": {
-        "command": "echoctl project ledger acme-rollout people-apply --evidence '{p2}' --file '{run}/none_people.json'",
-        "description": "Nothing to propose about people"
-       }
-      },
-      {
-       "type": "tool_use",
-       "id": "toolu_people_3",
-       "name": "Bash",
-       "input": {
-        "command": "echoctl project ledger acme-rollout people-apply --evidence '{p3}' --file '{run}/none_people.json'",
-        "description": "Nothing to propose about people"
-       }
-      },
-      {
-       "type": "tool_use",
-       "id": "toolu_people_4",
-       "name": "Bash",
-       "input": {
-        "command": "echoctl project ledger acme-rollout people-apply --evidence '{p4}' --file '{run}/none_people.json'",
-        "description": "Nothing to propose about people"
-       }
-      },
-      {
-       "type": "tool_use",
-       "id": "toolu_people_5",
-       "name": "Bash",
-       "input": {
-        "command": "echoctl project ledger acme-rollout people-apply --evidence '{p5}' --file '{run}/none_people.json'",
-        "description": "Nothing to propose about people"
-       }
-      },
-      {
-       "type": "tool_use",
-       "id": "toolu_people_6",
-       "name": "Bash",
-       "input": {
-        "command": "echoctl project ledger acme-rollout people-apply --evidence '{p6}' --file '{run}/none_people.json'",
-        "description": "Nothing to propose about people"
-       }
-      }
-     ]
-    },
-    {
-     "text": "People (virtual model): read for people only, nothing to propose."
+     "text": "{\n \"items\": [\n  {\n   \"id\": \"{p1}\",\n   \"people\": []\n  },\n  {\n   \"id\": \"{p2}\",\n   \"people\": []\n  },\n  {\n   \"id\": \"{p3}\",\n   \"people\": []\n  },\n  {\n   \"id\": \"{p4}\",\n   \"people\": []\n  },\n  {\n   \"id\": \"{p5}\",\n   \"people\": []\n  },\n  {\n   \"id\": \"{p6}\",\n   \"people\": []\n  }\n ],\n \"report\": \"Read for people only: nothing to propose.\"\n}"
     }
    ]
   }

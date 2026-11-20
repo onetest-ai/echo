@@ -201,7 +201,7 @@ scenario(test, 'S-33', "Prep, Yolo and a thread's sync on the virtual model", ()
     await setActs(page, false)
   })
 
-  test("3 · Sync now reads the thread's new call into its work and who's who in one guarded run given its text, verifies it in a fresh run with no tools, and keeps the fields the user set", covers('work/TC-028', 'F-THR-20', 'F-THR-27', 'F-WORK-16', 'F-CC-04'), async ({ page }) => {
+  test("3 · Sync now reads the thread's new call into its work and who's who in one answer given its text, fixes what Echo rejected in one more, verifies it in a fresh run, none with tools, and keeps the fields the user set", covers('work/TC-028', 'F-THR-20', 'F-THR-27', 'F-WORK-16', 'F-CC-04'), async ({ page }) => {
     const { sync: s, virtualModel: vm } = data.set
     const w = data.text.work
     const run = data.text.minutesRun
@@ -276,49 +276,36 @@ scenario(test, 'S-33', "Prep, Yolo and a thread's sync on the virtual model", ()
     expect(t3.delegated_by).toBe(before[owner.node].delegated_by)
     expect(t3.history.find((h) => h.by === 'agent' && h.effect === s.reassign.effect)).toMatchObject({ internal_owner: s.reassign.to, verdict: 'supports', applied: false })
 
-    // 8: the run's log: two runs; the guard refused both `context` calls (another thread's, and its own: it is in the prompt).
+    // 8: the run's log: three runs (the extract, its fix run, the verifier), none with a tool to call.
     const log = lines(data.read(runDir, data.text.claude.log))
     expect(log[0]).toContain(s.log.first)
     expect(log.filter((l) => l.includes(s.log.started))).toHaveLength(s.log.runs)
     const c = data.text.claude
-    const tool = (name) => log.filter((l) => l.includes(fill(c.tool, { tool: name })))
-    expect(tool(c.tools.bash).filter((l) => !l.includes(s.log.own))).toEqual([expect.stringContaining(s.log.other)])
-    const refused = log.map((l, i) => [l, i]).filter(([l]) => l.includes(run.logRefused))
-    expect(refused).toHaveLength(s.log.refusals.length)
-    // A refusal's line is cut at 300 characters after the guard's full path, a command's at 200 after the CLI's, each as
-    // long as the checkout's (#715): which commands were refused, and why, are read whole in what the model sent and was told.
-    const told = data.model.refused()
-    expect(told.map((r) => r.input.command)).toEqual(s.log.refusals.map((cmd) => expect.stringContaining(cmd)))
-    for (const r of told) expect(r.told).toContain(s.log.refusal)
-    expect(log.filter((l) => l.includes(run.logNotAllowed))).toEqual(s.log.notAllowed.map((x) => expect.stringContaining(x)))
-    for (const l of tool(c.tools.write)) expect(l).toContain(path.join(data.home, 'projects', id, w.runs) + path.sep)
-    expect(tool(c.tools.read)).toEqual([])
+    for (const t of Object.values(c.tools)) expect(log.filter((l) => l.includes(fill(c.tool, { tool: t })))).toEqual([])
+    expect(log.filter((l) => l.includes(run.logRefused) || l.includes(run.logNotAllowed))).toEqual([])
     expect(log.filter((l) => l.includes(run.logOk))).toHaveLength(s.log.runs)
 
-    // 9: what each run was given (its fixed instructions, then its own message; the extract run Write and Bash only, the
-    // verifier no tools) and told back.
-    expect(s.turns.map((_, r) => data.model.turns(r).length)).toEqual(s.turns)
+    // 9: what each run was given (its fixed instructions, then its own message; no tools): one request each.
+    expect(s.rules.map((r) => data.model.turns(r).length)).toEqual(s.turns)
     expect([...new Set(data.model.requests().filter((e) => e.rule != null).map((e) => e.model))]).toEqual([vm.model])
-    s.prompts.forEach((has, r) => {
-      const [first] = data.model.turns(r).filter((e) => e.step === 0)
-      expect([...new Set(first.tools)].filter((t) => !run.ignoredTools.includes(t)).sort()).toEqual(s.tools[r])
+    s.rules.forEach((r, k) => {
+      const [first] = data.model.turns(r)
+      expect([...new Set(first.tools)].filter((t) => !run.ignoredTools.includes(t))).toEqual([])
       const prompt = textOf(first.messages[0].content)
-      for (const words of has) expect(prompt).toContain(words)
+      for (const words of s.prompts[k]) expect(prompt).toContain(words)
       const system = JSON.stringify(first.system)
-      for (const words of s.systems[r]) expect(system).toContain(words)
+      for (const words of s.systems[k]) expect(system).toContain(words)
       for (const words of s.systemHasNot) expect(system).not.toContain(words)
     })
-    for (const e of data.model.turns(1)) expect(JSON.stringify(e.messages)).not.toContain(s.notToVerifier)
-    expect(data.model.toolResults(0).map(Boolean)).toEqual(s.extractResults)
+    for (const e of data.model.turns(s.rules.at(-1))) expect(JSON.stringify(e.messages)).not.toContain(s.notToVerifier)
 
-    // 10: who's who, from the same run: Priya Nair's role suggested and a fact added; Tom Becker's role, the user's, left alone.
+    // 10: who's who, from the same answer: Priya Nair's role suggested and a fact added; Tom Becker's role, the user's,
+    // left alone (its rejection given to the fix run).
     const suggestions = data.json(data.home, 'projects', id, w.suggestions)
     expect(suggestions).toContainEqual(expect.objectContaining({ field: 'role', value: s.person.role, state: 'pending', quote: expect.any(String), target: expect.objectContaining({ name: s.person.name }) }))
     expect(suggestions.filter((x) => x.field === 'role' && x.target?.name === s.userRole)).toEqual([])
     const priya = data.json(data.home, 'projects', w.people).find((p) => p.name === s.person.name)
     expect(priya.facts).toContainEqual(expect.objectContaining({ text: s.person.fact, evidence: evid }))
-    const answer = JSON.stringify(data.model.turns(0).at(-1).messages.at(-1).content)
-    for (const words of s.peopleApply) expect(answer).toContain(JSON.stringify(words).slice(1, -1))
 
     // 11: the window: synced, three to review; T008 and T003 still the user's, the agent's proposals "kept yours".
     await page.reload()

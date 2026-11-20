@@ -157,6 +157,7 @@
     "changes": [
       "^config/yolo/ask-[^/]+/(prompt\\.md|log\\.txt|answer\\.md|drafts\\.jsonl|permissions\\.json|actions\\.jsonl|run\\.json)$",
       "^config/my-skills/",
+      "^config/telemetry/",
       "^config/minutes-run/echo-mcp-[^/]+\\.json$",
       "^config/claude/ollama/",
       "^config/claude/[^/]+\\.lock$",
@@ -214,7 +215,7 @@
       "Memo"
     ],
     "read": "Acme security review",
-    "message": "Extract (virtual model): 1 item read; created a risk and a client-owed task, proposed T008's date and T003's owner; proposed Priya Nair's role, added a fact about her; Tom Becker's role is the user's.\nVerify: 3 supports.",
+    "message": "Extract: 1 item read, 4 changes to the work, 2 about people. 1 rejection left unfixed.\nExtract (virtual model): 1 item read; created a risk and a client-owed task, proposed T008's date and T003's owner; proposed Priya Nair's role, added a fact about her; Tom Becker's role is the user's.\nTom Becker's role is the one the user set: left as it is.\nVerify: 3 supports.",
     "runFiles": [
       "log.txt",
       "{evid}.json",
@@ -253,52 +254,32 @@
       "to": "Priya"
     },
     "turns": [
-      4,
+      1,
+      1,
       1
-    ],
-    "tools": [
-      [
-        "Bash",
-        "Write"
-      ],
-      []
     ],
     "prompts": [
       [
         "Items to read for the work and people, strictly in this order:",
-        "/ledger/runs/",
         "## The thread's work (`context`)",
         "## The thread's people (`people-context`)",
         "the budget for the second phase is not approved yet"
+      ],
+      [
+        "## Your answer",
+        "## What Echo rejected",
+        "the user set this role: leave it",
+        "## The ids your refs got"
       ],
       [
         "Judge these 3 packets."
       ]
     ],
     "notToVerifier": "Nominate two help desk observers",
-    "extractResults": [
-      true,
-      true,
-      false,
-      false,
-      false,
-      false
-    ],
     "log": {
       "first": "Echo syncs Acme rollout (acme-rollout) on Virtual model, model virtual",
       "started": "Claude Code started · model virtual",
-      "runs": 2,
-      "own": "echoctl project ledger acme-rollout ",
-      "other": "echoctl project ledger globex-pilot context",
-      "refusal": "Echo's project sync: only `echoctl project ledger acme-rollout <apply|done|people-apply>` runs here",
-      "notAllowed": [
-        "globex-pilot context",
-        "acme-rollout context"
-      ],
-      "refusals": [
-        "echoctl project ledger globex-pilot context",
-        "echoctl project ledger acme-rollout context"
-      ]
+      "runs": 3
     },
     "person": {
       "name": "Priya Nair",
@@ -307,11 +288,6 @@
     },
     "userRole": "Tom Becker",
     "toReview": 3,
-    "peopleApply": [
-      "\"added\": 1",
-      "\"facts\": 1",
-      "the user set this role: leave it"
-    ],
     "ids": {
       "risk": "R",
       "task": "T"
@@ -321,8 +297,13 @@
       [
         "# Echo: a thread's sync — extract",
         "nobody is watching it",
+        "You have no tools",
         "Pass 1 — the tree moves",
         "## What to propose (`field`)"
+      ],
+      [
+        "# Echo: a thread's sync — extract",
+        "only the fixed proposals"
       ],
       [
         "# Echo: a thread's sync — verify",
@@ -335,6 +316,11 @@
     "passes": [
       "extract",
       "verify"
+    ],
+    "rules": [
+      1,
+      0,
+      2
     ]
   },
   "s25": {

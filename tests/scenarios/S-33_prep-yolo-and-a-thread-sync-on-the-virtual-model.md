@@ -51,7 +51,7 @@ auto: [tests/auto/specs/S-33.spec.mjs]
 | 9 | `tasks/TC-033_yolo-runs-filters.md` | 8 (its runs) | — |
 | 10 | `traces/TC-002_a-yolo-run-leaves-a-trace-and-telemetry-configured-elsewhere-is-left-alone.md` | 8 (its runs) | — (after stage 9: its run would change stages 8 and 9's lists) |
 | 11 | `traces/TC-005_a-command-that-fails-leaves-a-trace-with-its-words-and-error.md` | — | — |
-| 12 | `traces/TC-006_settings-activity-shows-the-runs-and-a-runs-timeline-step-by-step.md` | 1, 4, 8, 11 (their runs) | — |
+| 12 | `traces/TC-006_settings-activity-shows-the-runs-and-a-runs-timeline-step-by-step.md` | 1, 3, 4, 8, 11 (their runs) | — |
 | 13 | `traces/TC-007_send-traces-elsewhere-to-an-otlp-collector-without-identity-or-text.md` | 4 (its sync's trace) | Start the stand-in collector (its Preconditions) |
 
 ## Teardown
@@ -60,4 +60,4 @@ auto: [tests/auto/specs/S-33.spec.mjs]
 ## Notes
 - Each stage writes its own script into `<dir>/model/model-script.json` (read on every request), so no stage's model answers another's prompt; each script's rules are keyed on phrases only its job's prompt holds.
 - Stage 2 runs with Yolo's skip permissions: only on this made-up data. The stages touch different threads (Acme renewal's prep, Globex pilot's T005, Acme rollout's work), so none depends on another; run them one after another, never side by side: stage 2 diffs the whole data folder around its run.
-- The real-model counterparts of these three ran in S-30 on `--ai local` (minutes of model time each, 45 min for the sync on this Mac); they moved here, where every scripted step — the guard's and the CLI's refusals included — is checked on every run.
+- The real-model counterparts of these three ran in S-30 on `--ai local` (minutes of model time each, 45 min for the sync on this Mac); they moved here, where every scripted step — the guard's and the CLI's refusals in Yolo's runs included — is checked on every run.

@@ -941,7 +941,7 @@ impl Ready {
 /// TERM — stopping it then takes the 3 s until KILL); `auth login` records its
 /// arguments in `login.args` and does what `login` says: `ok` (`after.json` becomes the status),
 /// `fail`, `hang` (its pid in `login.pid`, then it sleeps); `-p` reads its prompt and prints
-/// `p.reply` (with `p.hang` there: prints that to stderr, makes `p.hung` once it has, then sleeps, a run that never ends; Unix: a stream-json run then prints `p.result` when it is there). Installing it forgets this process's observations and cached checks.
+/// `p.reply` (Unix: a stream-json run N answers `p.reply.N` instead when there is one, counted in `p.runs`; with `p.hang` there: prints that to stderr, makes `p.hung` once it has, then sleeps, a run that never ends; Unix: a stream-json run then prints `p.result` when it is there). Installing it forgets this process's observations and cached checks.
 /// Unix: a shell script. Windows: the same in PowerShell, started by a `.cmd` (`stubborn` is Unix's: Windows stops
 /// the tree with `taskkill /T /F`; its `login.pid` is PowerShell's, a grandchild under `cmd.exe`, not the started child);
 /// most tests that use it are still Unix-only (#423).
@@ -1034,7 +1034,7 @@ case "$1 $2" in
 "--version ") cat "$d/version" 2>/dev/null || echo "2.1.400 (Claude Code)" ;;
 "auth status") echo x >> "$d/status.count"; [ -f "$d/slow" ] && sleep 1; [ -f "$d/stall" ] && sleep 30; cat "$d/status.json" ;;
 "-p "*) printf '%s\0' "$@" > "$d/p.args"; pwd > "$d/p.cwd"; env > "$d/p.env"; prev=; for a in "$@"; do [ "$prev" = --settings ] && cp "$a" "$d/p.settings"; prev=$a; done
-  case "$*" in *stream-json*) [ -f "$d/p.hang" ] && { cat "$d/p.hang" >&2; : > "$d/p.hung"; exec sleep 60; }; while IFS= read -r l; do printf '%s\n' "$l" >> "$d/p.turns"; cat "$d/p.reply"; echo; done; if [ -f "$d/p.result" ]; then cat "$d/p.result"; fi;; *) cat > "$d/p.stdin"; [ -f "$d/p.hang" ] && { cat "$d/p.hang" >&2; : > "$d/p.hung"; exec sleep 60; }; cat "$d/p.reply";; esac ;;
+  case "$*" in *stream-json*) [ -f "$d/p.hang" ] && { cat "$d/p.hang" >&2; : > "$d/p.hung"; exec sleep 60; }; n=$(( $(cat "$d/p.runs" 2>/dev/null || echo 0) + 1 )); echo $n > "$d/p.runs"; r="$d/p.reply"; [ -f "$d/p.reply.$n" ] && r="$d/p.reply.$n"; while IFS= read -r l; do printf '%s\n' "$l" >> "$d/p.turns"; cat "$r"; echo; done; if [ -f "$d/p.result" ]; then cat "$d/p.result"; fi;; *) cat > "$d/p.stdin"; [ -f "$d/p.hang" ] && { cat "$d/p.hang" >&2; : > "$d/p.hung"; exec sleep 60; }; cat "$d/p.reply";; esac ;;
 "auth login") echo "$@" > "$d/login.args"
   case "$(cat "$d/login" 2>/dev/null)" in
   ok) cp "$d/after.json" "$d/status.json"; echo "Login successful." ;;

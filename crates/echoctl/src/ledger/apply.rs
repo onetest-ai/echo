@@ -4,6 +4,12 @@ use super::*;
 
 // ── apply: agent proposals ───────────────────────────────────────────────────────────────────────
 
+/// A node's id as the tree has them (`E01`, `T003`): capitals, then digits.
+pub fn node_id(r: &str) -> bool {
+    let digits = r.trim_start_matches(|c: char| c.is_ascii_uppercase());
+    digits.len() < r.len() && !digits.is_empty() && digits.chars().all(|c| c.is_ascii_digit())
+}
+
 /// Owners as the project knows them: a member's name for their name, email, or unique first name.
 pub(super) fn canonical(p: &crate::projects::Project, who: Option<&str>) -> Option<String> {
     let w = who?.trim();
@@ -26,7 +32,7 @@ pub(super) fn key_str(v: &Value) -> String {
 }
 
 /// Apply one evidence item's proposals: each checked against the item's words and the tree's rules.
-/// Returns `{events, by_op, rejected}`.
+/// Returns `{events, by_op, rejected, created, touched, refs}` (`refs`: each proposal's `ref` and the id it stands for).
 pub fn apply(project: &str, evid: &str, proposals: &[Value]) -> Result<Value> {
     let l = Ledger::of(project)?;
     let p = crate::projects::load(project)?;
@@ -125,7 +131,8 @@ pub fn apply(project: &str, evid: &str, proposals: &[Value]) -> Result<Value> {
                 continue;
             }
             let cmid = mid_of(&[evid, &q, "create", k, par.as_deref().unwrap_or("None"), &title]);
-            let handle = pr["ref"].as_str().map(str::to_owned).unwrap_or_else(|| format!("#{i}"));
+            // A ref shaped like a node's id (`E01`) would shadow that node for the proposals after it: not a ref.
+            let handle = pr["ref"].as_str().filter(|r| !node_id(r)).map(str::to_owned).unwrap_or_else(|| format!("#{i}"));
             if let Some(id) = made.get(&cmid) {
                 handles.insert(handle, id.clone());
                 continue;
@@ -388,7 +395,9 @@ pub fn apply(project: &str, evid: &str, proposals: &[Value]) -> Result<Value> {
     // What it made and touched, by id: the next item and the dependency pass refer to them (#39).
     let created: Vec<Value> = out.iter().filter(|e| e["type"] == "create").map(|e| json!({"id": e["id"], "kind": e["kind"], "title": e["fields"]["title"], "parent": e["fields"]["parent"]})).collect();
     let touched: BTreeSet<&str> = out.iter().filter(|e| e["type"] != "create").filter_map(|e| e["node"].as_str()).collect();
-    Ok(json!({"events": out.len(), "by_op": by, "rejected": rej, "created": created, "touched": touched}))
+    // Its refs and the ids they stand for: a sync's one answer names an earlier item's ref in a later item's proposals.
+    let refs: BTreeMap<&String, &String> = handles.iter().filter(|(h, _)| !h.starts_with('#')).collect();
+    Ok(json!({"events": out.len(), "by_op": by, "rejected": rej, "created": created, "touched": touched, "refs": refs}))
 }
 
 // ── verify ──────────────────────────────────────────────────────────────────────────────────────
