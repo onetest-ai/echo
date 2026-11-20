@@ -155,9 +155,11 @@ routing-policy check.
   is its child). No `OTEL_LOG_*`: its prompt and reply logging stays off. None of them when something else configures
   its telemetry (`telemetry::configured_elsewhere`: a `telemetry::telemetry_var` — `OTEL_*`,
   `CLAUDE_CODE_ENABLE_TELEMETRY`, `CLAUDE_CODE_ENHANCED_TELEMETRY_BETA` — in this process's environment or in the
-  `env` of the managed settings (and `managed-settings.d/`), the profile's own settings (a `local` / `claude`
-  profile's folder, else `CLAUDE_CONFIG_DIR` or `~/.claude`) or the folder's `.claude/settings.json` /
-  `settings.local.json`), nor on a wrapper profile (`echo.telemetry` "the wrapper's own": it may set its own where
+  `env` of the profile's own settings (a `local` / `claude` profile's folder, else `CLAUDE_CONFIG_DIR` or `~/.claude`),
+  the folder's `.claude/settings.json` / `settings.local.json`, or the organisation's policy (`ai::policy_docs`: the
+  managed settings and `managed-settings.d/`, macOS managed preferences `com.anthropic.claudecode`, Windows policy keys,
+  the server-managed `remote-settings.json` in the profile's folder, its `env` or `settings.env`) — a policy source that
+  is there but can't be read counts too), nor on a wrapper profile (`echo.telemetry` "the wrapper's own": it may set its own where
   Echo can't see); through the login shell they pass as `ECHOCTL_T_<name>` and are exported only when the start-up
   files set none and `grep` is there to tell (`ai::shell_script`).
 - The receiver takes only `application/json` sent to its own address (`Host` 127.0.0.1 or localhost with its port),

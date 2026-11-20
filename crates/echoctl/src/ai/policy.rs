@@ -271,6 +271,41 @@ pub(super) fn read_policy_json(f: &Path) -> Result<Value, String> {
     fs::read(f).map_err(|e| e.to_string()).and_then(|b| serde_json::from_slice(&b).map_err(|e| e.to_string()))
 }
 
+/// Every Claude Code policy document a run of `p` would get, as read (an error: there, but it can't be read): the
+/// managed settings files, macOS managed preferences, Windows policy keys, and the server-managed settings Claude Code
+/// cached in the profile's folder (a profile on the user's own Claude Code: theirs, `CLAUDE_CONFIG_DIR` or `~/.claude`).
+pub fn policy_docs(p: &Profile) -> Vec<Result<Value, String>> {
+    let present = |f: &Path| !matches!(f.try_exists(), Ok(false));
+    let mut files = match managed_files() {
+        Ok(f) => f,
+        Err(e) => return vec![Err(e)],
+    };
+    let user = if p.kind.managed() { p.config_folder() } else { std::env::var_os("CLAUDE_CONFIG_DIR").map(PathBuf::from).unwrap_or_else(|| crate::paths::user_home().join(".claude")) };
+    files.push(user.join("remote-settings.json"));
+    #[cfg_attr(not(any(target_os = "macos", windows)), allow(unused_mut))] // macOS and Windows add their own
+    let mut docs: Vec<Result<Value, String>> = files.iter().filter(|f| present(f)).map(|f| read_policy_json(f)).collect();
+    #[cfg(target_os = "macos")]
+    for f in managed_plists().into_iter().filter(|f| present(f)) {
+        docs.push(
+            Command::new("plutil")
+                .args(["-convert", "json", "-o", "-"])
+                .arg(&f)
+                .output()
+                .map_err(|e| e.to_string())
+                .and_then(|o| serde_json::from_slice::<Value>(&o.stdout).map_err(|e| e.to_string())),
+        );
+    }
+    #[cfg(windows)]
+    for hklm in [true, false] {
+        match windows_policy(hklm) {
+            Ok(None) => {}
+            Ok(Some(json)) => docs.push(serde_json::from_str::<Value>(&json).map_err(|e| e.to_string())),
+            Err(e) => docs.push(Err(e)),
+        }
+    }
+    docs
+}
+
 /// A policy document that can decide the route: a routing variable in its `env`, or a helper.
 /// Server-managed settings may wrap the settings in a `settings` object.
 pub(crate) fn routes(v: &Value) -> bool {
