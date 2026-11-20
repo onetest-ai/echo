@@ -288,7 +288,9 @@ function activitySettings() {
 }
 async function loadActivityExport() {
   try { S.ac.export = await get('api/activity/export') } catch { /* app restarting */ }
-  // The form follows what is kept, unless the user is changing it.
+  // The form follows what is kept, unless the user is changing it — or saved it and it was refused (kept as typed).
+  const x = S.ac.export, sent = S.ac.saving
+  if (sent && x && x.on === sent.on && (!sent.on || (x.kind === sent.kind && x.endpoint === sent.endpoint))) { S.ac.formDirty = false; S.ac.saving = null }
   if (!S.ac.formDirty) S.ac.form = null
   if (S.view === 'settings' && S.setSection === 'activity') render()
 }
@@ -332,7 +334,9 @@ function acExportSave(on) {
   const settings = { on, kind: f.kind, endpoint: f.endpoint, public_key: f.public_key, secret_key: f.secret_key, text: f.text,
     headers: String(f.headers || '').split('\n').map((h) => h.trim()).filter(Boolean), keep_headers: !String(f.headers || '').trim() }
   send({ cmd: 'activity_export', settings })
-  S.ac.formDirty = false
+  // Kept as typed until what is kept shows it was taken (a refusal leaves the form as it was).
+  S.ac.saving = { on, kind: f.kind, endpoint: String(f.endpoint || '').trim().replace(/\/+$/, '') }
+  S.ac.formDirty = true
   setTimeout(loadActivityExport, 400)
 }
 document.addEventListener('input', (e) => {

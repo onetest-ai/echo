@@ -6,7 +6,7 @@
 //! path on this computer; what went in and came out (prompts, replies, tool input and output, instructions) only when
 //! the user said so (`text`). Spans carry Langfuse's names too, so model calls show as generations.
 
-use super::{lines, valid_id, DIR, INDEX};
+use super::{lines, records, valid_id, DIR, INDEX};
 use crate::paths;
 use anyhow::{bail, Context, Result};
 use chrono::{DateTime, Local, Utc};
@@ -53,11 +53,26 @@ pub fn load() -> Settings {
     std::fs::read(file()).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
 }
 
-/// An address traces may go to: `https://`, or `http://` on this computer.
+/// An address traces may go to: `https://<host>`, or `http://` to this computer only (`127.0.0.1`, `localhost`, `[::1]`,
+/// a port allowed); never a user or password in it, nor anything curl could read otherwise.
 fn address_ok(url: &str) -> bool {
     let u = url.trim();
-    let local = ["http://127.0.0.1", "http://localhost", "http://[::1]"].iter().any(|p| u.starts_with(p) && u[p.len()..].chars().next().is_none_or(|c| c == ':' || c == '/'));
-    (u.starts_with("https://") || local) && !u.chars().any(|c| c.is_whitespace() || c == '"' || c.is_control())
+    if u.chars().any(|c| c.is_whitespace() || c.is_control() || matches!(c, '"' | '\\' | '@')) {
+        return false;
+    }
+    let (scheme, rest) = match u.split_once("://") {
+        Some((s, r)) => (s, r),
+        None => return false,
+    };
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+    // The host, its port taken off (an IPv6 address in brackets keeps its colons).
+    let host = if let Some(h) = authority.strip_prefix('[') { h.split(']').next().map(|h| format!("[{h}]")).unwrap_or_default() } else { authority.split(':').next().unwrap_or("").to_string() };
+    let port_ok = authority.strip_prefix(host.as_str()).is_some_and(|p| p.is_empty() || (p.starts_with(':') && p.len() > 1 && p[1..].chars().all(|c| c.is_ascii_digit())));
+    match scheme {
+        "https" => !host.is_empty() && port_ok,
+        "http" => ["127.0.0.1", "localhost", "[::1]"].contains(&host.as_str()) && port_ok,
+        _ => false,
+    }
 }
 
 /// Check what the page or the CLI sends, then keep it (readable only by the user: it holds a key). A key left empty
@@ -99,6 +114,15 @@ pub fn set(v: &Value) -> Result<Settings> {
         }
     }
     write_private(&file(), &serde_json::to_vec_pretty(&new)?)?;
+    // Turned on (again): from now on — never what ran while it was off.
+    if new.on && !old.on {
+        let mut st = state();
+        if let Some(o) = st.as_object_mut() {
+            o.remove("sent_until");
+            o.remove("sent_at_end");
+        }
+        save_state(&st);
+    }
     Ok(new)
 }
 
@@ -131,9 +155,49 @@ fn identity(k: &str) -> bool {
     k.starts_with("user.") || k.starts_with("organization.") || k == "cwd" || k == "terminal.type" || k == "host.name" || k.starts_with("anthropic.")
 }
 
-/// Attributes that are what went in or came out: sent only with `text`.
-fn text_attr(k: &str) -> bool {
-    matches!(k, "args" | "files" | "system" | "input" | "output" | "query" | "prompt" | "response" | "user_prompt" | "used" | "title")
+/// With what went in and came out off, the only attributes whose text may leave (numbers and yes/no may): what ran, on
+/// which model, how it went — never a message, a path, a name or an address.
+fn plain_attr(k: &str) -> bool {
+    k.starts_with("gen_ai.usage.")
+        || k.starts_with("langfuse.")
+        || matches!(
+            k,
+            "echo.job" | "echo.telemetry" | "service" | "method" | "model" | "gen_ai.request.model" | "gen_ai.response.model" | "gen_ai.system"
+                | "gen_ai.provider.name" | "gen_ai.operation.name" | "gen_ai.tool.name" | "gen_ai.response.finish_reasons" | "tool_name" | "tool_name_safe"
+                | "span.type" | "decision" | "source" | "speed" | "effort" | "stop_reason" | "event.name" | "query_source" | "query_source_safe"
+                | "llm_request.context" | "permission_mode" | "claude_code_version" | "language" | "kind" | "status_code" | "success"
+        )
+}
+
+/// What of an attribute leaves: identity never; with `text` off only `plain_attr`s' text, numbers and yes/no; with it
+/// on everything else, this computer's home folder written `~` and identity taken out at any depth.
+fn keep(k: &str, v: &Value, text: bool) -> Option<Value> {
+    if identity(k) {
+        return None;
+    }
+    if text {
+        return Some(scrub(v));
+    }
+    match v {
+        Value::Number(_) | Value::Bool(_) => Some(v.clone()),
+        _ if plain_attr(k) => Some(v.clone()),
+        _ => None,
+    }
+}
+
+/// A value with identity keys gone at any depth and this computer's home folder written `~`.
+fn scrub(v: &Value) -> Value {
+    let home = paths::user_home().display().to_string();
+    match v {
+        Value::String(s) if home.len() > 1 => Value::String(s.replace(&home, "~")),
+        Value::Array(a) => Value::Array(a.iter().map(scrub).collect()),
+        Value::Object(m) => Value::Object(m.iter().filter(|(k, _)| !identity(k)).map(|(k, v)| (k.clone(), scrub(v))).collect()),
+        other => other.clone(),
+    }
+}
+
+fn kept(m: &Map<String, Value>, text: bool) -> Map<String, Value> {
+    m.iter().filter_map(|(k, v)| keep(k, v, text).map(|v| (k.clone(), v))).collect()
 }
 
 /// A JSON value as an OTLP attribute value (objects and arrays as JSON text).
@@ -220,23 +284,24 @@ pub fn to_otlp(records: &[Value], text: bool) -> Value {
             }
             _ => {}
         }
-        a.retain(|k, _| !identity(k) && (text || !text_attr(k)));
+        let failed = a.get("ok") == Some(&json!(false)) || a.get("success") == Some(&json!("false")) || a.get("success") == Some(&json!(false));
+        let error = a.get("error").and_then(Value::as_str).map(str::to_owned);
+        let a = kept(&a, text);
         let evs: Vec<Value> = events
             .iter()
             .filter(|e| text || e["source"] == "claude-code")
             .map(|e| {
-                let mut ea: Map<String, Value> = match &e["attrs"] {
+                let ea: Map<String, Value> = match &e["attrs"] {
                     Value::Object(m) => m.clone(),
                     other => Map::from_iter([("value".to_string(), other.clone())]),
                 };
-                ea.retain(|k, _| !identity(k) && (text || !text_attr(k)));
-                json!({"name": e["name"], "timeUnixNano": nanos(&e["at"]), "attributes": attributes(&ea)})
+                json!({"name": e["name"], "timeUnixNano": nanos(&e["at"]), "attributes": attributes(&kept(&ea, text))})
             })
             .collect();
-        let failed = a.get("ok") == Some(&json!(false)) || a.get("success") == Some(&json!("false"));
+        let message = if text { error.map(|e| scrub(&json!(e)).as_str().unwrap_or("failed").to_string()).unwrap_or_else(|| "failed".into()) } else { "failed".into() };
         let mut span = json!({"traceId": s["trace"], "spanId": s["span"], "name": s["name"], "kind": 1,
             "startTimeUnixNano": nanos(&s["start"]), "endTimeUnixNano": nanos(&s["end"]), "attributes": attributes(&a), "events": evs,
-            "status": if failed { json!({"code": 2, "message": a.get("error").and_then(Value::as_str).filter(|_| text).unwrap_or("failed")}) } else { json!({"code": 1}) }});
+            "status": if failed { json!({"code": 2, "message": message}) } else { json!({"code": 1}) }});
         if let Some(p) = s["parent"].as_str() {
             span["parentSpanId"] = json!(p);
         }
@@ -312,7 +377,8 @@ fn post(s: &Settings, body: &Value) -> Result<()> {
         use crate::app::NoWindow;
         c = c.no_window();
     }
-    let out = c.args(["-K"]).arg(&cfg_path).output();
+    // `-q` first: never the user's own ~/.curlrc (a proxy, a trace file, redirects).
+    let out = c.args(["-q", "-K"]).arg(&cfg_path).output();
     let _ = std::fs::remove_file(&cfg_path);
     let _ = std::fs::remove_file(&body_path);
     let out = out.context("running curl")?;
@@ -326,8 +392,9 @@ fn post(s: &Settings, body: &Value) -> Result<()> {
     Ok(())
 }
 
-/// The traces ended after `after` (an index line's `end`) and before `before`, oldest first, their day folder each.
-fn ended(after: &str, before: DateTime<Utc>) -> Vec<(PathBuf, Value)> {
+/// The traces ended at or after `after` (an index line's `end`) — those at `after` but in `done` left out — and before
+/// `before`, oldest first (by end, then id), their day folder each.
+fn ended(after: &str, done: &[String], before: DateTime<Utc>) -> Vec<(PathBuf, Value)> {
     let base = paths::config_dir().join(DIR);
     let mut out: Vec<(PathBuf, Value)> = Vec::new();
     for back in (0..2).rev() {
@@ -335,35 +402,60 @@ fn ended(after: &str, before: DateTime<Utc>) -> Vec<(PathBuf, Value)> {
         for v in lines(&base.join(&day).join(INDEX)) {
             let end = v["end"].as_str().unwrap_or("");
             let settled = DateTime::parse_from_rfc3339(end).is_ok_and(|e| e.with_timezone(&Utc) <= before);
-            if end > after && settled && v["id"].as_str().is_some_and(|i| valid_id(i, 32)) {
+            let id = v["id"].as_str().unwrap_or("");
+            let new = end > after || (end == after && !done.iter().any(|d| d == id));
+            if new && settled && valid_id(id, 32) {
                 out.push((base.join(&day), v));
             }
         }
     }
-    out.sort_by(|a, b| a.1["end"].as_str().cmp(&b.1["end"].as_str()));
+    out.sort_by(|a, b| (a.1["end"].as_str(), a.1["id"].as_str()).cmp(&(b.1["end"].as_str(), b.1["id"].as_str())));
     out
+}
+
+/// Files a pass left behind (Echo stopped mid-send): gone, they may hold the key.
+fn sweep_leftovers() {
+    for e in std::fs::read_dir(paths::config_dir().join(DIR)).into_iter().flatten().flatten() {
+        if e.file_name().to_string_lossy().starts_with(".export-") {
+            let _ = std::fs::remove_file(e.path());
+        }
+    }
 }
 
 /// One pass: the traces ended since the last sent, at most `PER_PASS`, sent in order; stops at the first that fails
 /// (kept as the error, tried again next pass). Returns how many went.
 pub fn pass(now: DateTime<Utc>) -> Result<usize> {
-    let s = load();
-    if !s.on {
+    pass_at(now, Utc::now())
+}
+
+/// `pass`, sending turned on at `start` when it has no mark yet (tests set it).
+fn pass_at(now: DateTime<Utc>, start: DateTime<Utc>) -> Result<usize> {
+    if !load().on {
         return Ok(0);
     }
+    sweep_leftovers();
     let mut st = state();
     // Never the past before it was turned on: from now on.
-    let after = st["sent_until"].as_str().map(str::to_owned).unwrap_or_else(|| now.to_rfc3339_opts(chrono::SecondsFormat::Millis, true));
+    let after = st["sent_until"].as_str().map(str::to_owned).unwrap_or_else(|| start.to_rfc3339_opts(chrono::SecondsFormat::Millis, true));
     if st["sent_until"].is_null() {
+        // From this very millisecond: a run that ended in it ran before sending was on.
+        let then: Vec<Value> = ended(&after, &[], Utc::now() + chrono::Duration::days(1)).into_iter().filter(|(_, l)| l["end"].as_str() == Some(after.as_str())).map(|(_, l)| l["id"].clone()).collect();
         st["sent_until"] = json!(after);
+        st["sent_at_end"] = json!(then);
         save_state(&st);
     }
     let mut sent = 0;
-    for (day, line) in ended(&after, now - chrono::Duration::seconds(SETTLE_SECS)).into_iter().take(PER_PASS) {
+    let done: Vec<String> = st["sent_at_end"].as_array().into_iter().flatten().filter_map(|v| v.as_str().map(str::to_owned)).collect();
+    for (_, line) in ended(&after, &done, now - chrono::Duration::seconds(SETTLE_SECS)).into_iter().take(PER_PASS) {
+        // Read again before each: turned off (or changed) meanwhile, it stops here.
+        let s = load();
+        if !s.on {
+            break;
+        }
         let id = line["id"].as_str().unwrap_or("");
-        let records = lines(&day.join(format!("{id}.jsonl")));
-        if !records.is_empty() {
-            if let Err(e) = post(&s, &to_otlp(&records, s.text)) {
+        let recs = records(id);
+        if !recs.is_empty() {
+            if let Err(e) = post(&s, &to_otlp(&recs, s.text)) {
                 st["error"] = json!(format!("{e:#}"));
                 st["error_at"] = json!(now.to_rfc3339());
                 save_state(&st);
@@ -373,6 +465,9 @@ pub fn pass(now: DateTime<Utc>) -> Result<usize> {
             st["last_sent"] = json!(now.to_rfc3339());
             st["sent"] = json!(st["sent"].as_u64().unwrap_or(0) + 1);
         }
+        // Those sent at this very end, so one ending in the same millisecond isn't skipped.
+        let at_end: Vec<Value> = if st["sent_until"] == line["end"] { st["sent_at_end"].as_array().cloned().unwrap_or_default() } else { Vec::new() };
+        st["sent_at_end"] = json!(at_end.into_iter().chain([json!(id)]).collect::<Vec<_>>());
         st["sent_until"] = line["end"].clone();
         st["error"] = Value::Null;
         save_state(&st);
@@ -387,9 +482,9 @@ pub fn send_newest() -> Result<String> {
     if !s.on {
         bail!("sending traces is off");
     }
-    let (day, line) = ended("", Utc::now()).into_iter().last().context("no trace to send yet: Echo hasn't run anything today")?;
+    let (_, line) = ended("", &[], Utc::now()).into_iter().last().context("no trace to send yet: Echo hasn't run anything today")?;
     let id = line["id"].as_str().unwrap_or("").to_string();
-    post(&s, &to_otlp(&lines(&day.join(format!("{id}.jsonl"))), s.text))?;
+    post(&s, &to_otlp(&records(&id), s.text))?;
     Ok(id)
 }
 
@@ -488,6 +583,107 @@ mod tests {
     }
 
     #[test]
+    fn only_https_or_this_computer_and_never_a_user_in_the_address() {
+        for ok in ["https://cloud.langfuse.com", "https://otel.acme.example:4318/v1/traces", "http://127.0.0.1:4318", "http://localhost", "http://[::1]:4318/x"] {
+            assert!(address_ok(ok), "{ok}");
+        }
+        for bad in ["http://127.0.0.1:80@evil.example", "http://localhost:@evil.example", "http://127.0.0.1.evil.example", "https://user:pw@otel.acme.example",
+                    "http://collector.acme.example:4318", "ftp://127.0.0.1", "HTTPS://x.example", "https://", "http://localhost:", "http://localhost:80x", "https://a.example/\"x"] {
+            assert!(!address_ok(bad), "{bad}");
+        }
+    }
+
+    #[test]
+    fn with_text_off_only_what_ran_leaves_and_with_it_on_no_home_folder_or_identity_at_any_depth() {
+        let (_env, _root) = testenv::folders("export-allow");
+        let home = paths::user_home().display().to_string();
+        let t = "0123456789abcdef0123456789abcdef";
+        let recs = vec![
+            json!({"t": "span", "source": "echo", "trace": t, "span": "a1", "parent": null, "name": "transcription", "start": "2026-11-20T12:00:00.000Z", "end": "2026-11-20T12:01:00.000Z",
+                   "attrs": {"call": "2026-11-20 Acme pricing (made up)", "ok": false, "error": format!("reading {home}/echo/calls/x/transcript.md: no such file"), "segments": 12, "model": "parakeet", "profile": "work"}}),
+            json!({"t": "span", "source": "echo", "trace": t, "span": "a2", "parent": "a1", "name": "http.request", "start": "2026-11-20T12:00:00.000Z", "end": "2026-11-20T12:00:01.000Z",
+                   "attrs": {"service": "microsoft", "method": "GET", "host": "graph.microsoft.com", "path": "/v1.0/chats/19:oid-a_oid-b@unq.gbl.spaces", "query": "$search=pricing", "ok": true}}),
+            json!({"t": "span", "source": "claude-code", "trace": t, "span": "a3", "parent": "a1", "name": "claude_code.tool", "start": "2026-11-20T12:00:00.000Z", "end": "2026-11-20T12:00:01.000Z",
+                   "attrs": {"tool_name": "Bash", "tool_parameters": "{\"command\":\"cat secret.txt\"}", "duration_ms": 12, "gen_ai.usage.input_tokens": 5}}),
+            json!({"t": "event", "source": "claude-code", "trace": t, "span": "a3", "name": "tool_result", "at": "2026-11-20T12:00:01.000Z",
+                   "attrs": {"tool_name": "Bash", "tool_input": "cat secret.txt", "full_command": "cat secret.txt", "user.email": "sam@initech.example", "success": "true"}}),
+            json!({"t": "event", "source": "echo", "trace": t, "span": "a1", "name": "claude.system.init", "at": "2026-11-20T12:00:00.000Z",
+                   "attrs": {"cwd": format!("{home}/echo"), "plugins": [{"name": "echo", "path": format!("{home}/.claude/plugins/echo"), "user.id": "u-1"}]}}),
+        ];
+        let off = to_otlp(&recs, false).to_string();
+        for gone in ["Acme pricing", "transcript.md", &home, "oid-a", "pricing", "secret.txt", "\"work\"", "graph.microsoft.com", "sam@initech.example", "plugins"] {
+            assert!(!off.contains(gone), "{gone} stays home with text off: {off}");
+        }
+        for stays in ["\"parakeet\"", "\"microsoft\"", "\"GET\"", "\"Bash\"", "\"segments\"", "\"failed\"", "gen_ai.usage.input_tokens"] {
+            assert!(off.contains(stays), "{stays} leaves: {off}");
+        }
+        let on = to_otlp(&recs, true).to_string();
+        assert!(on.contains("Acme pricing") && on.contains("~/echo/calls/x/transcript.md") && on.contains("~/.claude/plugins/echo"), "text with the switch on, the home folder as ~");
+        for gone in [home.as_str(), "sam@initech.example", "u-1"] {
+            assert!(!on.contains(gone), "{gone} never leaves: {on}");
+        }
+    }
+
+    #[test]
+    fn turned_on_again_it_sends_from_then_never_what_ran_while_it_was_off() {
+        let (_env, _root) = testenv::folders("export-again");
+        let (url, got) = collector(vec![200, 200]);
+        let on = json!({"on": true, "kind": "otlp", "endpoint": url});
+        set(&on).unwrap();
+        pass(Utc::now()).unwrap();
+        std::thread::sleep(Duration::from_millis(20));
+        let first = a_trace();
+        let later = || Utc::now() + chrono::Duration::seconds(SETTLE_SECS + 5);
+        assert_eq!(pass(later()).unwrap(), 1);
+        set(&json!({"on": false, "kind": "otlp", "endpoint": url})).unwrap();
+        let while_off = a_trace();
+        set(&on).unwrap();
+        assert_eq!(pass(later()).unwrap(), 0, "the run made while off isn't sent");
+        std::thread::sleep(Duration::from_millis(20));
+        let after = a_trace();
+        assert_eq!(pass(later()).unwrap(), 1);
+        let got = got.lock().unwrap();
+        assert!(got[0].2.contains(&first) && got[1].2.contains(&after) && !got.iter().any(|g| g.2.contains(&while_off)));
+    }
+
+    /// An index line, and the trace's records split between two day folders (a run across midnight).
+    fn planted(id: &str, end: &str, days: &[&str]) {
+        let base = paths::config_dir().join(DIR);
+        for (i, d) in days.iter().enumerate() {
+            std::fs::create_dir_all(base.join(d)).unwrap();
+            let rec = json!({"t": "span", "source": "echo", "trace": id, "span": format!("{:016x}", i + 1), "parent": if i == 0 { Value::Null } else { json!("0000000000000001") },
+                             "name": format!("step.{i}"), "start": end, "end": end, "attrs": {}});
+            let f = base.join(d).join(format!("{id}.jsonl"));
+            let before = std::fs::read_to_string(&f).unwrap_or_default();
+            std::fs::write(&f, format!("{before}{rec}\n")).unwrap();
+        }
+        let last = base.join(days[days.len() - 1]).join(INDEX);
+        let before = std::fs::read_to_string(&last).unwrap_or_default();
+        std::fs::write(&last, format!("{before}{}\n", json!({"id": id, "name": "job.minutes", "job": "minutes", "end": end}))).unwrap();
+    }
+
+    #[test]
+    fn runs_ending_in_the_same_millisecond_are_each_sent_once_and_one_across_midnight_whole() {
+        let (_env, _root) = testenv::folders("export-order");
+        let (url, got) = collector(vec![200, 500, 200]);
+        let today = Local::now().format("%Y-%m-%d").to_string();
+        let yesterday = (Local::now() - chrono::Duration::days(1)).format("%Y-%m-%d").to_string();
+        set(&json!({"on": true, "kind": "otlp", "endpoint": url})).unwrap();
+        let mut st = state();
+        st["sent_until"] = json!("2000-01-01T00:00:00.000Z");
+        save_state(&st);
+        let end = (Utc::now() - chrono::Duration::minutes(5)).to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+        planted("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", &end, &[&yesterday, &today]);
+        planted("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", &end, &[&today]);
+        assert!(pass(Utc::now()).is_err(), "the first sent, the second refused");
+        assert_eq!(pass(Utc::now()).unwrap(), 1, "the second, tried again: not skipped though it ended in the same millisecond");
+        assert_eq!(pass(Utc::now()).unwrap(), 0, "each once");
+        let got = got.lock().unwrap();
+        assert!(got[0].2.contains("step.0") && got[0].2.contains("step.1"), "across midnight: both days' spans");
+        assert!(got[2].2.contains("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"));
+    }
+
+    #[test]
     fn a_trace_leaves_without_identity_and_with_its_text_only_when_allowed() {
         let (_env, _root) = testenv::folders("export-otlp");
         let id = a_trace();
@@ -518,9 +714,15 @@ mod tests {
         let (_env, _root) = testenv::folders("export-pass");
         let (url, got) = collector(vec![500, 200]);
         set(&json!({"on": true, "kind": "otlp", "endpoint": url, "headers": ["X-Team: acme"]})).unwrap();
-        // Turned on: from now on, never the past.
+        // Turned on: from now on, never the past — a run that ended in the same millisecond as the mark neither.
         let before = a_trace();
-        assert_eq!(pass(Utc::now()).unwrap(), 0);
+        let mut st = state();
+        let end = super::super::list(1, None, None, 1)["traces"][0]["end"].clone();
+        st["sent_until"] = Value::Null;
+        save_state(&st);
+        let mark = DateTime::parse_from_rfc3339(end.as_str().unwrap()).unwrap().with_timezone(&Utc);
+        // The mark is the moment it starts; here, the very millisecond `before` ended.
+        assert_eq!(pass_at(Utc::now(), mark).unwrap(), 0);
         std::thread::sleep(Duration::from_millis(20));
         let id = a_trace();
         // Not yet settled (Claude Code's spans may still come): not sent.
