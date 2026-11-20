@@ -197,7 +197,15 @@ fn traced<T>(config: &str, f: impl FnOnce() -> Result<T>) -> Result<T> {
 }
 
 fn curl(config: &str) -> Result<Value> {
-    traced(config, || curl_untraced(config))
+    traced(config, || {
+        let v = curl_untraced(config)?;
+        // Microsoft's own error in its answer (raised by the caller): the request's span says so.
+        if let Some(e) = v.get("error") {
+            let why = e["code"].as_str().or(e.as_str()).unwrap_or("error");
+            crate::telemetry::annotate(json!({"ok": false, "error": format!("{why} {}", e["message"].as_str().unwrap_or(""))}));
+        }
+        Ok(v)
+    })
 }
 
 fn curl_untraced(config: &str) -> Result<Value> {
@@ -1186,6 +1194,33 @@ mod tests {
         let req = &shown["spans"][0]["children"][0];
         assert_eq!((req["attrs"]["method"].clone(), req["attrs"]["path"].clone(), req["attrs"]["service"].clone()), (json!("POST"), json!("/v1.0/me/sendMail"), json!("microsoft")));
         assert!(!shown.to_string().contains("secret-token"), "no header, no token");
+    }
+
+    #[test]
+    fn a_request_microsoft_answers_with_its_error_is_traced_as_failed_and_answers_as_before() {
+        let (_env, _root) = crate::paths::testenv::folders("graph-traced-error");
+        // A server answering as Graph does for a missing item.
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = l.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            use std::io::{BufRead, Write as _};
+            let (mut s, _) = l.accept().unwrap();
+            let mut r = std::io::BufReader::new(s.try_clone().unwrap());
+            let mut h = String::new();
+            while r.read_line(&mut h).unwrap_or(0) > 0 && h.trim() != "" {
+                h.clear();
+            }
+            let body = r#"{"error": {"code": "ErrorItemNotFound", "message": "Not found"}}"#;
+            let _ = s.write_all(format!("HTTP/1.1 404 Not Found\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).as_bytes());
+        });
+        let job = crate::jobs::begin("fetch");
+        let answer = curl(&format!("url = {}\n", quote(&format!("http://127.0.0.1:{port}/v1.0/me/messages/none")))).unwrap();
+        assert_eq!(answer["error"]["code"], "ErrorItemNotFound", "the caller gets the answer as it was");
+        job.done(Some("fetched".into()));
+        crate::telemetry::flush(std::time::Duration::from_secs(5));
+        let id = crate::telemetry::list(7, Some("fetch"), None, 1)["traces"][0]["id"].as_str().unwrap().to_string();
+        let req = &crate::telemetry::show(&id).unwrap()["spans"][0]["children"][0];
+        assert_eq!((req["attrs"]["ok"].clone(), req["attrs"]["error"].clone(), req["attrs"]["path"].clone()), (json!(false), json!("ErrorItemNotFound Not found"), json!("/v1.0/me/messages/none")));
     }
 
     #[test]

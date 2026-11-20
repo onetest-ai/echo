@@ -940,10 +940,12 @@ fn main() -> Result<()> {
     };
     // A change that failed is noted too, with why.
     notes::note_action(&argv, out.as_ref().err().map(|e| format!("failed: {e:#}")).as_deref());
-    // A command that failed is a trace of its own (its words and why), not only a line on stderr.
+    // A command that failed is a trace of its own (its command and why), not only a line on stderr: its command words
+    // only, never its arguments (a `--key`, a `--token`, a setting's value).
     if let Err(e) = &out {
-        let name = argv.iter().find(|a| !a.starts_with('-')).map_or("echoctl", String::as_str);
-        telemetry::record_span(&format!("cli.{name}"), started, serde_json::json!({"args": argv, "ok": false, "error": format!("{e:#}")}));
+        let words: Vec<&str> = argv.iter().take_while(|a| !a.starts_with('-')).take(2).map(String::as_str).collect();
+        let name = words.first().copied().unwrap_or("echoctl");
+        telemetry::record_span(&format!("cli.{name}"), started, serde_json::json!({"command": words.join(" "), "ok": false, "error": format!("{e:#}")}));
     }
     // What this command traced is written before it ends (a moment at most: never waits on a full disk).
     telemetry::flush(std::time::Duration::from_millis(500));

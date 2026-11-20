@@ -130,9 +130,12 @@ reads the data folder's files.
   query, never a header), a model call without Claude Code `model.request` (`livenotes::model::complete_local_body`:
   its system, input, output, usage; its tokens counted in the trace by `telemetry::count_usage`), a call's
   `transcription` (`transcribe::transcribe`: model, language, segments, audio seconds), the threads' mail and chat
-  fetch `job.fetch` (`projectsync::run_with`, under the sync's span). A span's ended children wait on their thread
-  until its root ends (`HELD`): a discarded root drops them, unless one failed — then it is kept, `ok` false and that
-  step's `error`. A CLI command that fails is a span `cli.<command>` with its `args` and `error` (`main`).
+  fetch `job.fetch` (`projectsync::run_with`: a trace of its own, `telemetry::start_root`, kept when it brought
+  something or failed), the calendar's sync `app.calendar_sync` and the Teams transcript scan `app.transcript_scan`.
+  A Microsoft 365 answer carrying `error` marks its request's span failed (`graph::curl`; the caller gets the answer
+  as before). A span's ended children wait on their thread until their trace's root ends (`HELD`): a discarded root
+  drops them, a discarded step the ones under it. A CLI command that fails is a span `cli.<command>` with its command
+  words (`command`, at most two, before any option) and `error`, never its arguments (`main`).
 - The page polls a call's revision, `/api/call/<name>/rev` (`window::call::call_rev`), and fetches the call only when it
   changed.
 

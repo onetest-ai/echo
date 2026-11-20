@@ -246,8 +246,19 @@ fn current_job() -> Option<String> {
 
 /// Start a span on this thread: a child of its current span, else a new trace.
 pub fn start(name: &str, attrs: Value) -> Span {
-    let (trace, parent) = match current() {
-        Some((t, s, _)) => (t, Some(s)),
+    let at = current().map(|(t, s, _)| (t, s));
+    begin(name, attrs, at)
+}
+
+/// Start a trace of its own on this thread, whatever span is open (a job of its own run inside another's pass): the
+/// current span until it ends.
+pub fn start_root(name: &str, attrs: Value) -> Span {
+    begin(name, attrs, None)
+}
+
+fn begin(name: &str, attrs: Value, under: Option<(String, String)>) -> Span {
+    let (trace, parent) = match under {
+        Some((t, s)) => (t, Some(s)),
         None => (new_id(16), None),
     };
     let id = new_id(8);
@@ -260,22 +271,29 @@ impl Span {
         self.attrs.insert(k.to_string(), v.into());
     }
 
-    /// Not kept, nor the spans it held: a look that found nothing to do — unless something in it failed (a fetch that
-    /// couldn't read mail): then kept as it ended.
+    /// Not kept, nor the spans under it it held: a look that found nothing to do.
     pub fn discard(mut self) {
-        let failed = HELD.with(|h| h.borrow().get(&self.trace).and_then(|v| v.iter().find(|l| l["attrs"]["ok"] == false).map(|l| l["attrs"]["error"].clone())));
-        if let (Some(error), None) = (failed, &self.parent) {
-            // Kept, saying which step failed (dropped: ends as any span does).
-            self.attrs.insert("ok".into(), json!(false));
-            self.attrs.insert("error".into(), error);
-            return;
-        }
         self.pop();
         self.open = false;
         if self.parent.is_none() {
             HELD.with(|h| h.borrow_mut().remove(&self.trace));
             TOTALS.lock().unwrap_or_else(|e| e.into_inner()).remove(&self.trace);
+            return;
         }
+        // A step's: the spans held under it go with it.
+        HELD.with(|h| {
+            if let Some(held) = h.borrow_mut().get_mut(&self.trace) {
+                let mut gone: HashSet<String> = HashSet::from([self.id.clone()]);
+                loop {
+                    let more: Vec<String> = held.iter().filter(|l| l["parent"].as_str().is_some_and(|p| gone.contains(p))).filter_map(|l| l["span"].as_str().map(str::to_owned)).filter(|s| !gone.contains(s)).collect();
+                    if more.is_empty() {
+                        break;
+                    }
+                    gone.extend(more);
+                }
+                held.retain(|l| !l["span"].as_str().is_some_and(|s| gone.contains(s)));
+            }
+        });
     }
 
     fn pop(&mut self) {
@@ -296,7 +314,8 @@ impl Span {
         }
         self.open = false;
         self.pop();
-        let root_open = CURRENT.with(|c| c.borrow().first().is_some_and(|(t, _, _)| *t == self.trace));
+        // Its trace's root still open on this thread: held until it ends.
+        let root_open = CURRENT.with(|c| c.borrow().iter().any(|(t, _, _)| *t == self.trace));
         // Its Claude Code runs that gave no result (stopped, failed to start) end with it.
         let orphans: Vec<String> = RUNS.lock().unwrap_or_else(|e| e.into_inner()).iter().filter(|r| r.parent.as_deref() == Some(self.id.as_str())).map(|r| r.id.clone()).collect();
         for r in orphans {
@@ -376,18 +395,23 @@ pub fn record_span(name: &str, started: DateTime<Local>, attrs: Value) {
 fn index(trace: &str, name: &str, start: DateTime<Utc>, end: DateTime<Utc>, attrs: &Map<String, Value>) {
     let t = TOTALS.lock().unwrap_or_else(|e| e.into_inner()).remove(trace).unwrap_or_default();
     let job = attrs.get("echo.job").cloned().or_else(|| name.strip_prefix("job.").map(|j| json!(j)));
-    let kind = match name.split('.').next().unwrap_or("") {
+    let line = json!({"id": trace, "name": name, "kind": kind_of(name), "job": job, "start": ts(start), "end": ts(end), "duration_ms": (end - start).num_milliseconds().max(0),
+        "ok": attrs.get("ok").cloned().unwrap_or(json!(true)), "summary": attrs.get("summary"), "error": attrs.get("error"),
+        "runs": t.runs, "tokens": t.tokens, "cost_usd": (t.cost_usd * 1e6).round() / 1e6, "model": t.models.join(", ")});
+    queue(INDEX.into(), line);
+}
+
+/// A trace's kind, from its root's name: `job`, `claude`, `request`, `model`, `command`, else the name's first word
+/// (`transcription`, `app`).
+fn kind_of(name: &str) -> &str {
+    match name.split('.').next().unwrap_or("") {
         "job" => "job",
         "claude" => "claude",
         "http" => "request",
         "model" => "model",
         "cli" => "command",
         other => other,
-    };
-    let line = json!({"id": trace, "name": name, "kind": kind, "job": job, "start": ts(start), "end": ts(end), "duration_ms": (end - start).num_milliseconds().max(0),
-        "ok": attrs.get("ok").cloned().unwrap_or(json!(true)), "summary": attrs.get("summary"), "error": attrs.get("error"),
-        "runs": t.runs, "tokens": t.tokens, "cost_usd": (t.cost_usd * 1e6).round() / 1e6, "model": t.models.join(", ")});
-    queue(INDEX.into(), line);
+    }
 }
 
 // ── Claude Code runs ─────────────────────────────────────────────────────────────────────────
@@ -678,7 +702,17 @@ pub fn list(days: i64, job: Option<&str>, kind: Option<&str>, limit: usize) -> V
         if day.is_none_or(|x| x < oldest) {
             continue;
         }
-        let mut of_day: Vec<Value> = lines(&d.join(INDEX)).into_iter().filter(|v| job.is_none_or(|j| v["job"] == j) && kind.is_none_or(|k| v["kind"] == k)).collect();
+        let mut of_day: Vec<Value> = lines(&d.join(INDEX))
+            .into_iter()
+            .map(|mut v| {
+                // A line written before kinds: its kind from its name.
+                if v["kind"].is_null() {
+                    v["kind"] = json!(kind_of(v["name"].as_str().unwrap_or("")));
+                }
+                v
+            })
+            .filter(|v| job.is_none_or(|j| v["job"] == j) && kind.is_none_or(|k| v["kind"] == k))
+            .collect();
         of_day.reverse();
         out.extend(of_day);
     }
@@ -1048,20 +1082,54 @@ mod tests {
     }
 
     #[test]
-    fn a_look_that_found_nothing_leaves_nothing_unless_a_step_of_it_failed() {
+    fn a_look_that_found_nothing_leaves_nothing_and_a_discarded_step_takes_its_own_with_it() {
         let (_env, _root) = testenv::folders("telemetry-held");
-        let quiet = start("job.thread_sync", json!({"echo.job": "thread_sync"}));
-        let _ = traced("http.request", outbound("microsoft", "GET", "https://graph.microsoft.com/v1.0/me/messages"), || Ok(()));
+        let req = |path: &str, ok: bool| traced("http.request", outbound("microsoft", "GET", &format!("https://graph.microsoft.com/v1.0{path}")), || if ok { Ok(()) } else { anyhow::bail!("ErrorItemNotFound") });
+        let quiet = start("job.needs", json!({"echo.job": "needs"}));
+        let _ = req("/me/messages", true);
+        let _ = req("/me/messages/gone", false);
         quiet.discard();
         flush(Duration::from_secs(5));
-        assert_eq!(list(KEEP_DAYS, None, None, 10)["traces"], json!([]), "its request went with it");
-        let failing = start("job.thread_sync", json!({"echo.job": "thread_sync"}));
-        let _ = traced("http.request", outbound("microsoft", "GET", "https://graph.microsoft.com/v1.0/me/messages"), || -> anyhow::Result<()> { anyhow::bail!("network error: timed out") });
-        failing.discard();
+        assert_eq!(list(KEEP_DAYS, None, None, 10)["traces"], json!([]), "its requests went with it, a handled failure too");
+
+        let kept = start("job.thread_sync", json!({"echo.job": "thread_sync"}));
+        let step = start("step", json!({}));
+        let _ = req("/me/chats", true);
+        step.discard();
+        let _ = req("/me/messages", true);
+        drop(kept);
         flush(Duration::from_secs(5));
         let t = &list(KEEP_DAYS, None, None, 10)["traces"][0];
-        assert_eq!((t["ok"].clone(), t["error"].clone()), (json!(false), json!("network error: timed out")));
-        assert_eq!(show(t["id"].as_str().unwrap()).unwrap()["spans"][0]["children"][0]["attrs"]["ok"], false);
+        let shown = show(t["id"].as_str().unwrap()).unwrap();
+        assert_eq!(shown["spans"].as_array().unwrap().len(), 1, "one root, no orphan: {shown}");
+        let kids: Vec<Value> = shown["spans"][0]["children"].as_array().unwrap().iter().map(|k| k["attrs"]["path"].clone()).collect();
+        assert_eq!(kids, [json!("/v1.0/me/messages")]);
+    }
+
+    #[test]
+    fn a_job_of_its_own_inside_another_s_pass_is_kept_when_that_pass_is_not() {
+        let (_env, _root) = testenv::folders("telemetry-own-root");
+        let sync = start("job.thread_sync", json!({"echo.job": "thread_sync"}));
+        let fetch = start_root("job.fetch", json!({"echo.job": "fetch"}));
+        let _ = traced("http.request", outbound("microsoft", "GET", "https://graph.microsoft.com/v1.0/me/messages"), || Ok(()));
+        crate::jobs::record("fetch", Local::now(), Ok("2 new items".into()), json!({}));
+        drop(fetch);
+        sync.discard();
+        flush(Duration::from_secs(5));
+        let l = list(KEEP_DAYS, None, None, 10);
+        assert_eq!(l["traces"].as_array().unwrap().len(), 1, "{l}");
+        let t = &l["traces"][0];
+        assert_eq!((t["name"].clone(), t["job"].clone(), t["summary"].clone()), (json!("job.fetch"), json!("fetch"), json!("2 new items")));
+        assert_eq!(show(t["id"].as_str().unwrap()).unwrap()["spans"][0]["children"][0]["name"], "http.request");
+    }
+
+    #[test]
+    fn an_index_line_from_before_kinds_gets_its_kind_from_its_name() {
+        let (_env, root) = testenv::folders("telemetry-old-index");
+        let day = root.join("config/telemetry").join(Local::now().format("%Y-%m-%d").to_string());
+        std::fs::create_dir_all(&day).unwrap();
+        std::fs::write(day.join(INDEX), format!("{}\n", json!({"id": new_id(16), "name": "job.minutes", "job": "minutes", "end": ts(Utc::now())}))).unwrap();
+        assert_eq!(list(KEEP_DAYS, None, Some("job"), 10)["traces"][0]["kind"], "job");
     }
 
     #[test]

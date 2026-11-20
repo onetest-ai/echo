@@ -35,14 +35,14 @@
   },
   {
    "id": "F-TRACE-05",
-   "feature": "Echo's own steps are traced too, under the job they run in (else a trace of their own): each request to Microsoft 365 (service, method, host, path and query, how it ended; never a header), each model call made without Claude Code (what it was given, what it answered, its tokens; counted in its trace's tokens), a call's transcription (model, language, segments, audio seconds, how it ended), the threads' mail and chat fetch; a look that found nothing leaves nothing unless a step of it failed (then kept, its error said); `echoctl traces --kind` lists one kind (`job`, `claude`, `request`, `model`, `transcription`, `command`)",
+   "feature": "Echo's own steps are traced too, under the job they run in (else a trace of their own): each request to Microsoft 365 (service, method, host, path and query, how it ended; never a header), each model call made without Claude Code (what it was given, what it answered, its tokens; counted in its trace's tokens), a call's transcription (model, language, segments, audio seconds, how it ended), the threads' mail and chat fetch (a trace of its own), the calendar's sync and the Teams transcript scan (one trace each, their requests under it); a Microsoft 365 answer carrying an error marks its request failed; a look that found nothing leaves nothing, the requests in it included; `echoctl traces --kind` lists one kind (`job`, `claude`, `request`, `model`, `transcription`, `command`)",
    "priority": "high",
    "check": "agent",
    "axes": []
   },
   {
    "id": "F-TRACE-06",
-   "feature": "A CLI command that fails leaves a trace of its own: its words and its error (`echoctl traces --kind command`)",
+   "feature": "A CLI command that fails leaves a trace of its own: its command words (`server use`) and its error, never its arguments (a `--key`, a `--token`, a setting's value) (`echoctl traces --kind command`)",
    "priority": "medium",
    "check": "agent",
    "axes": []
