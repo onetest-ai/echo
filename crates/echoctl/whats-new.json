@@ -1,5 +1,11 @@
 [
   {
+    "version": "0.10.6",
+    "items": [
+      { "icon": "shield", "title": "Safer work on web pages", "text": "A plugin's Claude can work through pages it gathered with file tools only, in that plugin's folder, never reaching your data or the web.", "open": "settings/plugins" }
+    ]
+  },
+  {
     "version": "0.10.5",
     "items": [
       { "icon": "plugin", "title": "Plugins that work together", "text": "Plugins can offer their commands to each other and to Claude in Echo, so one plugin or Claude uses what another one does.", "open": "settings/plugins" },
