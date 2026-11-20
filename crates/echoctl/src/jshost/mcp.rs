@@ -18,18 +18,86 @@ fn tools() -> Value {
     let obj = |props: Value, req: &[&str]| json!({"type": "object", "properties": props, "required": req});
     let s = |d: &str| json!({"type": "string", "description": d});
     json!([
-        {"name": "plugins", "description": "The user's Echo plugins that offer commands: id, name, what each is for. Then plugin(id) for its commands.", "inputSchema": obj(json!({}), &[])},
-        {"name": "plugin", "description": "One plugin's commands, each with when to call it. Then command(id, name) for its arguments.", "inputSchema": obj(json!({"id": s("the plugin's id")}), &["id"])},
+        {"name": "plugins", "description": "Every Echo plugin that gives you something: id, name, what it is for, how many commands it offers, its guide to Read first (`guide`, with `entries` of its own) and its skills. Then plugin(id) for its commands.", "inputSchema": obj(json!({}), &[])},
+        {"name": "plugin", "description": "One plugin: its commands, each with when to call it, its guide and its skills. Then command(id, name) for a command's arguments.", "inputSchema": obj(json!({"id": s("the plugin's id")}), &["id"])},
         {"name": "command", "description": "One command's arguments: names, which are optional, defaults (args null: any JSON object).", "inputSchema": obj(json!({"id": s("the plugin's id"), "name": s("the command")}), &["id", "name"])},
         {"name": "call", "description": "Call a plugin's command with its arguments; its answer as JSON.", "inputSchema": obj(json!({"id": s("the plugin's id"), "name": s("the command"), "args": {"type": "object", "description": "its arguments"}}), &["id", "name"])},
     ])
 }
 
+/// A plugin's guide laid out for Claude: what it gives, its CLAUDE.md, its skills, its entries' [{name, summary, guide}].
+struct Guide {
+    what: String,
+    read: String,
+    skills: Vec<String>,
+    entries: Vec<Value>,
+}
+
+/// The plugins whose folders this server couldn't check (busy) when it was first asked: checked once a session, as the
+/// core's hook does, never on every call.
+static UNCHECKED: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
+
+/// The plugins with a guide laid out for Claude, their folders checked as the core's are: by id.
+fn guides() -> std::collections::BTreeMap<String, Guide> {
+    let clean = |t: &str| crate::plugins::agent::plain(t, 200);
+    let unchecked = UNCHECKED.get_or_init(crate::plugins::agent::check_folders);
+    let mut out: std::collections::BTreeMap<String, Guide> = Default::default();
+    for r in crate::plugins::agent::rows().into_iter().filter(|r| !unchecked.contains(&r.id)) {
+        let parts: Vec<&str> = r.read.split('/').collect();
+        match parts.as_slice() {
+            [".plugins", _, "CLAUDE.md"] => {
+                out.insert(r.id.clone(), Guide { what: clean(&r.what), read: r.read.clone(), skills: r.skills.clone(), entries: vec![] });
+            }
+            [".plugins", _, name, "CLAUDE.md"] => {
+                if let Some(g) = out.get_mut(&r.id) {
+                    g.entries.push(json!({"name": name, "summary": clean(&r.what), "guide": r.read}));
+                }
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
+fn name_of(id: &str) -> String {
+    crate::plugins::enabled().into_iter().find(|p| p.id == id).map(|p| p.name).unwrap_or_else(|| id.to_string())
+}
+
+/// Every plugin that offers commands or gives a guide: [{id, name, description, commands, guide, skills, entries}].
+fn everything() -> Value {
+    let offered: std::collections::BTreeMap<String, offers::Offer> = offers::all().into_iter().collect();
+    let guides = guides();
+    let ids: std::collections::BTreeSet<&String> = offered.keys().chain(guides.keys()).collect();
+    json!(ids.into_iter().map(|id| {
+        let (o, g) = (offered.get(id), guides.get(id));
+        json!({"id": id, "name": name_of(id),
+               "description": g.map(|g| g.what.clone()).or_else(|| o.map(|o| crate::plugins::agent::plain(&o.description, 200))).unwrap_or_default(),
+               "commands": o.map_or(0, |o| o.commands.len()),
+               "guide": g.map(|g| g.read.clone()), "skills": g.map(|g| g.skills.clone()).unwrap_or_default(),
+               "entries": g.map(|g| g.entries.clone()).unwrap_or_default()})
+    }).collect::<Vec<_>>())
+}
+
+/// One plugin: what `offers::detail` gives (commands) with its guide, skills and entries; a plugin with only a guide
+/// has no commands.
+fn one(id: &str) -> Result<Value> {
+    let g = guides().remove(id);
+    let mut v = match (offers::detail(id), &g) {
+        (Ok(v), _) => v,
+        (Err(_), Some(g)) => json!({"id": id, "name": name_of(id), "description": g.what, "commands": []}),
+        (Err(e), None) => anyhow::bail!("no plugin “{id}” offers commands or a guide ({e:#})"),
+    };
+    v["guide"] = json!(g.as_ref().map(|g| g.read.clone()));
+    v["skills"] = json!(g.as_ref().map(|g| g.skills.clone()).unwrap_or_default());
+    v["entries"] = json!(g.map(|g| g.entries).unwrap_or_default());
+    Ok(v)
+}
+
 fn run(name: &str, a: &Value, reading: bool) -> Result<Value> {
     let s = |k: &str| a[k].as_str().unwrap_or("").to_string();
     match name {
-        "plugins" => Ok(offers::listing()),
-        "plugin" => offers::detail(&s("id")),
+        "plugins" => Ok(everything()),
+        "plugin" => one(&s("id")),
         "command" => offers::command_detail(&s("id"), &s("name")),
         "call" => offers::call(&s("id"), &s("name"), &a["args"], "claude", reading),
         t => anyhow::bail!("no tool {t}"),
@@ -78,9 +146,10 @@ pub fn serve(reading: bool) -> Result<()> {
     Ok(())
 }
 
-/// The `--mcp-config` file for a session's `echo_plugins` server; None when no plugin offers itself (nothing added).
+/// The `--mcp-config` file for a session's `echo_plugins` server; None when no plugin offers commands or gives a guide
+/// (nothing added).
 pub fn config(exe: &Path, reading: bool) -> Option<String> {
-    if offers::all().is_empty() {
+    if offers::all().is_empty() && crate::plugins::agent::rows().is_empty() {
         return None;
     }
     let f = paths::config_dir().join("minutes-run").join(format!("echo-plugins-mcp{}.json", if reading { "-read" } else { "" }));
@@ -145,5 +214,55 @@ mod tests {
         let argv = |a: &[&str]| a.iter().map(|s| s.to_string()).collect::<Vec<_>>();
         assert_eq!((crate::notes::action_kind(&argv(&["plugins-mcp", "--read"])), crate::notes::action_kind(&argv(&["plugin", "commands", "vaults"]))), (None, None));
         crate::jshost::unload_all();
+    }
+
+    #[test]
+    fn a_plugin_with_only_a_guide_is_listed_by_the_plugins_tool_and_brings_the_server() {
+        let (_env, root) = paths::testenv::folders("plugins-mcp-guides");
+        let mk = root.join("market");
+        let d = mk.join("plugins/staff");
+        std::fs::create_dir_all(d.join("agent")).unwrap();
+        std::fs::write(d.join("echo-plugin.json"), json!({"id": "staff", "name": "Staff", "version": "0.1.0", "summary": "A made-up plugin", "agent": {"summary": "Staffing of Acme projects"}}).to_string()).unwrap();
+        std::fs::write(d.join("agent/CLAUDE.md"), "# Staff\n").unwrap();
+        std::fs::write(mk.join("echo-marketplace.json"), json!({"name": "t", "plugins": [{"id": "staff", "source": "./plugins/staff"}]}).to_string()).unwrap();
+        let name = crate::plugins::market_add(mk.to_str().unwrap(), Some("t")).unwrap();
+        crate::plugins::refresh(&name).unwrap();
+        let agreed = crate::plugins::review("staff", Some(&name)).unwrap().uses;
+        crate::plugins::install("staff", Some(&name), &agreed).unwrap();
+        crate::plugins::agent::lay_out("staff").unwrap();
+        // No plugin offers commands, one gives a guide: the server is there, its plugins tool lists it with its guide.
+        assert!(offers::all().is_empty());
+        assert!(config(Path::new("/x/echoctl"), false).is_some());
+        assert_eq!(run("plugins", &json!({}), false).unwrap(), json!([{"id": "staff", "name": "Staff", "description": "Staffing of Acme projects", "commands": 0, "guide": ".plugins/staff/CLAUDE.md", "skills": [], "entries": []}]));
+        assert_eq!(run("plugin", &json!({"id": "staff"}), false).unwrap()["guide"], ".plugins/staff/CLAUDE.md");
+        assert!(run("plugin", &json!({"id": "nobody"}), false).unwrap_err().to_string().contains("offers commands or a guide"));
+        // A plugin that gives a guide (with an entry of its host half's) and offers commands: one entry, its guide's
+        // words first, its commands counted, its entry named by its folder.
+        let d = mk.join("plugins/crew");
+        std::fs::create_dir_all(d.join("agent")).unwrap();
+        std::fs::write(d.join("echo-plugin.json"), json!({"id": "crew", "name": "Crew", "version": "0.1.0", "summary": "A made-up plugin", "main": "main.js", "agent": {"summary": "Crews of Acme projects"}}).to_string()).unwrap();
+        std::fs::write(d.join("agent/CLAUDE.md"), "# Crew\n").unwrap();
+        std::fs::write(d.join("main.js"), "export function apply(ctx) { const api = ctx.expose('Crew commands'); api.command('who', ({project}) => [project], {description: 'Who works on a project', reads: true}); ctx.command('guides', (a) => ctx.agent.set(a)) }").unwrap();
+        std::fs::write(mk.join("echo-marketplace.json"), json!({"name": "t", "plugins": [{"id": "staff", "source": "./plugins/staff"}, {"id": "crew", "source": "./plugins/crew"}]}).to_string()).unwrap();
+        crate::plugins::refresh(&name).unwrap();
+        let agreed = crate::plugins::review("crew", Some(&name)).unwrap().uses;
+        crate::plugins::install("crew", Some(&name), &agreed).unwrap();
+        crate::jshost::sync();
+        let set = (0..50).find_map(|_| crate::jshost::call("crew", "guides", &json!({"entries": [{"name": "acme", "summary": "Acme's <b>crews</b>\u{202E}", "guide": "# Acme"}]})).ok().or_else(|| { std::thread::sleep(std::time::Duration::from_millis(50)); None }));
+        assert!(set.is_some());
+        crate::plugins::agent::lay_out("crew").unwrap();
+        let all = run("plugins", &json!({}), false).unwrap();
+        let crew = all.as_array().unwrap().iter().find(|p| p["id"] == "crew").unwrap().clone();
+        assert_eq!(crew, json!({"id": "crew", "name": "Crew", "description": "Crews of Acme projects", "commands": 1, "guide": ".plugins/crew/CLAUDE.md", "skills": [],
+            "entries": [{"name": "acme", "summary": "Acme's ‹b›crews‹/b›", "guide": ".plugins/crew/acme/CLAUDE.md"}]}));
+        let one = run("plugin", &json!({"id": "crew"}), false).unwrap();
+        assert_eq!((one["commands"][0]["name"].clone(), one["guide"].clone(), one["entries"][0]["name"].clone()), (json!("who"), json!(".plugins/crew/CLAUDE.md"), json!("acme")));
+        crate::jshost::unload_all();
+        // Switched off: nothing gives Claude anything, no server.
+        crate::plugins::set_enabled("crew", false).unwrap();
+        crate::plugins::agent::lay_out("crew").unwrap();
+        crate::plugins::set_enabled("staff", false).unwrap();
+        crate::plugins::agent::lay_out("staff").unwrap();
+        assert_eq!(config(Path::new("/x/echoctl"), false), None);
     }
 }

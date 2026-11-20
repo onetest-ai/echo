@@ -18,11 +18,13 @@ tags: [plugins, host-half, offers, cli]
 ## Preconditions
 - Standard data set built right before the run: `tests/fixtures/make-data.sh <dir>`
 - Every Bash call starts with the prelude (a fresh shell each time): `. <dir>/env; D="$(dirname "$ECHOCTL_HOME")"; E=target/debug/echoctl`
-- A made-up local marketplace `acme-offers` with four plugins: **Acme vaults** offers two commands, **Acme asker** asks to call other plugins, **Acme nosy** doesn't, **Acme quiet** offers nothing:
+- A made-up local marketplace `acme-offers` with five plugins: **Acme vaults** offers two commands, **Acme asker** asks to call other plugins, **Acme nosy** doesn't, **Acme quiet** offers nothing, **Acme guide** offers no commands but gives Claude a guide:
 
 ```bash
-M="$D/market-offers"; for p in acme-vaults acme-asker acme-nosy acme-quiet; do mkdir -p "$M/plugins/$p"; done
-echo '{"name":"acme-offers","plugins":[{"id":"acme-vaults","source":"./plugins/acme-vaults"},{"id":"acme-asker","source":"./plugins/acme-asker"},{"id":"acme-nosy","source":"./plugins/acme-nosy"},{"id":"acme-quiet","source":"./plugins/acme-quiet"}]}' > "$M/echo-marketplace.json"
+M="$D/market-offers"; for p in acme-vaults acme-asker acme-nosy acme-quiet acme-guide/agent; do mkdir -p "$M/plugins/$p"; done
+echo '{"name":"acme-offers","plugins":[{"id":"acme-vaults","source":"./plugins/acme-vaults"},{"id":"acme-asker","source":"./plugins/acme-asker"},{"id":"acme-nosy","source":"./plugins/acme-nosy"},{"id":"acme-quiet","source":"./plugins/acme-quiet"},{"id":"acme-guide","source":"./plugins/acme-guide"}]}' > "$M/echo-marketplace.json"
+echo '{"id":"acme-guide","name":"Acme guide","version":"0.1.0","summary":"A made-up plugin for tests","agent":{"summary":"Staffing of Acme projects"}}' > "$M/plugins/acme-guide/echo-plugin.json"
+printf '# Acme guide\n' > "$M/plugins/acme-guide/agent/CLAUDE.md"
 echo '{"id":"acme-vaults","name":"Acme vaults","version":"0.1.0","summary":"A made-up plugin for tests","main":"main.js"}' > "$M/plugins/acme-vaults/echo-plugin.json"
 cat > "$M/plugins/acme-vaults/main.js" <<'JS'
 export function apply(ctx) {
@@ -51,8 +53,8 @@ $E plugin marketplace add "$M" --name acme-offers
 | 2 | `$E plugin commands` | One plugin: `[{"description": "Search and notes across the Acme vaults", "id": "acme-vaults", "name": "Acme vaults"}]` — Acme quiet isn't listed |
 | 3 | `$E plugin commands acme-vaults` | Its `commands` are exactly `search` (`"reads": true`, description `Find notes by words, when a fact from a vault is needed`) and `note` (`"reads": false`); `secret` isn't among them |
 | 4 | `$E plugin commands acme-vaults search`; then `$E plugin commands acme-vaults secret` | The first: `args` are `query` (`"optional": false`, `"about": "the words to find"`) and `limit` (`"optional": true`, `"default": "10"`); the second fails: `acme-vaults offers no command “secret”` |
-| 5 | `$E core \| sed -n '/## Plugins. commands/,$p'` | A section `## Plugins' commands` that names the `echo_plugins` tools and has the line ``- `acme-vaults`: Search and notes across the Acme vaults``; no line for `acme-quiet` |
-| 6 | `$E plugin disable acme-vaults`; `$E plugin commands`; `$E core \| grep -c "Plugins' commands"` | `[]`; `0` — switched off, it is offered to nobody |
+| 5 | `$E core \| sed -n '/^## Plugins$/,$p'` | The plugins' table (`\| Plugin \| Id \| What it gives \|`), its line "ask `echo_plugins`' plugin(id) for its commands, skills and guide", and the row ``\| Acme vaults \| `acme-vaults` \| Search and notes across the Acme vaults \|``; no row for `acme-quiet` |
+| 6 | `$E plugin disable acme-vaults`; `$E plugin commands`; `$E core \| grep -c acme-vaults` | `[]`; `0` — switched off, it is offered to nobody |
 | 7 | `$E plugin enable acme-vaults`; `$E plugin commands \| grep -c acme-vaults` | `1`: listed again |
 
 ## Teardown

@@ -1022,13 +1022,17 @@ No line on the sheet: handing a file over is the user's own act. Evidence: `jsho
   Evidence: `grants::set_session_skills`
 - **Commands**: a skill's Echo CLI is `${CLAUDE_PLUGIN_ROOT}/scripts/echoctl`; Echo's sessions run only the plugin's
   commands listed in `uses.sessions.commands` (`plugin call <id> <command>`). Evidence: `plugins::session_commands`
-- **Offered commands** (§ Host half: Offering commands): when a plugin offers itself, Echo's sessions — the folder
-  session, plugins' sessions, routines, Yolo, plugins' runs (`folder_args::session_as`) — get the MCP server
-  `echo_plugins` (`echoctl plugins-mcp`, its tools allowed without asking): `plugins`, `plugin(id)`, `command(id,
-  name)`, `call(id, name, args)`; a run that only reads (`read`) gets it with `--read`, where `call` runs only
+- **Offered commands** (§ Host half: Offering commands): when a plugin offers commands or gives Claude a guide
+  (`agent/`), Echo's sessions — the folder session, plugins' sessions, routines, Yolo, plugins' runs
+  (`folder_args::session_as`) — get the MCP server `echo_plugins` (`echoctl plugins-mcp`, its tools allowed without
+  asking): `plugins` (every such plugin: `{id, name, description, commands, guide, skills, entries}` — `commands`
+  how many it offers, `guide` its CLAUDE.md, `skills` as the session names them, `entries` its host half's own guides;
+  only folders checked as the core's are, its text one plain line), `plugin(id)` (its commands, guide, skills and
+  entries), `command(id, name)`, `call(id, name, args)`; a run that only reads (`read`) gets it with `--read`, where `call` runs only
   commands marked `reads`; a call of a command not marked `reads` — Claude's, or one a command makes in turn — is in a routine's or Yolo's
-  outcome as `plugin call <id> <name>`; a refused one isn't. The core names each offering plugin first, after its template, within 1,500 characters (the rest: the
-  `plugins` tool), the plugins' table after it. Never a
+  outcome as `plugin call <id> <name>`; a refused one isn't. The core's one table has a row a plugin — its name, id and what it gives (a guide's words win
+  over `ctx.expose`'s) — sorted by id; its commands, skills, guide and entries come from `plugin(id)`, which the core
+  tells Claude to ask before reading the guide; rows left out for room are counted and pointed to the `plugins` tool. Never a
   minutes run, a project sync, the window's session on a call or a run with no tools. Evidence: `jshost::mcp::config`,
   `plugins::agent::render_with`
 - **`agent/`**: `"agent": {"summary": "…", "prefix": "…"}` in the manifest — `summary` one line, ≤ 200 chars, the row
