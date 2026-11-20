@@ -1022,7 +1022,7 @@
   },
   {
    "id": "F-PLUG-156",
-   "feature": "A plugin may offer itself to other plugins and Claude in Echo, in its code only: `ctx.expose(description)` and `api.command(name, fn, {description, args?, reads?})` (also its own command); argument names come from the function's destructured first parameter. Echo finds what it offers by a dry run of `apply(ctx)` on services that do nothing, kept per installed version; `echoctl plugin commands [<id> [<name>]]` lists the plugins, one's commands, one command's arguments; the core's plugins table has a row for each offering plugin. A plugin without `ctx.expose`, switched off or removed is offered to nobody",
+   "feature": "A plugin may offer itself to other plugins and Claude in Echo, in its code only: `ctx.expose()` (what it is for: its manifest's `agent.summary`, else its `summary`; a text given to it isn't read) and `api.command(name, fn, {description, args?, reads?})` (also its own command); argument names come from the function's destructured first parameter. Echo finds what it offers by a dry run of `apply(ctx)` on services that do nothing, kept per installed version; `echoctl plugin commands [<id> [<name>]]` lists the plugins, one's commands, one command's arguments; the core's plugins table has a row for each offering plugin. A plugin without `ctx.expose`, switched off or removed is offered to nobody",
    "priority": "high",
    "check": "agent",
    "axes": [

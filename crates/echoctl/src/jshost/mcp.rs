@@ -71,7 +71,7 @@ fn everything() -> Value {
     json!(ids.into_iter().map(|id| {
         let (o, g) = (offered.get(id), guides.get(id));
         json!({"id": id, "name": name_of(id),
-               "description": g.map(|g| g.what.clone()).or_else(|| o.map(|o| crate::plugins::agent::plain(&o.description, 200))).unwrap_or_default(),
+               "description": g.map(|g| g.what.clone()).unwrap_or_else(|| crate::plugins::agent::plain(&crate::plugins::agent::about(id), 200)),
                "commands": o.map_or(0, |o| o.commands.len()),
                "guide": g.map(|g| g.read.clone()), "skills": g.map(|g| g.skills.clone()).unwrap_or_default(),
                "entries": g.map(|g| g.entries.clone()).unwrap_or_default()})
@@ -183,7 +183,9 @@ mod tests {
         let ask = |name: &str, args: Value, reading: bool| answer(&json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": name, "arguments": args}}), reading).unwrap()["result"].clone();
         let list = answer(&json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}), false).unwrap();
         assert_eq!(list["result"]["tools"].as_array().unwrap().iter().map(|t| t["name"].as_str().unwrap()).collect::<Vec<_>>(), ["plugins", "plugin", "command", "call"]);
-        assert!(ask("plugins", json!({}), false)["content"][0]["text"].as_str().unwrap().contains("Search across the vaults"));
+        // What it is for is its manifest's (its summary here), not the text given to ctx.expose.
+        let listed = ask("plugins", json!({}), false)["content"][0]["text"].as_str().unwrap().to_string();
+        assert!(listed.contains("\"description\":\"vaults for tests\"") && !listed.contains("Search across the vaults"), "{listed}");
         assert!(ask("command", json!({"id": "vaults", "name": "note"}), false)["content"][0]["text"].as_str().unwrap().contains("\"text\""));
         let call = |name: &str, reading: bool| ask("call", json!({"id": "vaults", "name": name, "args": {"query": "acme", "path": "a.md", "text": "x"}}), reading);
         let r = call("search", true);

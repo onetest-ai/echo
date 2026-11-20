@@ -122,8 +122,9 @@ file of a skill folder that has one asks again. Evidence: `plugins::scripts::des
 
 ### Offering commands (`ctx.expose`, `ctx.plugins`)
 
-- Optional. `const api = ctx.expose(description)` (once; 1–200 characters: what the plugin is for) offers the plugin
-  to other plugins and Claude in Echo; `api.command(name, fn, {description, args, reads})` adds a command they may
+- Optional. `const api = ctx.expose()` (once) offers the plugin to other plugins and Claude in Echo — what it is for
+  is its manifest's, as the core shows it: `agent.summary` (or what its host half set with `ctx.agent.set`), else its
+  `summary` (a text given to `ctx.expose` isn't read); `api.command(name, fn, {description, args, reads})` adds a command they may
   call — also the plugin's own command, as `ctx.command` (a name `ctx.command` took already throws). `name`: 1–40
   letters, digits, `-`, `_`, not starting `__`; `description` (1–300 characters) says when to call it; at most 20.
   A plugin without `ctx.expose` is offered to nobody. Evidence: `jshost::offers::discover`
