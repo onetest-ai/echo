@@ -627,6 +627,8 @@ struct Extracted {
     report: String,
     /// Items an error stopped part-way (`ledger::apply` or a write failed): not marked done, said in the message.
     errors: Vec<String>,
+    /// Items an error stopped applying their fix: their rejections stand.
+    fix_errors: Vec<String>,
 }
 
 /// Apply one extract answer, item by item in its order: only the run's own items, each once, work only for those read
@@ -676,6 +678,8 @@ fn apply_answer(id: &str, items: &[Item], answer: &Value, run_dir: &Path, fixing
             if fixing.is_none() {
                 x.noted.retain(|(i, _)| *i != item.id);
                 x.errors.push(item.id.clone());
+            } else {
+                x.fix_errors.push(item.id.clone());
             }
         }
     }
@@ -748,7 +752,8 @@ fn extract(p: &projects::Project, run: Run, items: &[Item], given: &Given, tag: 
                 if let Some(more) = fixes["report"].as_str().filter(|r| !r.trim().is_empty()) {
                     x.report = format!("{}\n{more}", x.report).trim().to_string();
                 }
-                x.rejected = standing(&rejected, &fixes, &fixing, std::mem::take(&mut x.rejected));
+                let applied: Vec<&str> = fixing.iter().copied().filter(|i| !x.fix_errors.iter().any(|e| e == i)).collect();
+                x.rejected = standing(&rejected, &fixes, &applied, std::mem::take(&mut x.rejected));
             }
             Ok(None) => {
                 let _ = writeln!(log, "{}  the fix run's answer couldn't be read: its rejections stand", Local::now().format("%H:%M:%S"));
