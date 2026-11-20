@@ -22,9 +22,9 @@ const MAX_COMMANDS: usize = 20;
 const MAX_ABOUT: usize = 200;
 const MAX_COMMAND_ABOUT: usize = 300;
 
+/// What a plugin offers: its commands (what it is for is its manifest's, `plugins::agent::about`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Offer {
-    pub description: String,
     pub commands: Vec<Command>,
 }
 
@@ -97,7 +97,7 @@ fn name_of(id: &str) -> String {
 
 /// The plugins that offer themselves: [{id, name, description}].
 pub fn listing() -> Value {
-    json!(all().into_iter().map(|(id, o)| json!({"id": id, "name": name_of(&id), "description": o.description})).collect::<Vec<_>>())
+    json!(all().into_iter().map(|(id, _)| json!({"id": id, "name": name_of(&id), "description": plugins::agent::about(&id)})).collect::<Vec<_>>())
 }
 
 fn offer(id: &str) -> Result<Offer> {
@@ -108,7 +108,7 @@ fn offer(id: &str) -> Result<Offer> {
 pub fn detail(id: &str) -> Result<Value> {
     let o = offer(id)?;
     let commands: Vec<Value> = o.commands.iter().map(|c| json!({"name": c.name, "description": c.description, "reads": c.reads})).collect();
-    Ok(json!({"id": id, "name": name_of(id), "description": o.description, "commands": commands}))
+    Ok(json!({"id": id, "name": name_of(id), "description": plugins::agent::about(id), "commands": commands}))
 }
 
 /// One command: {plugin, name, description, reads, args: [{name, optional, default?, about?}] or null (any JSON)}.
@@ -171,10 +171,8 @@ pub fn discover(id: &str, dir: &Path) -> Found {
             return found;
         }
     };
-    let Some(desc) = raw["description"].as_str() else { return found };
-    let desc = desc.trim();
-    if desc.is_empty() || desc.chars().count() > MAX_ABOUT {
-        found.problems.push(format!("ctx.expose needs a description of 1 to {MAX_ABOUT} characters: what the plugin is for"));
+    // No ctx.expose: it offers nothing. A text given to it is no longer read (what the plugin is for is its manifest's).
+    if !raw["description"].is_string() {
         return found;
     }
     let mut commands = vec![];
@@ -186,7 +184,7 @@ pub fn discover(id: &str, dir: &Path) -> Found {
             Err(e) => found.problems.push(format!("“{name}” left out: {e}")),
         }
     }
-    found.offer = Some(Offer { description: desc.to_string(), commands });
+    found.offer = Some(Offer { commands });
     found
 }
 
@@ -411,7 +409,7 @@ pub(crate) mod tests {
         for (id, uses, main) in list {
             let d = mk.join("plugins").join(id);
             std::fs::create_dir_all(&d).unwrap();
-            std::fs::write(d.join("echo-plugin.json"), json!({"id": id, "name": id, "version": "0.1.0", "main": "main.js", "uses": uses}).to_string()).unwrap();
+            std::fs::write(d.join("echo-plugin.json"), json!({"id": id, "name": id, "version": "0.1.0", "summary": format!("{id} for tests"), "main": "main.js", "uses": uses}).to_string()).unwrap();
             std::fs::write(d.join("main.js"), main).unwrap();
         }
         let ps: Vec<Value> = list.iter().map(|(id, _, _)| json!({"id": id, "source": format!("./plugins/{id}")})).collect();
@@ -447,7 +445,6 @@ pub(crate) mod tests {
         ]);
         let found = discover("vaults", &plugins::plugin_dir(&plugins::enabled().into_iter().find(|p| p.id == "vaults").unwrap()));
         let o = found.offer.clone().unwrap();
-        assert_eq!(o.description, "Search and links across the vaults");
         assert_eq!(o.commands.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(), ["search", "backlinks"]);
         let search = &o.commands[0];
         assert!(search.reads);

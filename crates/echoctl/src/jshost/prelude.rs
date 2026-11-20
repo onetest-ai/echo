@@ -65,9 +65,10 @@ pub(super) const PRELUDE: &str = r#"
     terminal: call('terminal'),
     log: (...a) => call('log', ['info', a.map(String).join(' ')]),
     command: (name, fn) => { commands[name] = fn },
-    /** Offer this plugin to other plugins and Claude in Echo, `description` saying what it is for; its
-     *  `command(name, fn, {description, args, reads})` adds a command they may call (also its own, as `ctx.command`).
-     *  Without it, nobody else sees the plugin. Called once, in `apply`, at once (Echo finds it by a dry run). */
+    /** Offer this plugin to other plugins and Claude in Echo (what it is for: its manifest's `agent.summary`, else
+     *  its `summary`; a text given here isn't read); its `command(name, fn, {description, args, reads})` adds a command
+     *  they may call (also its own, as `ctx.command`). Without it, nobody else sees the plugin. Called once, in
+     *  `apply`, at once (Echo finds it by a dry run). */
     /** Other plugins and what they offer (`uses.plugins`): `list()` [{id, name, description}], `get(id)` with its
      *  commands, `call(id, name, args)` its answer. */
     plugins: {

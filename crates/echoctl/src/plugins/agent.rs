@@ -1080,7 +1080,7 @@ pub fn rows() -> Vec<Row> {
         }
         let Ok(m) = super::read_manifest(&super::plugin_dir(&p)) else { continue };
         let runtime = runtime_part(&p.id);
-        let what = [runtime["summary"].as_str().map(str::to_owned), summary_of(&m), Some(m.summary.clone()), Some(m.name.clone())].into_iter().flatten().find(|s| !s.trim().is_empty()).unwrap_or_default();
+        let what = claude_line(&p.id, &m);
         out.push(Row { plugin: m.name.clone(), id: p.id.clone(), what, skills: skills_in(&d), read: format!(".plugins/{}/CLAUDE.md", p.id) });
         if !has_guide(&m) {
             continue;
@@ -1139,12 +1139,23 @@ pub fn render_with(home: &Path, rows: &[Row], offers: &[Row]) -> String {
     s
 }
 
+/// What plugin `id` (manifest `m`) is for, as Claude reads it — the core's row, `echo_plugins`' tools: what its host
+/// half set (`ctx.agent.set`), else its `agent.summary`, else the summary its install sheet shows, else its name.
+pub fn claude_line(id: &str, m: &super::Manifest) -> String {
+    [runtime_part(id)["summary"].as_str().map(str::to_owned), summary_of(m), Some(m.summary.clone()), Some(m.name.clone())].into_iter().flatten().find(|s| !s.trim().is_empty()).unwrap_or_default()
+}
+
+/// `claude_line` of the enabled plugin `id` (its id when its manifest can't be read).
+pub fn about(id: &str) -> String {
+    super::enabled().into_iter().find(|p| p.id == id).and_then(|p| super::read_manifest(&super::plugin_dir(&p)).ok()).map_or_else(|| id.to_string(), |m| claude_line(id, &m))
+}
+
 /// What plugins offer, for the core: a row each (no file to Read: a guide's row, where it has one, wins).
 fn offered() -> Vec<Row> {
     #[cfg(feature = "js")]
     {
         let names: std::collections::BTreeMap<String, String> = super::enabled().into_iter().map(|p| (p.id, p.name)).collect();
-        crate::jshost::offers::all().into_iter().map(|(id, o)| Row { plugin: names.get(&id).cloned().unwrap_or_else(|| id.clone()), id, what: o.description, skills: vec![], read: String::new() }).collect()
+        crate::jshost::offers::all().into_iter().map(|(id, _)| Row { plugin: names.get(&id).cloned().unwrap_or_else(|| id.clone()), what: about(&id), id, skills: vec![], read: String::new() }).collect()
     }
     #[cfg(not(feature = "js"))]
     vec![]
