@@ -181,6 +181,10 @@ variables (`ai::PASS`).
     say `prepares and asks (…)` (Yolo runs shows it as "Prepared and asked").
   - The switch before (`folder_skip_permissions`) is read once by `Config::load`: on becomes `folder_permissions: skip`,
     off stays unset (Auto); it is never written again.
+- A plugin's run or session in a folder (`claudejob::in_folder`, `in_folder_session`; plugin-api reference, Claude
+  runs) uses the same builder with a place (`folder_args::Place`): no folder plugins offer sessions; in `read` only
+  Echo's reading commands and `folder_args::read_only_args` (`dontAsk`) whatever the setting; else the plugin's `tools`
+  (`skip` only with `claude.skip`), else the routines' setting (a session: the folder session's).
 - `notes::run_acts` tells a routine's or Yolo's run (`ECHOCTL_RUN_SESSION=acts`), whatever its mode.
 - A run with `tools: "none"` (Won't do, a plugin's analysis of what it read) keeps no tools.
 
