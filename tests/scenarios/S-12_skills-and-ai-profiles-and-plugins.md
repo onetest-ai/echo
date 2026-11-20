@@ -62,6 +62,9 @@ cases:
   - tests/cases/plugins/TC-091_a-plugins-claude-run-in-its-folder-takes-the-permissions-it-asked-else-the-routines-setting.md
   - tests/cases/plugins/TC-092_a-plugins-claude-run-in-its-folder-is-refused-before-it-starts-when-its-mode-path-or-settings-dont-fit.md
   - tests/cases/plugins/TC-244_a-plugins-claude-run-in-a-folder-of-its-own-store-works-with-its-files-and-leaves-its-output-there.md
+  - tests/cases/plugins/TC-245_a-plugin-that-exposes-itself-is-listed-with-its-commands-and-arguments-and-in-the-core.md
+  - tests/cases/plugins/TC-246_a-plugin-that-asked-calls-what-another-offers-and-the-called-one-knows-who-called.md
+  - tests/cases/plugins/TC-247_claude-in-echo-sees-what-plugins-offer-through-four-tools-and-a-reading-run-calls-only-reading-commands.md
   - tests/cases/window/TC-029_recall-shows-only-a-plugins-knowledge-tabs-and-old-addresses-land-safely.md
 auto: [tests/auto/specs/S-12.spec.mjs]
 ---
@@ -155,6 +158,9 @@ auto: [tests/auto/specs/S-12.spec.mjs]
 | 57 | `plugins/TC-092_a-plugins-claude-run-in-its-folder-is-refused-before-it-starts-when-its-mode-path-or-settings-dont-fit.md` | 55 | As for stage 56. Its teardown ends with TC-090's: Acme tidy, `acme-tidy`, `acme-work` and `$D/tidy` go, the data's fake `claude` back |
 | 58 | `window/TC-029_recall-shows-only-a-plugins-knowledge-tabs-and-old-addresses-land-safely.md` | — | Its own marketplace `acme-know` in `market-know`: run its precondition lines as written. On this scenario's `small` data any call or "Pick a call" counts as Calls |
 | 59 | `plugins/TC-244_a-plugins-claude-run-in-a-folder-of-its-own-store-works-with-its-files-and-leaves-its-output-there.md` | 57 | Its own marketplace `acme-crawl` and profile `acme-work` (TC-092's teardown removed the earlier one): run its precondition lines as written |
+| 60 | `plugins/TC-245_a-plugin-that-exposes-itself-is-listed-with-its-commands-and-arguments-and-in-the-core.md` | — | Its own marketplace `acme-offers` in `market-offers`: run its precondition lines as written. Skip its teardown: the marketplace stays for stages 61–62 |
+| 61 | `plugins/TC-246_a-plugin-that-asked-calls-what-another-offers-and-the-called-one-knows-who-called.md` | 60 | `acme-offers` is added and Acme vaults installed: skip the precondition lines |
+| 62 | `plugins/TC-247_claude-in-echo-sees-what-plugins-offer-through-four-tools-and-a-reading-run-calls-only-reading-commands.md` | 61 | Acme vaults is installed: define `mcp` as its preconditions say; its last step removes Acme vaults. Then `$E plugin remove acme-quiet`; `$E plugin marketplace remove acme-offers` |
 
 ## Notes
 - The plugin stages use the made-up local marketplace the prelude writes in the run's scratch folder; nothing is fetched from the network, and the built-in marketplace's own plugins are never installed. It is added once (stage 22, in the window), installed from once (stage 26, through the sheet), and the plugin's settings, switch and removal follow on that install; stage 31 removes the marketplace.

@@ -1121,9 +1121,41 @@ pub fn render(home: &Path, rows: &[Row]) -> String {
     s
 }
 
+/// `render`, then the plugins that offer commands (`ctx.expose`: `(id, description)`) in what is left of `BUDGET` —
+/// after the table, so they never push a plugin's row out — the rest counted.
+pub fn render_with(home: &Path, rows: &[Row], offers: &[(String, String)]) -> String {
+    let mut s = render(home, rows);
+    if offers.is_empty() {
+        return s;
+    }
+    s.push_str("\n## Plugins' commands\n\nThe `echo_plugins` tools call what these plugins offer: plugins → plugin(id) for its commands → command(id, name) for its arguments → call.\n\n");
+    let note = |left: usize| format!("\n{left} more: the plugins tool lists them all.\n");
+    let lines: Vec<String> = offers.iter().map(|(id, d)| format!("- `{}`: {}\n", cell(id, 40), cell(d, MAX_SUMMARY))).collect();
+    let fits = |n: usize| {
+        let left = lines.len() - n;
+        s.chars().count() + lines[..n].iter().map(|l| l.chars().count()).sum::<usize>() + if left > 0 { note(left).chars().count() } else { 0 } < BUDGET
+    };
+    let n = (0..=lines.len()).rev().find(|&n| fits(n)).unwrap_or(0);
+    for l in &lines[..n] {
+        s.push_str(l);
+    }
+    if n < lines.len() {
+        s.push_str(&note(lines.len() - n));
+    }
+    s
+}
+
+/// What plugins offer, for the core: `(id, description)`.
+fn offered() -> Vec<(String, String)> {
+    #[cfg(feature = "js")]
+    return crate::jshost::offers::all().into_iter().map(|(id, o)| (id, o.description)).collect();
+    #[cfg(not(feature = "js"))]
+    vec![]
+}
+
 /// The core for this data folder now.
 pub fn core() -> String {
-    render(&paths::home(), &rows())
+    render_with(&paths::home(), &rows(), &offered())
 }
 
 /// `echoctl core --hook`: each plugin's folder laid out again first when it isn't what Echo wrote, then the core as a
@@ -1141,7 +1173,7 @@ pub fn hook() -> i32 {
 fn hook_core() -> String {
     let unchecked = sync_within(Some(std::time::Instant::now() + HOOK_WAIT));
     let rows: Vec<Row> = rows().into_iter().filter(|r| !unchecked.iter().any(|id| r.read.starts_with(&format!(".plugins/{id}/")))).collect();
-    render(&paths::home(), &rows)
+    render_with(&paths::home(), &rows, &offered())
 }
 
 /// The folder session's SessionStart hook that gives it the core (at its start, a resume, a compaction, a /clear).
@@ -1743,5 +1775,22 @@ mod tests {
         let shown = s.lines().filter(|l| l.starts_with("| Plugin ") && !l.starts_with("| Plugin |")).count();
         assert!(s.chars().count() < BUDGET && shown > 0 && shown < 200, "{} {shown}", s.chars().count());
         assert!(s.contains(&format!("{} more left out for room", 200 - shown)) && s.contains("| Plugin 0 |"), "{s}");
+    }
+
+    #[test]
+    fn plugins_that_offer_commands_follow_the_table_and_never_push_a_row_out() {
+        let home = Path::new("/data/echo");
+        let row = |i: usize| Row { plugin: format!("Plugin {i}"), what: "word ".repeat(40), skills: vec![], read: format!(".plugins/p{i}/CLAUDE.md") };
+        // None offers: the core is as it was.
+        assert_eq!(render_with(home, &[row(0)], &[]), render(home, &[row(0)]));
+        let s = render_with(home, &[], &[("vaults".into(), "Search | across\nthe vaults <b>".into())]);
+        assert!(s.contains("No plugin gives you a guide now.") && s.contains("## Plugins' commands") && s.contains("- `vaults`: Search \\| across the vaults ‹b›\n"), "{s}");
+        // The table first: its rows as without offers, the offers in what is left, the rest counted.
+        let many: Vec<Row> = (0..5).map(row).collect();
+        let offers: Vec<(String, String)> = (0..200).map(|i| (format!("o{i}"), "word ".repeat(30))).collect();
+        let s = render_with(home, &many, &offers);
+        assert!(s.starts_with(&render(home, &many)) && s.chars().count() < BUDGET, "{}", s.chars().count());
+        let shown = s.lines().filter(|l| l.starts_with("- `o")).count();
+        assert!(shown > 0 && s.contains(&format!("{} more: the plugins tool lists them all.", 200 - shown)), "{shown}");
     }
 }

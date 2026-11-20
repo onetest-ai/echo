@@ -34,6 +34,8 @@ mod http;
 pub mod net;
 mod speech;
 mod tls;
+pub mod mcp;
+pub mod offers;
 mod prelude;
 mod render;
 use prelude::PRELUDE;
@@ -70,7 +72,8 @@ enum Msg {
     Load(String, PathBuf),
     Unload(String),
     /// `files`: the handles passed with it (JSON), the command's second argument `{files}`.
-    Call { plugin: String, command: String, args: String, files: String, n: u64, reply: Sender<Result<Value, String>> },
+    /// `from`: the plugin or `claude` that called through what the plugin offers (`offers.rs`), else empty.
+    Call { plugin: String, command: String, args: String, files: String, from: String, n: u64, reply: Sender<Result<Value, String>> },
     /// A call's caller stopped waiting (its timeout): its reply is dropped, never kept for a plugin that doesn't settle.
     Forget(String, u64),
     Event(String, String),
@@ -278,13 +281,23 @@ pub fn call_within(plugin: &str, command: &str, args: &Value, timeout: Duration)
 /// The same, with handles of files the user handed this plugin (`files::make`), each checked as its own.
 pub fn call_with(plugin: &str, command: &str, args: &Value, files: &[Value], timeout: Duration) -> Result<Value> {
     let files = json!(files::own_list(plugin, files)?).to_string();
+    send_call(plugin, command, args, files, "", timeout)
+}
+
+/// A call through what `plugin` offers, by another plugin or Claude in Echo (`from`): the command's second argument
+/// carries `from`.
+pub fn call_from(plugin: &str, command: &str, args: &Value, from: &str, timeout: Duration) -> Result<Value> {
+    send_call(plugin, command, args, "[]".into(), from, timeout)
+}
+
+fn send_call(plugin: &str, command: &str, args: &Value, files: String, from: &str, timeout: Duration) -> Result<Value> {
     let h = host();
     if !h.loaded.lock().map(|l| l.contains_key(plugin)).unwrap_or(false) {
         sync_only(plugin);
     }
     let (tx, rx) = channel();
     let n = NEXT.fetch_add(1, Ordering::Relaxed);
-    h.tx.send(Msg::Call { plugin: plugin.into(), command: command.into(), args: args.to_string(), files, n, reply: tx }).map_err(|_| anyhow!("the plugins' host stopped"))?;
+    h.tx.send(Msg::Call { plugin: plugin.into(), command: command.into(), args: args.to_string(), files, from: from.into(), n, reply: tx }).map_err(|_| anyhow!("the plugins' host stopped"))?;
     match rx.recv_timeout(timeout) {
         Ok(Ok(v)) => Ok(v),
         Ok(Err(e)) => bail!("{e}"),
@@ -418,7 +431,7 @@ fn run(rx: Receiver<Msg>, tx: Sender<Msg>) {
                     l.remove(&id);
                 }
             }
-            Ok(Msg::Call { plugin, command, args, files, n, reply }) => {
+            Ok(Msg::Call { plugin, command, args, files, from, n, reply }) => {
                 let Some(p) = plugins.get_mut(&plugin) else {
                     let why = status().get(&plugin).and_then(|r| r.clone().err()).unwrap_or_else(|| "it isn't installed and on".into());
                     let _ = reply.send(Err(format!("{plugin} isn't loaded: {why}")));
@@ -434,7 +447,7 @@ fn run(rx: Receiver<Msg>, tx: Sender<Msg>) {
                 slice(&mut || {
                     ctx.with(|c| {
                         if let Ok(f) = c.globals().get::<_, Function>("__call") {
-                            if let Err(e) = f.call::<_, ()>((n, command.clone(), args.clone(), files.clone())).catch(&c) {
+                            if let Err(e) = f.call::<_, ()>((n, command.clone(), args.clone(), files.clone(), from.clone())).catch(&c) {
                                 current.lock().unwrap().replies.push((n, Err(e.to_string())));
                             }
                         }

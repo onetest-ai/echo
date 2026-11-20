@@ -5,6 +5,9 @@ pub(super) const PRELUDE: &str = r#"
 (() => {
   const host = globalThis.__host, hostAsync = globalThis.__hostAsync
   const commands = {}, timers = [], pending = {}, handlers = {}, providers = {}
+  // What it offers other plugins and Claude in Echo (`ctx.expose`), read by Echo's dry run (`offers.rs`).
+  const offers = { description: null, commands: [] }
+  globalThis.__offers = () => JSON.stringify(offers)
   // A way to send this plugin adds (`ctx.deliver.provide`): Echo hands it the message.
   commands.__deliver = ({ kind, msg }) => {
     const p = providers[kind]
@@ -21,10 +24,10 @@ pub(super) const PRELUDE: &str = r#"
     const p = pending[token]; delete pending[token]; if (!p) return
     const out = JSON.parse(json); out.error ? p[1](new Error(out.error)) : p[0](out.value)
   }
-  globalThis.__call = (id, name, args, files) => {
+  globalThis.__call = (id, name, args, files, from) => {
     const fn = commands[name]
     if (!fn) return host('reply', JSON.stringify({ call: id, error: `no command “${name}”` }))
-    Promise.resolve().then(() => fn(JSON.parse(args), { files: JSON.parse(files) })).then(
+    Promise.resolve().then(() => fn(JSON.parse(args), from ? { files: JSON.parse(files), from } : { files: JSON.parse(files) })).then(
       (v) => host('reply', JSON.stringify({ call: id, value: v === undefined ? null : v })),
       (e) => host('reply', JSON.stringify({ call: id, error: String((e && e.message) || e) })))
   }
@@ -62,6 +65,29 @@ pub(super) const PRELUDE: &str = r#"
     terminal: call('terminal'),
     log: (...a) => call('log', ['info', a.map(String).join(' ')]),
     command: (name, fn) => { commands[name] = fn },
+    /** Offer this plugin to other plugins and Claude in Echo, `description` saying what it is for; its
+     *  `command(name, fn, {description, args, reads})` adds a command they may call (also its own, as `ctx.command`).
+     *  Without it, nobody else sees the plugin. Called once, in `apply`, at once (Echo finds it by a dry run). */
+    /** Other plugins and what they offer (`uses.plugins`): `list()` [{id, name, description}], `get(id)` with its
+     *  commands, `call(id, name, args)` its answer. */
+    plugins: {
+      list: () => later('plugins.list'),
+      get: (id) => later('plugins.get', String(id)),
+      call: (id, name, args) => later('plugins.call', [String(id), String(name), args === undefined ? {} : args]),
+    },
+    expose: (description) => {
+      if (offers.description !== null) throw new Error('ctx.expose is called once')
+      offers.description = String(description == null ? '' : description)
+      return {
+        command: (name, fn, opts) => {
+          name = String(name)
+          if (commands[name]) throw new Error(`“${name}” is a command of this plugin already: an offered command needs a name of its own`)
+          commands[name] = fn
+          const o = opts || {}
+          offers.commands.push({ name, description: String(o.description == null ? '' : o.description), args: o.args || null, reads: o.reads === true, source: String(fn).slice(0, 2000) })
+        },
+      }
+    },
     every: (seconds, fn) => { timers.push({ every: Math.max(10, seconds) * 1000, next: 0, fn }) },
     /** Hear an event (`uses.events.on`): a promise, refused (and the handler dropped) for one not asked for. */
     on: (event, fn) => {

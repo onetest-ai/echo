@@ -169,6 +169,12 @@ pub fn session_as(p: &crate::ai::Profile, exe: &Path, settings: &Path, usage: &s
     }
     #[cfg(not(feature = "tray"))]
     let _ = usage;
+    // What plugins offer (`ctx.expose`), when one does: its tools allowed without asking; a reading run calls only
+    // commands marked reads.
+    #[cfg(feature = "js")]
+    if let Some(f) = crate::jshost::mcp::config(exe, place == Place::Read) {
+        args.extend(["--mcp-config".to_string(), f, "--allowedTools".into(), format!("mcp__{}", crate::jshost::mcp::SERVER)]);
+    }
     Ok(args)
 }
 

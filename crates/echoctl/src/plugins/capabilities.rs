@@ -36,7 +36,19 @@ pub(super) const CAPABILITIES: &[Capability] = &[
     Capability { id: "me", ready: true, describe: describe_me },
     Capability { id: "skills", ready: true, describe: describe_skills },
     Capability { id: "speech", ready: true, describe: describe_speech },
+    Capability { id: "plugins", ready: true, describe: describe_plugins },
 ];
+
+/// The sheet's line for `uses.plugins` (`ctx.plugins`, `jshost::offers`).
+pub const PLUGINS_LINE: &str = "Calls the commands your other plugins offer and gets what they answer — what those plugins read or do for you, it can have them read or do for it";
+
+/// `uses.plugins: true`: its host half lists other plugins' offers and calls them.
+pub(super) fn describe_plugins(v: &Value) -> Result<String> {
+    if *v != Value::Bool(true) {
+        bail!("“plugins” is true");
+    }
+    Ok(PLUGINS_LINE.into())
+}
 
 /// The sheet's line for `uses.speech` (`ctx.speech.transcribe`, `jshost::speech`).
 pub const SPEECH_LINE: &str = "Transcribes audio files you hand it (WAV, webm/opus, ogg/opus, m4a or mp3, up to 60 minutes and 200 MB) with Echo's own speech model, on this computer, or on the transcription server you connected; it starts only while Echo is not recording or transcribing a call. The text goes only to the plugin";
@@ -652,6 +664,12 @@ pub(super) fn not_ready(uses: &serde_json::Map<String, Value>) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_plugin_asks_to_call_other_plugins_with_true_and_the_sheet_says_what_it_may_get() {
+        assert_eq!(describe(serde_json::json!({"plugins": true}).as_object().unwrap()).unwrap(), vec![PLUGINS_LINE.to_string()]);
+        assert!(describe(serde_json::json!({"plugins": ["vaults"]}).as_object().unwrap()).is_err());
+    }
 
     #[test]
     fn a_plugin_asks_for_about_me_as_an_empty_object_and_the_sheet_says_all_it_may_read() {

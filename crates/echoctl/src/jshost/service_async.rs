@@ -28,6 +28,23 @@ fn take_stream(id: &str, n: u64) -> bool {
 
 pub(super) fn service_async(id: &str, op: &str, arg: &Value) -> Result<Value> {
     match op {
+        // Other plugins' offers (`uses.plugins`): what they are, and a call of one of their commands.
+        "plugins.list" | "plugins.get" | "plugins.call" => {
+            if uses(id, "plugins")? != Value::Bool(true) {
+                bail!("{id} didn't ask for “plugins” when it was installed");
+            }
+            match op {
+                "plugins.list" => Ok(offers::listing()),
+                "plugins.get" => offers::detail(arg.as_str().unwrap_or("")),
+                _ => {
+                    let target = arg[0].as_str().unwrap_or("");
+                    if target == id {
+                        bail!("{id} calls its own commands itself, not through ctx.plugins");
+                    }
+                    offers::call(target, arg[1].as_str().unwrap_or(""), &arg[2], id, false)
+                }
+            }
+        }
         // A script it declared (`uses.scripts`).
         "scripts.run" => {
             let args: Vec<String> = arg[2].as_array().into_iter().flatten().map(|a| a.as_str().map(str::to_owned).ok_or_else(|| anyhow!("a script's arguments are strings"))).collect::<Result<_>>()?;

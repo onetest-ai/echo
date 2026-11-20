@@ -62,6 +62,7 @@ as U+FFFD, and Echo logs it. Evidence: `capabilities::make_sheet_safe`, `plugins
 | `network.hosts`, `network.hosts_from`, `network.ask`, `network.web` | the `https://` hosts it fetches (§ Network); string settings without a default whose addresses the user lists; `ask: true`: it may ask the user for one address to fetch once (§ Network, A typed address); `web: true`: `ctx.web.read` and `ctx.web.fetch` read any https page on the public internet, its redirects followed (§ Reading a web page, The public web) — a line of its own on the sheet, "Reads web pages on the public internet (https), and can send what it knows to any site through the addresses it opens", so an update adding it asks again. Evidence: `capabilities::describe_network`, `capabilities::WEB_LINE` |
 | `channel.plugin` | the Claude Code plugin it installs (§ Claude runs) |
 | `sessions`, `sessions.commands` | its runtime skills for Echo's sessions; its commands Claude in Echo may run (§ Claude in Echo) |
+| `plugins` | `true` (nothing else): its host half lists what other plugins offer and calls their offered commands (§ Host half: Offering commands). The sheet: "Calls the commands your other plugins offer and gets what they answer — what those plugins read or do for you, it can have them read or do for it". Evidence: `capabilities::describe_plugins`, `capabilities::PLUGINS_LINE` |
 | `folders.what`, `folders.write` | folders the user picks, read-only, or changed with `folders.write` (§ Folders and files) |
 | `files.read` | other apps' files, each named in full, read with `ctx.system.readFile(entry)` |
 | `scripts` | the scripts of its package skills Echo may run (§ Scripts) |
@@ -118,6 +119,31 @@ file of a skill folder that has one asks again. Evidence: `plugins::scripts::des
   after the caller was told the call failed (a call waiting on the network then, or work queued before the cut), so a
   retry must be idempotent; bulk file reads go through
   `ctx.fs.readMany` / `ctx.fs.walk`, which run off that slice. Evidence: `jshost::CALL_TIMEOUT`, `jshost::SLICE`
+
+### Offering commands (`ctx.expose`, `ctx.plugins`)
+
+- Optional. `const api = ctx.expose(description)` (once; 1–200 characters: what the plugin is for) offers the plugin
+  to other plugins and Claude in Echo; `api.command(name, fn, {description, args, reads})` adds a command they may
+  call — also the plugin's own command, as `ctx.command` (a name `ctx.command` took already throws). `name`: 1–40
+  letters, digits, `-`, `_`, not starting `__`; `description` (1–300 characters) says when to call it; at most 20.
+  A plugin without `ctx.expose` is offered to nobody. Evidence: `jshost::offers::discover`
+- Arguments: the names in `fn`'s destructured first parameter (`({query, limit = 10}) => …`: `query` required,
+  `limit` optional with its default); `args: {name: 'what to pass'}` adds a line to a name (or a name); a parameter
+  not destructured (`(a) => …`) leaves them unknown (any JSON object). `reads: true`: it only reads — a run that only
+  reads may call it (Echo trusts the mark). Evidence: `jshost::offers::params`
+- Echo finds what a plugin offers without starting it: a dry run of `apply(ctx)` on a `ctx` whose services do nothing
+  (`ctx.terminal` true; nothing it starts settles), at most 2 s, kept per installed version
+  (`<config>/plugins/offers/<id>.json`). Call `ctx.expose` and its `command`s first in `apply`, at once — no
+  condition, no `await` before them: what comes after a throw or an `await` isn't found. A dry run that fails never
+  fails an install. Evidence: `jshost::offers::of`
+- `echoctl plugin commands [<id> [<name>]]`: the plugins that offer (`[{id, name, description}]`), one's commands
+  (`{…, commands: [{name, description, reads}]}`), one command's arguments (`{…, args: [{name, optional, default?,
+  about?}] | null}`). Switched off or removed: offered to nobody.
+- With `uses.plugins`: `await ctx.plugins.list()`, `.get(id)` (as the CLI's), `.call(id, name, args)` — its answer.
+  The called command's second argument has `from` (the caller's id; `"claude"` from Claude in Echo; absent when the
+  plugin calls it as its own). Refused, each said: a plugin that offers nothing, a command not offered, a required
+  argument missing, its own commands, and past 16 calls between plugins waiting at once (a loop). A call waits up to
+  30 s. Evidence: `jshost::offers::call`
 - `ctx.every(seconds, fn)`: periodic work, 10 s minimum; there are no timers in `echoctl plugin call`,
   `echoctl deliver`, `echoctl widget show` or `echoctl work show`. Evidence: `jshost::no_timers`
 - Memory: 64 MB shared by all host halves. Evidence: `jshost::set_memory_limit`
@@ -991,6 +1017,13 @@ No line on the sheet: handing a file over is the user's own act. Evidence: `jsho
   Evidence: `grants::set_session_skills`
 - **Commands**: a skill's Echo CLI is `${CLAUDE_PLUGIN_ROOT}/scripts/echoctl`; Echo's sessions run only the plugin's
   commands listed in `uses.sessions.commands` (`plugin call <id> <command>`). Evidence: `plugins::session_commands`
+- **Offered commands** (§ Host half: Offering commands): when a plugin offers itself, Echo's sessions — the folder
+  session, plugins' sessions, routines, Yolo, plugins' runs (`folder_args::session_as`) — get the MCP server
+  `echo_plugins` (`echoctl plugins-mcp`, its tools allowed without asking): `plugins`, `plugin(id)`, `command(id,
+  name)`, `call(id, name, args)`; a run that only reads (`read`) gets it with `--read`, where `call` runs only
+  commands marked `reads`. The core names each offering plugin after its table, in what is left of its room. Never a
+  minutes run, a project sync, the window's session on a call or a run with no tools. Evidence: `jshost::mcp::config`,
+  `plugins::agent::render_with`
 - **`agent/`**: `"agent": {"summary": "…", "prefix": "…"}` in the manifest — `summary` one line, ≤ 200 chars, the row
   Echo's core gives the plugin (needs the `agent/` folder); `prefix` 2–4 chars `[a-z0-9]`, no `-`, required when it
   has skills (a plugin with skills and no guide declares only `"agent": {"prefix": …}`, and Echo writes its
