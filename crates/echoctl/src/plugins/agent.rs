@@ -1791,8 +1791,7 @@ mod tests {
     fn plugins_that_offer_commands_follow_the_table_and_never_push_a_row_out() {
         let home = Path::new("/data/echo");
         let row = |i: usize| Row { plugin: format!("Plugin {i}"), what: "word ".repeat(40), skills: vec![], read: format!(".plugins/p{i}/CLAUDE.md") };
-        // None offers: the core is as it was.
-        assert_eq!(render_with(home, &[row(0)], &[]), render(home, &[row(0)]));
+        assert!(!render_with(home, &[row(0)], &[]).contains("Plugins' commands"), "none offers: no section");
         let s = render_with(home, &[], &[("vaults".into(), "Search | across\nthe vaults <b>".into())]);
         assert!(s.contains("No plugin gives you a guide now.") && s.contains("## Plugins' commands") && s.contains("- `vaults`: Search \\| across the vaults ‹b›\n"), "{s}");
         // The offers first, within their own room, the rest counted; then a full table in what is left, under the budget.

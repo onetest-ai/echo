@@ -31,15 +31,7 @@ fn run(name: &str, a: &Value, reading: bool) -> Result<Value> {
         "plugins" => Ok(offers::listing()),
         "plugin" => offers::detail(&s("id")),
         "command" => offers::command_detail(&s("id"), &s("name")),
-        "call" => {
-            let (id, cmd) = (s("id"), s("name"));
-            let r = offers::call(&id, &cmd, &a["args"], "claude", reading);
-            // In a routine's or Yolo's outcome as `echoctl plugin call` is: a command that may change things.
-            if !offers::reads(&id, &cmd) {
-                crate::notes::note("change", &format!("plugin call {id} {cmd}"), r.as_ref().err().map(|e| format!("failed: {e:#}")).as_deref());
-            }
-            r
-        }
+        "call" => offers::call(&s("id"), &s("name"), &a["args"], "claude", reading),
         t => anyhow::bail!("no tool {t}"),
     }
 }
@@ -127,9 +119,19 @@ mod tests {
         let call = |name: &str, reading: bool| ask("call", json!({"id": "vaults", "name": name, "args": {"query": "acme", "path": "a.md", "text": "x"}}), reading);
         let r = call("search", true);
         assert_eq!((r["isError"].clone(), r["content"][0]["text"].clone()), (json!(false), json!("[\"found\",\"acme\"]")));
+        // Inside a run that keeps its changes: a called command that may change things is noted, a reading one and a
+        // refused one aren't.
+        let actions = root.join("actions.jsonl");
+        std::env::set_var(crate::notes::HEADLESS, "1");
+        std::env::set_var(crate::notes::RUN_ACTIONS, &actions);
         let r = call("note", true);
         assert!(r["isError"] == json!(true) && r["content"][0]["text"].as_str().unwrap().contains("this run only reads"), "{r}");
         assert_eq!(call("note", false)["content"][0]["text"], json!("\"written\""));
+        call("search", false);
+        std::env::remove_var(crate::notes::RUN_ACTIONS);
+        std::env::remove_var(crate::notes::HEADLESS);
+        let noted = crate::notes::run_actions(&actions);
+        assert_eq!(noted.iter().map(|a| (a["kind"].as_str().unwrap(), a["command"].as_str().unwrap())).collect::<Vec<_>>(), [("change", "plugin call vaults note")]);
         // Echo's sessions get it: a reading run with --read, its tools allowed without asking.
         let claude = crate::ai::Profile { id: "work".into(), name: "Work".into(), kind: crate::ai::Kind::Claude, base_url: None, token: None, live_model: None, notes_model: None, account: None, email: None, sso: false, models: Default::default(), wrapper: None };
         for (place, args) in [(crate::folder_args::Place::Read, json!(["plugins-mcp", "--read"])), (crate::folder_args::Place::Data, json!(["plugins-mcp"]))] {
@@ -142,7 +144,6 @@ mod tests {
         // Showing what plugins offer is no change of a run's; calling a command that may change things is noted.
         let argv = |a: &[&str]| a.iter().map(|s| s.to_string()).collect::<Vec<_>>();
         assert_eq!((crate::notes::action_kind(&argv(&["plugins-mcp", "--read"])), crate::notes::action_kind(&argv(&["plugin", "commands", "vaults"]))), (None, None));
-        assert!(!offers::reads("vaults", "note") && offers::reads("vaults", "search"));
         crate::jshost::unload_all();
     }
 }

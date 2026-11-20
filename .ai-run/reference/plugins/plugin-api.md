@@ -132,8 +132,8 @@ file of a skill folder that has one asks again. Evidence: `plugins::scripts::des
   line to a name, or a name of its own, optional; a parameter not destructured (`(a) => …`) or a bound function leaves
   them unknown (any JSON object). `reads: true`: it only reads — a run that only reads may call it. Echo trusts the
   mark, also for what that command calls in turn. Evidence: `jshost::offers::params`
-- A call from another plugin or Claude in Echo runs as a timer's does: no picker opens in it ("a picker opens only for
-  what you asked, not from a timer, an event or another plugin's or Claude's call") — offer no command that asks the
+- A call from another plugin or Claude in Echo runs as a timer's does, also after its awaits: no picker opens in it
+  ("a picker opens only for what you asked, not in another plugin's or Claude's call") — offer no command that asks the
   user to pick.
 - Echo finds what a plugin offers without starting it: a dry run of `apply(ctx)` on a `ctx` whose services do nothing
   (`ctx.terminal` true; nothing it starts settles), at most 5 s, kept per installed version and Echo's version
@@ -1026,8 +1026,8 @@ No line on the sheet: handing a file over is the user's own act. Evidence: `jsho
   session, plugins' sessions, routines, Yolo, plugins' runs (`folder_args::session_as`) — get the MCP server
   `echo_plugins` (`echoctl plugins-mcp`, its tools allowed without asking): `plugins`, `plugin(id)`, `command(id,
   name)`, `call(id, name, args)`; a run that only reads (`read`) gets it with `--read`, where `call` runs only
-  commands marked `reads`; a call of a command not marked `reads` is in a routine's or Yolo's outcome as `plugin call
-  <id> <name>`. The core names each offering plugin first, after its template, within 1,500 characters (the rest: the
+  commands marked `reads`; a call of a command not marked `reads` — Claude's, or one a command makes in turn — is in a routine's or Yolo's
+  outcome as `plugin call <id> <name>`; a refused one isn't. The core names each offering plugin first, after its template, within 1,500 characters (the rest: the
   `plugins` tool), the plugins' table after it. Never a
   minutes run, a project sync, the window's session on a call or a run with no tools. Evidence: `jshost::mcp::config`,
   `plugins::agent::render_with`

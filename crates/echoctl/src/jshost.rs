@@ -156,6 +156,10 @@ pub fn provider_send(kind: &str, m: &crate::deliver::Msg) -> Result<()> {
     call_within(&p.plugin, "__deliver", &json!({"kind": kind, "msg": msg}), Duration::from_secs(90)).map(|_| ())
 }
 
+/// The async operations started where no one at the screen asked (a timer, an event, Echo's own ask, a call from
+/// another plugin or Claude), by token: their outcome runs so too — `(unattended, called)`.
+static UNATTENDED: Mutex<std::collections::BTreeMap<u64, (bool, bool)>> = Mutex::new(std::collections::BTreeMap::new());
+
 /// Async operations and command calls in flight, numbered.
 static NEXT: AtomicU64 = AtomicU64::new(1);
 /// Off in a terminal (`echoctl plugin call`): the plugins' timers are the app's alone.
@@ -349,6 +353,8 @@ struct Current {
     widget: bool,
     /// A timer or an event handler runs now, no one at the screen asked: no picker opens (`host_async`).
     unattended: bool,
+    /// …and that is a call from another plugin or Claude in Echo (`from`): its own words when a picker is refused.
+    called: bool,
 }
 
 fn run(rx: Receiver<Msg>, tx: Sender<Msg>) {
@@ -444,6 +450,7 @@ fn run(rx: Receiver<Msg>, tx: Sender<Msg>) {
                 // Echo's own asks (its work rows, a widget's data) aren't the user's: no picker from them.
                 // …nor a call from another plugin or Claude in Echo (`from`): no one at the screen asked for it.
                 current.lock().unwrap().unattended = command == "__work" || command.starts_with("__widget:") || !from.is_empty();
+                current.lock().unwrap().called = !from.is_empty();
                 let ctx = p.ctx.clone();
                 slice(&mut || {
                     ctx.with(|c| {
@@ -500,6 +507,11 @@ fn run(rx: Receiver<Msg>, tx: Sender<Msg>) {
             Ok(Msg::Settle(id, token, out)) => {
                 if let Some(p) = plugins.get(&id) {
                     set_current(&current, &id);
+                    // What goes on after an await is as unattended as what started it.
+                    if let Some((unattended, called)) = UNATTENDED.lock().unwrap_or_else(|e| e.into_inner()).remove(&token) {
+                        let mut c = current.lock().unwrap();
+                        (c.unattended, c.called) = (unattended, called);
+                    }
                     let ctx = p.ctx.clone();
                     slice(&mut || ctx.with(|c| drop(c.globals().get::<_, Function>("__settle").and_then(|f| f.call::<_, ()>((token, out.clone()))))));
                 }
@@ -558,6 +570,7 @@ fn set_current(current: &Mutex<Current>, id: &str) {
     if let Ok(mut c) = current.lock() {
         c.id = id.into();
         c.unattended = false;
+        c.called = false;
     }
 }
 
@@ -601,8 +614,8 @@ fn load(rt: &Runtime, id: &str, dir: &Path, current: &Arc<Mutex<Current>>, tx: &
                 g.set("__host", host_fn).map_err(|e| anyhow!("{e}"))?;
                 let (id2, tx2, cur2) = (id_s.clone(), tx.clone(), current.clone());
                 let async_fn = Function::new(c.clone(), move |op: String, arg: String| -> u64 {
-                    let unattended = cur2.lock().is_ok_and(|c| c.unattended);
-                    host_async(&id2, &tx2, op, arg, unattended)
+                    let (unattended, called) = cur2.lock().map(|c| (c.unattended, c.called)).unwrap_or((false, false));
+                    host_async(&id2, &tx2, op, arg, unattended, called)
                 })
                 .map_err(|e| anyhow!("{e}"))?;
                 g.set("__hostAsync", async_fn).map_err(|e| anyhow!("{e}"))?;
@@ -647,14 +660,19 @@ fn host_op(current: &Mutex<Current>, op: &str, arg: &str) -> String {
 }
 
 /// `__hostAsync(op, json)`: started on a worker thread; its outcome settles the plugin's Promise.
-/// `unattended`: started by a timer or an event handler, where no picker opens.
-fn host_async(id: &str, tx: &Sender<Msg>, op: String, arg: String, unattended: bool) -> u64 {
+/// `unattended`: started by a timer or an event handler, where no picker opens (`called`: by a call from another plugin
+/// or Claude); what its outcome runs on is so too (`UNATTENDED`).
+fn host_async(id: &str, tx: &Sender<Msg>, op: String, arg: String, unattended: bool, called: bool) -> u64 {
     let token = NEXT.fetch_add(1, Ordering::Relaxed);
+    if unattended {
+        UNATTENDED.lock().unwrap_or_else(|e| e.into_inner()).insert(token, (true, called));
+    }
     let (id, tx) = (id.to_string(), tx.clone());
     std::thread::spawn(move || {
         let arg: Value = serde_json::from_str(&arg).unwrap_or(Value::Null);
         let picker = op == "system.pick_folder" || op == "system.pick_files";
-        let out = match if picker && unattended { Err(anyhow!("a picker opens only for what you asked, not from a timer, an event or another plugin's or Claude's call")) } else { service_async(&id, &op, &arg) } {
+        let refused = if called { "a picker opens only for what you asked, not in another plugin's or Claude's call" } else { "a picker opens only for what you asked, not from a timer or an event" };
+        let out = match if picker && unattended { Err(anyhow!(refused)) } else { service_async(&id, &op, &arg) } {
             Ok(v) => json!({ "value": v }),
             Err(e) => json!({ "error": format!("{e:#}") }),
         };

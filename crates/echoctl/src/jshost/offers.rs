@@ -81,10 +81,6 @@ pub fn of(id: &str) -> Option<Offer> {
     found.offer
 }
 
-/// Whether `id`'s offered command `name` is marked `reads`.
-pub fn reads(id: &str, name: &str) -> bool {
-    of(id).is_some_and(|o| o.commands.iter().any(|c| c.name == name && c.reads))
-}
 
 /// Every enabled plugin that offers itself, by id.
 pub fn all() -> Vec<(String, Offer)> {
@@ -142,6 +138,11 @@ pub fn call(id: &str, name: &str, args: &Value, from: &str, reading: bool) -> Re
     }
     let out = super::call_from(id, name, &args, from, super::CALL_TIMEOUT);
     IN_FLIGHT.fetch_sub(1, Ordering::SeqCst);
+    // In a routine's or Yolo's outcome, as `echoctl plugin call` is: a command that may change things, called —
+    // Claude's call or one a plugin's command made in turn.
+    if !c.reads {
+        crate::notes::note("change", &format!("plugin call {id} {name}"), out.as_ref().err().map(|e| format!("failed: {e:#}")).as_deref());
+    }
     out
 }
 
@@ -493,6 +494,7 @@ pub(crate) mod tests {
                 api.command('search', ({query, limit = 2}, how) => ({query, limit, from: how.from || null}), {description: 'Find notes by words', reads: true})
                 api.command('echo', (a) => a, {description: 'Answers what it was given'})
                 api.command('pick', async () => await ctx.system.pickFolder('a vault'), {description: 'Asks the user for a folder'})
+                api.command('pick_later', async () => { try { await ctx.plugins.list() } catch (e) {} return await ctx.system.pickFolder('a vault') }, {description: 'Asks for a folder after an await'})
                 ctx.command('secret', () => 'mine')
               }"#),
             ("ping", json!({"plugins": true}), r#"
@@ -532,7 +534,8 @@ pub(crate) mod tests {
         refused("ping", json!({"id": "ping", "name": "ping", "args": {}}), "calls its own commands itself");
         refused("nosy", json!({}), "didn't ask for “plugins”");
         // No one at the screen asked for a call from another plugin: no picker opens in it.
-        refused("ping", json!({"id": "vaults", "name": "pick", "args": {}}), "not from a timer, an event or another plugin's or Claude's call");
+        refused("ping", json!({"id": "vaults", "name": "pick", "args": {}}), "not in another plugin's or Claude's call");
+        refused("ping", json!({"id": "vaults", "name": "pick_later", "args": {}}), "not in another plugin's or Claude's call");
         // Two plugins calling each other stop at the limit, said.
         let e = call("ping", "ping", json!({})).unwrap_err();
         assert!(e.contains("calls between plugins are waiting at once"), "{e}");
