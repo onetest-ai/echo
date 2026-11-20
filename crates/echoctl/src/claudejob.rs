@@ -130,38 +130,37 @@ impl InFolder {
 /// session as a routine has it (`folder_args::session_as`: Echo's CLI, plugins' commands, skills and guides, the Brain,
 /// Echo's hooks; the data folder added when it works elsewhere), the folder's own Claude Code project (on a profile of
 /// Echo's own `--setting-sources user,project`; the user's own setup loads it anyway; a store folder none), its
-/// mode's tools (`read` changes nothing; `edit`, `copy` and a store folder all of Claude Code's) and the permissions
-/// `perm` gives (the plugin's `tools`, else the user's setting for routines; `read` as a run that may change nothing).
+/// mode's tools and permissions: `read` changes nothing — its reading tools and Bash, only what Echo's session allows
+/// running, nothing asked (`folder_args::read_only_args`, whatever the setting); `edit`, `copy` and a store folder all
+/// of Claude Code's, with the permissions `perm` gives (the plugin's `tools`, else the user's setting for routines).
 /// Its sources come last, where `ai::build_command` looks for them. Refused on a profile of Echo's own when the
 /// folder's project settings could send the run elsewhere than that profile, and in a store folder holding `.claude`.
 pub fn in_folder(p: &crate::ai::Profile, model: Option<&str>, f: &InFolder, perm: crate::config::Permissions, exe: &Path, settings: &Path) -> Result<Vec<String>> {
+    let mut a = folder_session(p, model, f, crate::folder_args::Who::Run(perm), exe, settings)?;
+    a.insert(a.len() - folder_sources(p, f).len(), "--no-session-persistence".into());
+    Ok(a)
+}
+
+/// `in_folder` for a plugin's session in Echo's terminal (`terminal::start_plugin`): the same, the user there (the
+/// window's view hook as in the folder session) with permissions `perm`, kept by Claude Code for the user to resume.
+#[cfg(feature = "tray")]
+pub fn in_folder_session(p: &crate::ai::Profile, model: Option<&str>, f: &InFolder, perm: crate::config::Permissions, exe: &Path, settings: &Path) -> Result<Vec<String>> {
+    folder_session(p, model, f, crate::folder_args::Who::Session(perm), exe, settings)
+}
+
+fn folder_session(p: &crate::ai::Profile, model: Option<&str>, f: &InFolder, who: crate::folder_args::Who, exe: &Path, settings: &Path) -> Result<Vec<String>> {
     folder_check(p, f)?;
-    let mut a = crate::folder_args::session_as(p, exe, settings, "routine", model, crate::folder_args::Who::Run(perm), f.mode != FolderMode::Read)?;
+    let place = if f.tools().is_some() { crate::folder_args::Place::Read } else { crate::folder_args::Place::Edit };
+    let usage = if matches!(who, crate::folder_args::Who::Run(_)) { "routine" } else { "folder" };
+    let mut a = crate::folder_args::session_as(p, exe, settings, usage, model, who, place)?;
     let home = dunce::canonicalize(paths::home())?;
     if f.cwd != home {
         a.extend(["--add-dir".into(), home.display().to_string()]);
     }
+    // `read`: its tools and Bash for what Echo's session allows (`folder_args::read_only_args`).
     if let Some(t) = f.tools() {
-        a.extend(["--tools".into(), t.into()]);
+        a.extend(["--tools".into(), format!("Bash,{t}")]);
     }
-    a.push("--no-session-persistence".into());
-    a.extend(folder_sources(p, f));
-    Ok(a)
-}
-
-/// A plugin's session in a folder in Echo's terminal (`terminal::start_plugin`): that folder's own project, its mode's
-/// tools and the permissions `perm` gives, kept by Claude Code for the user to resume.
-#[cfg(feature = "tray")]
-pub fn in_folder_session(p: &crate::ai::Profile, model: Option<&str>, f: &InFolder, perm: crate::config::Permissions) -> Result<Vec<String>> {
-    folder_check(p, f)?;
-    let mut a: Vec<String> = vec![];
-    if let Some(m) = model {
-        a.extend(["--model".into(), m.to_string()]);
-    }
-    if let Some(t) = f.tools() {
-        a.extend(["--tools".into(), t.into()]);
-    }
-    a.extend(crate::folder_args::permission_args(perm, p, model, f.mode != FolderMode::Read).0);
     a.extend(folder_sources(p, f));
     Ok(a)
 }
@@ -596,7 +595,7 @@ fn folder_preamble(f: &InFolder, cli: &str, home: &Path) -> String {
     };
     let own = if f.store { "" } else { " Its own CLAUDE.md, skills and settings apply." };
     let reach = if f.tools().is_some() {
-        "What was said and who people are: the `echo` MCP tools.".to_string()
+        format!("Echo's CLI is {cli} (only its reading commands run here); what was said and who people are: the `echo` MCP tools.")
     } else {
         format!(
             "Echo's CLI is {cli}; what was said and who people are: the `echo` MCP tools. The user lets you act on your own: \
@@ -736,7 +735,7 @@ fn run_job(spec: &Spec, mut on_text: Option<&mut dyn FnMut(&str)>) -> Result<(St
             "{}, {} ({})",
             if f.store { "a folder of the plugin's store" } else { "its folder's own Claude Code setup" },
             if f.mode == FolderMode::Read { "reads only" } else { "edits in the folder" },
-            crate::folder_args::permission_args(m, profile, model.as_deref(), edit).1
+            if edit { crate::folder_args::permission_args(m, profile, model.as_deref(), true).1 } else { crate::folder_args::read_only_args().1 }
         ),
         (None, None) => "no tools".to_string(),
         (None, Some(m)) => format!("the folder session's: acts on its own ({})", crate::folder_args::permission_args(m, profile, model.as_deref(), true).1),
@@ -1196,17 +1195,19 @@ mod tests {
         let record = |dir: &str| serde_json::from_str::<Value>(&fs::read_to_string(root.join("store/runs").join(dir).join("permissions.json")).unwrap()).unwrap();
         // Routines on Auto (the default), whatever the folder session's setting: every mode in the folder, its own
         // project loaded once (not Echo's `user` alone) and last; Echo's session as a routine's (its settings and hooks,
-        // its CLI's commands, plugins, the data folder added, the routine's marks), the user's MCP servers; `read` only
-        // reading tools and the web, `edit` and `copy` all of Claude Code's; auto mode.
+        // its CLI's commands, plugins, the data folder added, the routine's marks), the user's MCP servers; `read` its
+        // reading tools, the web and Bash for what Echo's session allows, nothing asked; `edit` and `copy` all of Claude
+        // Code's, in auto mode.
         set_permissions(Permissions::Skip, None, Some(Permissions::Skip));
-        for (mode, tools) in [(FolderMode::Read, Some("Read,Grep,Glob,Skill,WebFetch,WebSearch")), (FolderMode::Edit, None), (FolderMode::Copy, None)] {
+        for (mode, tools) in [(FolderMode::Read, Some("Bash,Read,Grep,Glob,Skill,WebFetch,WebSearch")), (FolderMode::Edit, None), (FolderMode::Copy, None)] {
+            let (perm_mode, words) = if tools.is_some() { ("dontAsk", "(nothing asked: only reading, Echo's reading commands and the web run)") } else { ("auto", "(auto mode: Claude Code decides each action)") };
             let _ = run(&spec(mode, mode.name()));
             let a = args();
             assert_eq!(file("p.cwd").trim(), vault.display().to_string(), "{mode:?}");
             assert_eq!(a.iter().filter(|x| *x == "--setting-sources").count(), 1, "{a:?}");
             assert!(a.ends_with(&["--setting-sources".to_string(), "user,project".to_string()]), "{a:?}");
             assert_eq!(after(&a, "--tools").as_deref(), tools, "{mode:?}");
-            assert_eq!(after(&a, "--permission-mode").as_deref(), Some("auto"));
+            assert_eq!(after(&a, "--permission-mode").as_deref(), Some(perm_mode));
             assert_eq!(after(&a, "--add-dir").as_deref(), Some(home.as_str()), "{a:?}");
             for yes in ["--settings", "--allowedTools", "--no-session-persistence"] {
                 assert!(a.contains(&yes.to_string()), "{yes}: {a:?}");
@@ -1218,12 +1219,12 @@ mod tests {
             let r = record(mode.name());
             let used = r["used"].as_str().unwrap();
             assert_eq!(r["asked"], mode.name());
-            assert!(used.starts_with("its folder's own Claude Code setup") && used.ends_with("(auto mode: Claude Code decides each action)"), "{r}");
+            assert!(used.starts_with("its folder's own Claude Code setup") && used.ends_with(words), "{r}");
             let log = fs::read_to_string(root.join("store/runs").join(mode.name()).join("log.txt")).unwrap();
             assert!(log.lines().next().unwrap().ends_with(&format!("(asked: {}; runs with {used})", mode.name())), "{log}");
             let prompt = fs::read_to_string(root.join("store/runs").join(mode.name()).join("prompt.md")).unwrap();
             assert!(prompt.contains("Its own CLAUDE.md, skills and settings apply") && prompt.contains(&format!("Echo's data folder is {home}")) && prompt.ends_with("Tidy the notes"), "{prompt}");
-            assert_eq!(prompt.contains("Echo's CLI is"), tools.is_none(), "the CLI where it may run it: {prompt}");
+            assert!(prompt.contains("Echo's CLI is"), "{prompt}");
         }
         // The plugin asks for its own permissions (`tools`): taken over the routines' setting.
         let asked = |t: Tools, dir: &str| {
@@ -1238,11 +1239,15 @@ mod tests {
         set_permissions(Permissions::Auto, None, None);
         // Routines on Skip all permission checks: every mode skips them.
         set_permissions(Permissions::Auto, Some(Permissions::Skip), None);
-        for mode in [FolderMode::Read, FolderMode::Edit, FolderMode::Copy] {
+        for mode in [FolderMode::Edit, FolderMode::Copy] {
             let _ = run(&spec(mode, &format!("{}-skip", mode.name())));
             let a = args();
             assert!(a.contains(&"--dangerously-skip-permissions".to_string()) && !a.contains(&"--permission-mode".to_string()), "{a:?}");
         }
+        // `read` never skips them: it changes nothing whatever the setting.
+        let _ = run(&spec(FolderMode::Read, "read-skip"));
+        let a = args();
+        assert!(!a.contains(&"--dangerously-skip-permissions".to_string()) && after(&a, "--permission-mode").as_deref() == Some("dontAsk"), "{a:?}");
         set_permissions(Permissions::Auto, None, None);
         // Claude Code started in its manual mode though auto was asked: the log and the record say so.
         let init = serde_json::json!({"type": "system", "subtype": "init", "claude_code_version": "9.0.0", "permissionMode": "default"});
@@ -1308,33 +1313,48 @@ mod tests {
 
     #[test]
     #[cfg(feature = "tray")]
-    fn a_plugins_folder_session_is_that_folders_own_project_kept_for_resuming_with_the_permissions_it_is_given() {
-        let vault = std::path::PathBuf::from("/data/acme-vault");
+    fn a_plugins_folder_session_is_echos_session_in_that_folders_own_project_kept_for_resuming_with_the_permissions_it_is_given() {
+        let (_env, root) = crate::paths::testenv::folders("claudejob-folder-session");
+        let vault = root.join("acme-vault");
+        fs::create_dir_all(&vault).unwrap();
+        let vault = dunce::canonicalize(&vault).unwrap();
+        let home = dunce::canonicalize(crate::paths::home()).unwrap().display().to_string();
+        let (exe, set) = (std::env::current_exe().unwrap(), root.join("session-plugin-acme.json"));
         let after = |a: &[String], k: &str| a.iter().position(|x| x == k).and_then(|i| a.get(i + 1).cloned());
         let profile = |kind| crate::ai::Profile { id: "work".into(), name: "Work".into(), kind, base_url: None, token: None, live_model: None, notes_model: None, account: None, email: None, sso: false, models: Default::default(), wrapper: None };
         let inf = |mode| InFolder { cwd: vault.clone(), mode, store: false };
-        // The folder's project last, the mode's tools (read changes nothing; edit all of Claude Code's), the user's MCP
-        // servers, the conversation kept.
+        let session = |p: &crate::ai::Profile, m: Option<&str>, mode, perm| in_folder_session(p, m, &inf(mode), perm, &exe, &set).unwrap();
+        // The folder's project last; Echo's session (its settings file with the window's view hook: the user is there,
+        // its commands, the data folder); `read` its reading tools and Bash for Echo's commands, nothing asked; `edit`
+        // every tool; the user's MCP servers; the conversation kept.
         let claude = profile(crate::ai::Kind::Claude);
-        for (mode, tools) in [(FolderMode::Read, Some("Read,Grep,Glob,Skill,WebFetch,WebSearch")), (FolderMode::Edit, None)] {
-            let a = in_folder_session(&claude, None, &inf(mode), Permissions::Ask).unwrap();
+        for (mode, tools) in [(FolderMode::Read, Some("Bash,Read,Grep,Glob,Skill,WebFetch,WebSearch")), (FolderMode::Edit, None)] {
+            let a = session(&claude, None, mode, Permissions::Ask);
             assert_eq!(after(&a, "--tools").as_deref(), tools);
             assert!(!a.contains(&"--strict-mcp-config".to_string()) && !a.contains(&"--no-session-persistence".to_string()), "{a:?}");
             assert!(a.ends_with(&["--setting-sources".to_string(), "user,project".to_string()]), "{a:?}");
+            assert_eq!(after(&a, "--add-dir").as_deref(), Some(home.as_str()));
+            assert!(a.contains(&"--allowedTools".to_string()) && after(&a, "--settings").as_deref() == Some(set.display().to_string().as_str()), "{a:?}");
+            assert!(fs::read_to_string(&set).unwrap().contains("UserPromptSubmit"), "the window's view hook: the user is there");
         }
-        // The setting it is given, each way: Ask each time — Claude Code's own prompts; Auto; Skip all permission checks.
-        let ask = in_folder_session(&claude, None, &inf(FolderMode::Edit), Permissions::Ask).unwrap();
+        // `read` asks nothing and runs only what is allowed, whatever the setting.
+        for perm in [Permissions::Ask, Permissions::Auto, Permissions::Skip] {
+            let a = session(&claude, None, FolderMode::Read, perm);
+            assert_eq!(after(&a, "--permission-mode").as_deref(), Some("dontAsk"), "{perm:?}");
+            assert!(!a.contains(&"--dangerously-skip-permissions".to_string()), "{a:?}");
+        }
+        // `edit` takes the setting it is given, each way: Ask each time — Claude Code's own prompts; Auto; Skip.
+        let ask = session(&claude, None, FolderMode::Edit, Permissions::Ask);
         assert!(!ask.contains(&"--permission-mode".to_string()) && !ask.contains(&"--dangerously-skip-permissions".to_string()), "{ask:?}");
-        assert_eq!(after(&in_folder_session(&claude, None, &inf(FolderMode::Edit), Permissions::Auto).unwrap(), "--permission-mode").as_deref(), Some("auto"));
-        let skip = in_folder_session(&claude, None, &inf(FolderMode::Read), Permissions::Skip).unwrap();
+        assert_eq!(after(&session(&claude, None, FolderMode::Edit, Permissions::Auto), "--permission-mode").as_deref(), Some("auto"));
+        let skip = session(&claude, None, FolderMode::Edit, Permissions::Skip);
         assert!(skip.contains(&"--dangerously-skip-permissions".to_string()) && !skip.contains(&"--permission-mode".to_string()), "{skip:?}");
-        // A model server has no auto mode: edits accepted, or a read asking nothing; its model named.
+        // A model server has no auto mode: edits accepted; its model named.
         let local = profile(crate::ai::Kind::Local);
-        let a = in_folder_session(&local, Some("qwen3"), &inf(FolderMode::Read), Permissions::Auto).unwrap();
-        assert_eq!((after(&a, "--model").as_deref(), after(&a, "--permission-mode").as_deref()), (Some("qwen3"), Some("dontAsk")));
-        assert_eq!(after(&in_folder_session(&local, None, &inf(FolderMode::Edit), Permissions::Auto).unwrap(), "--permission-mode").as_deref(), Some("acceptEdits"));
+        assert_eq!(after(&session(&local, Some("qwen3"), FolderMode::Read, Permissions::Auto), "--model").as_deref(), Some("qwen3"));
+        assert_eq!(after(&session(&local, None, FolderMode::Edit, Permissions::Auto), "--permission-mode").as_deref(), Some("acceptEdits"));
         // The user's own Claude Code loads the folder's project anyway: no sources named.
-        assert!(!in_folder_session(&profile(crate::ai::Kind::System), None, &inf(FolderMode::Read), Permissions::Ask).unwrap().contains(&"--setting-sources".to_string()));
+        assert!(!session(&profile(crate::ai::Kind::System), None, FolderMode::Read, Permissions::Ask).contains(&"--setting-sources".to_string()));
     }
 
     /// A run taking the key in a thread of its own, once it has either ended or waits at the key's gate.

@@ -592,14 +592,10 @@ pub(super) fn snapshot(id: &str, root: &str, o: &Value) -> Result<Value> {
 /// `folders.write`), at `path` inside it — or, for `copy`, into a snapshot of it (`snapshot`, dot names too, so the
 /// folder's `.claude` comes along; less the paths `exclude` names, as `ctx.fs.snapshot`'s), whose answer is the run's
 /// `snapshot` for the plugin to compare and apply. Or into a folder of its own store (`store`, no `mode`). No
-/// `folder` or `store`: the run as before (`mode`, `path` and `exclude` then refused); `exclude` only with `copy`; never
-/// `tools: "none"` (a run in a folder works with its files).
+/// `folder` or `store`: the run as before (`mode`, `path` and `exclude` then refused); `exclude` only with `copy`.
 pub(super) fn claude_folder(id: &str, arg: &Value, spec: &mut crate::claudejob::Spec) -> Result<Option<Value>> {
     use crate::claudejob::{FolderMode, InFolder};
     let (root, path) = (arg["folder"].as_str().unwrap_or(""), arg["path"].as_str().unwrap_or(""));
-    if (!root.is_empty() || !arg["store"].is_null()) && spec.tools == crate::claudejob::Tools::None {
-        bail!("tools “none” goes without a folder: a run in a folder (folder, store) works with its files");
-    }
     if !arg["store"].is_null() {
         if !root.is_empty() || !path.is_empty() || !arg["exclude"].is_null() {
             bail!("a run goes in a folder you were given (folder, path) or in one of your store (store), not both");
@@ -651,10 +647,21 @@ fn store_folder(id: &str, rel: &str) -> Result<std::path::PathBuf> {
         bail!("a run in your store goes in a folder of it (store: \"cache/pages\"), never the store itself");
     }
     let at = store_path(id, rel)?;
-    let base = dunce::canonicalize(plugins::data_dir(id))?;
+    let rel = rel.trim_start_matches("./");
+    if Path::new(rel).components().next().is_some_and(|c| c.as_os_str().eq_ignore_ascii_case("runs")) {
+        bail!("“{rel}”: runs/ keeps Echo's records of your runs — a run in your store goes in a folder of your own");
+    }
+    let base = plugins::data_dir(id);
+    let mut at_part = base.clone();
+    for c in Path::new(rel).components() {
+        at_part.push(c);
+        if std::fs::symlink_metadata(&at_part).is_ok_and(|m| m.file_type().is_symlink()) {
+            bail!("“{rel}” is a link: a run in your store goes in a folder of it");
+        }
+    }
+    let base = dunce::canonicalize(&base)?;
     match dunce::canonicalize(&at) {
-        Ok(c) if c.is_dir() && c.starts_with(&base) && c != base && c == base.join(rel.trim_start_matches("./")) => Ok(c),
-        Ok(c) if c.is_dir() => bail!("“{rel}” is a link: a run in your store goes in a folder of it"),
+        Ok(c) if c.is_dir() && c.starts_with(&base) && c != base => Ok(c),
         _ => bail!("“{rel}” isn't a folder in your store"),
     }
 }
@@ -1189,7 +1196,7 @@ mod tests {
         assert_eq!(cwd(), dunce::canonicalize(store.join("cache/pages")).unwrap().display().to_string());
         assert!(!std::fs::read_to_string(crate::ai::fake::file(&p, "p.args")).unwrap().split('\0').any(|a| a == "--tools"), "every tool");
         // Refused before anything starts: the store itself, a folder out of it or not there, a file, a link out, a
-        // mode, a folder given too, no tools.
+        // mode, a folder given too, Echo's records of runs.
         std::os::unix::fs::symlink(&other, store.join("cache/out")).unwrap();
         forget();
         let refused = [
@@ -1201,13 +1208,12 @@ mod tests {
             claude("asker", json!({"store": "cache/out"})),
             claude("asker", json!({"store": "cache/pages", "mode": "read"})),
             claude("reader", json!({"store": "cache", "folder": v})),
-            claude("asker", json!({"store": "cache/pages", "tools": "none"})),
-            claude("asker", json!({"folder": v, "tools": "none"})),
+            claude("asker", json!({"store": "runs/x"})),
         ];
         let why: Vec<String> = refused.into_iter().map(|r| r.unwrap_err().to_string()).collect();
         assert!(why[0].contains("never the store itself") && why[1].contains("never the store itself") && why[2].contains("isn't a path inside"), "{why:?}");
         assert!(why[3].contains("isn't a folder in your store") && why[4].contains("isn't a folder in your store") && why[5].contains("is a link"), "{why:?}");
-        assert!(why[6].contains("mode goes with a folder") && why[7].contains("not both") && why[8].contains("tools “none”") && why[9].contains("tools “none”"), "{why:?}");
+        assert!(why[6].contains("mode goes with a folder") && why[7].contains("not both") && why[8].contains("runs/ keeps Echo's records"), "{why:?}");
         assert!(!started(), "nothing started");
         for id in ["reader", "writer", "asker"] {
             plugins::remove(id, true).unwrap();

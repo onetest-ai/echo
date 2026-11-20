@@ -1,6 +1,6 @@
 ---
 id: TC-091
-title: "A plugin's Claude run in its folder takes the permissions the plugin asked (skip as its sheet allows), else the user's setting for routines: Auto — auto mode on a Claude profile, edits accepted or a read asking nothing on a local model; Skip all permission checks — every mode skips them"
+title: "A plugin's Claude run in its folder takes the permissions the plugin asked (skip as its sheet allows), else the user's setting for routines: Auto — auto mode on a Claude profile, edits accepted on a local model; Skip all permission checks — edit and copy skip them; a read asks nothing and only reads, whatever the setting"
 priority: high
 type: functional
 requirements: [F-PLUG-63]
@@ -27,7 +27,7 @@ tags: [plugins, claude-code, folders, permissions]
 | # | Action | Expected Result |
 |---|--------|----------------|
 | 1 | `$E plugin call acme-tidy run '{"mode":"edit","tools":"skip","dir":"p1"}'`; `grep -A1 '^--permission-mode$' "$D/run-args"`; `grep -c '^--dangerously-skip-permissions$' "$D/run-args"`; `cat "$S/runs/p1/permissions.json"`; `head -1 "$S/runs/p1/log.txt"` | `"answer": "Tidied"`; no `--permission-mode` line; `1` — the plugin's own `skip` is taken (its sheet allows it); the record's `"used"` ends `(every permission check skipped)`; the log's first line ends `(asked: edit; runs with <the record's "used">)` |
-| 2 | `$E config --routine-permissions skip > /dev/null 2>&1`; then for each of `read` (`p2`), `edit` (`p3`) and `copy` (`p4`): `$E plugin call acme-tidy run '{"mode":"<mode>","dir":"<p>"}'`; `grep -c '^--dangerously-skip-permissions$' "$D/run-args"`; `grep -c '^--permission-mode$' "$D/run-args"` | Each answers `"answer": "Tidied"`; `1` and `0` for all three; each record's `"used"` ends `(every permission check skipped)` |
+| 2 | `$E config --routine-permissions skip > /dev/null 2>&1`; then for each of `read` (`p2`), `edit` (`p3`) and `copy` (`p4`): `$E plugin call acme-tidy run '{"mode":"<mode>","dir":"<p>"}'`; `grep -c '^--dangerously-skip-permissions$' "$D/run-args"`; `grep -c '^--permission-mode$' "$D/run-args"` | Each answers `"answer": "Tidied"`; for `edit` and `copy` `1` and `0`, each record's `"used"` ends `(every permission check skipped)`; for `read` `0` and `1` (a run that reads never skips them), its `"used"` ends `(nothing asked: only reading, Echo's reading commands and the web run)` |
 | 3 | `$E config --routine-permissions auto > /dev/null 2>&1`; `$E plugin call acme-tidy run '{"mode":"read","profile":"acme-local","dir":"p5"}'`; `grep -A1 '^--permission-mode$' "$D/run-args"`; `$E plugin call acme-tidy run '{"mode":"edit","profile":"acme-local","dir":"p6"}'`; `grep -A1 '^--permission-mode$' "$D/run-args"`; `cat "$S/runs/p6/permissions.json"` | Both answer `"answer": "Tidied"`; `--permission-mode` `dontAsk` for the read, `acceptEdits` for the edit (the local model has no auto mode: never Claude Code's manual mode, where every edit would be refused); the record's `"used"` ends `(edits accepted: this profile's model has no auto mode)` |
 
 ## Expected Final State

@@ -586,9 +586,9 @@ fn plugin_store_key(profile: &str, plugin: &str, cwd: &Path) -> String {
 }
 
 /// A plugin's session (`ctx.claude.session`, opened only on the user's click in its view): Claude Code in a folder the
-/// user gave plugin `plugin` (`req`: `{folder, path, mode}`), as that folder's own project — its setup, the mode's tools,
-/// no MCP server (`claudejob::in_folder_session`) — with the folder session's permission setting (Ask each time, Auto,
-/// Skip), on `profile` (a wrapper only when it is the default) or the default; `pick` as `choose_session` (`new`: a new
+/// user gave plugin `plugin` (`req`: `{folder, path, mode}`), as that folder's own project — its setup and Echo's
+/// session, the mode's tools (`claudejob::in_folder_session`) — with the folder session's permission setting (Ask each
+/// time, Auto, Skip; `read` asks nothing and only reads), on `profile` (a wrapper only when it is the default) or the default; `pick` as `choose_session` (`new`: a new
 /// conversation). Nothing is typed into it but the user's keys; the plugin's ctx gets no handle on it. With the plugin
 /// switched off it keeps running, the user's, but doesn't start again.
 #[cfg(feature = "js")]
@@ -620,16 +620,19 @@ fn plugin_command(plugin: &str, req: &serde_json::Value, profile: Option<&str>, 
     choose_session(&store, pick)?;
     let (mut args, _, forget) = session_args(&store);
     let perm = crate::folder_args::folder_permissions();
-    args.extend(crate::claudejob::in_folder_session(&p, model.as_deref(), &f, perm)?);
+    // Echo's session there too (its settings file, one per plugin), the user there.
+    let exe = std::env::current_exe()?;
+    let settings = paths::config_dir().join("minutes-run").join(format!("session-plugin-{plugin}.json"));
+    args.extend(crate::claudejob::in_folder_session(&p, model.as_deref(), &f, perm, &exe, &settings)?);
     // Through a wrapper, its own settings file's session-start hook answering is the check (claude-code-runs R14).
     let proof = if p.kind == ai::Kind::Wrapper { Some(ai::wrapper::terminal_proof(&mut args)?) } else { None };
-    let cmd = ai::terminal_command(&p, &args, &f.cwd, &[], false)?;
+    let cmd = ai::terminal_command(&p, &args, &f.cwd, &crate::folder_args::env(&p.id), false)?;
     let name = crate::plugins::enabled().into_iter().find(|x| x.id == plugin).and_then(|x| crate::plugins::read_manifest(&crate::plugins::plugin_dir(&x)).ok()).map_or_else(|| plugin.to_string(), |m| m.name);
     let about = serde_json::json!({
         "plugin": plugin, "name": name, "cwd": f.cwd.display().to_string(),
         "folder": req["folder"].as_str().unwrap_or(""), "path": req["path"].as_str().unwrap_or(""), "mode": f.mode.name(),
         "profile": p.id, "profile_name": p.name,
-        "permissions": crate::folder_args::permission_args(perm, &p, model.as_deref(), f.mode != crate::claudejob::FolderMode::Read).1,
+        "permissions": if f.mode == crate::claudejob::FolderMode::Read { crate::folder_args::read_only_args().1 } else { crate::folder_args::permission_args(perm, &p, model.as_deref(), true).1 },
     });
     Ok((cmd, ready, forget, proof, about))
 }
@@ -904,7 +907,7 @@ mod tests {
         let agreed = crate::plugins::review("kit", Some(&name)).unwrap().uses;
         crate::plugins::install("kit", Some(&name), &agreed).unwrap();
         let exe = Path::new("/Apps/Echo.app/echoctl");
-        let args = crate::folder_args::build(false, exe, &paths::config_dir().join("session-folder.json"), crate::folder_args::Who::Folder).unwrap();
+        let args = crate::folder_args::build(false, exe, &paths::config_dir().join("session-folder.json"), crate::folder_args::Who::Folder, crate::folder_args::Place::Data).unwrap();
         // No plugin's folder as a Claude Code plugin: its part waits in the data folder for Claude to Read it.
         let dirs: Vec<&String> = args.iter().zip(args.iter().skip(1)).filter(|(a, _)| *a == "--plugin-dir").map(|(_, d)| d).collect();
         let session = paths::config_dir().join("plugins/session");
@@ -1072,12 +1075,16 @@ mod tests {
         let (a, cwd, about) = start("vault", json!({"folder": v}), None).unwrap();
         assert_eq!(cwd.as_deref(), Some(v.as_str()));
         assert!(a.ends_with(&["--setting-sources".to_string(), "user,project".to_string()]), "{a:?}");
-        assert_eq!(after(&a, "--tools").as_deref(), Some("Read,Grep,Glob,Skill,WebFetch,WebSearch"));
+        assert_eq!(after(&a, "--tools").as_deref(), Some("Bash,Read,Grep,Glob,Skill,WebFetch,WebSearch"));
         assert!(after(&a, "--session-id").is_some(), "{a:?}");
-        for no in ["--strict-mcp-config", "--permission-mode", "--dangerously-skip-permissions", "--no-session-persistence", "--settings", "--plugin-dir", "--mcp-config", "--add-dir", "--allowedTools", "-p"] {
+        for no in ["--strict-mcp-config", "--dangerously-skip-permissions", "--no-session-persistence", "-p"] {
             assert!(!a.contains(&no.to_string()), "{no}: {a:?}");
         }
-        assert_eq!((about["name"].as_str(), about["mode"].as_str(), about["permissions"].as_str(), about["profile"].as_str()), (Some("Acme vault"), Some("read"), Some("asks each time"), Some("work")));
+        // Echo's session too, only reading: its settings, reading commands, nothing asked; no folder offered to sessions.
+        assert!(after(&a, "--settings").is_some_and(|f| f.ends_with("session-plugin-vault.json")) && after(&a, "--permission-mode").as_deref() == Some("dontAsk"), "{a:?}");
+        assert!(a.iter().any(|x| x.ends_with("echoctl project show:*)")) && !a.iter().any(|x| x.ends_with("echoctl compose:*)") || x.ends_with("echoctl project work:*)") || x.contains(" plugin call ")), "{a:?}");
+        assert_eq!(a.iter().filter(|x| *x == "--add-dir").count(), 1, "only the data folder: {a:?}");
+        assert_eq!((about["name"].as_str(), about["mode"].as_str(), about["permissions"].as_str(), about["profile"].as_str()), (Some("Acme vault"), Some("read"), Some("nothing asked: only reading, Echo's reading commands and the web run"), Some("work")));
         // Started again: the same conversation, resumed.
         let id = after(&a, "--session-id").unwrap();
         let (b, ..) = start("vault", json!({"folder": v}), None).unwrap();
@@ -1099,7 +1106,7 @@ mod tests {
         assert_eq!((after(&a, "--tools").as_deref(), after(&a, "--permission-mode").as_deref()), (None, Some("auto")));
         assert!(after(&a, "--session-id").is_some_and(|x| x != id), "{a:?}");
         set(Permissions::Skip);
-        let (a, ..) = start("vault", json!({"folder": v}), None).unwrap();
+        let (a, ..) = start("writer", json!({"folder": v, "mode": "edit"}), None).unwrap();
         assert!(a.contains(&"--dangerously-skip-permissions".to_string()) && !a.contains(&"--permission-mode".to_string()), "{a:?}");
         set(Permissions::Ask);
         // Refused before anything starts: no Claude on its sheet; edit without folders.write; a copy; no folder; a

@@ -224,10 +224,10 @@ pub(super) fn join_words(w: &[&str]) -> String {
     }
 }
 
-/// Its runs are routines: they run as your Claude · Echo folder session, by your one choice — `claude.skip` (from
-/// before that choice) is still taken and changes nothing. In a folder you gave it, a run works there on that folder's
-/// own setup, its permissions as you set routines too; a session the user opens there from its screens, as they set
-/// Claude in the window.
+/// Its runs are routines: they run as your Claude · Echo folder session, by your one choice or the run's (`skip` only
+/// with `claude.skip`). In a folder of its own data, a run works on the files it gathered; in a folder you gave it, on
+/// that folder's own setup — reading only, or editing where the plugin may change it; a session the user opens there
+/// from its screens, as they set Claude in the window.
 /// The sheet's line for `uses.skills: true` (`claude_skills`: each skill only on the user's click).
 pub const SKILLS_LINE: &str = "Adds instructions for Claude Code (skills) to your own Claude Code (~/.claude/skills), each only when you click to add it: skills that run commands are refused, never over a skill that is there already, changing or removing only the skills it added — they go when you remove the plugin";
 
@@ -245,8 +245,8 @@ pub(super) fn describe_claude(v: &Value) -> Result<String> {
         line.push_str("; a run you mark so may skip every permission check");
     }
     line.push_str(
-        ". In a folder you gave it, Claude works with that folder's own Claude Code setup: it reads the folder and, if the plugin may change it, \
-         edits files there or in a copy for you to review — as you set routines; on your click in its screens it opens Claude Code there in Echo's Claude panel for you to ask, as you set Claude in the window",
+        ". In a folder of its own data, Claude works on the files it gathered with every tool. In a folder you gave it, Claude works with that folder's own Claude Code setup and Echo's: it only reads the folder (and Echo's data), or, if the plugin may change it, \
+         edits files there or in a copy for you to review with every tool — as you set routines; on your click in its screens it opens Claude Code there in Echo's Claude panel for you to ask, as you set Claude in the window",
     );
     Ok(line)
 }
