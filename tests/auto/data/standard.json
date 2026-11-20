@@ -215,7 +215,7 @@
       "Memo"
     ],
     "read": "Acme security review",
-    "message": "Extract: 1 item read, 4 changes to the work, 2 about people.\nExtract (virtual model): 1 item read; created a risk and a client-owed task, proposed T008's date and T003's owner; proposed Priya Nair's role, added a fact about her; Tom Becker's role is the user's.\nTom Becker's role is the one the user set: left as it is.\nVerify: 3 supports.",
+    "message": "Extract: 1 item read, 4 changes to the work, 2 about people. 1 rejection left unfixed.\nExtract (virtual model): 1 item read; created a risk and a client-owed task, proposed T008's date and T003's owner; proposed Priya Nair's role, added a fact about her; Tom Becker's role is the user's.\nTom Becker's role is the one the user set: left as it is.\nVerify: 3 supports.",
     "runFiles": [
       "log.txt",
       "{evid}.json",

@@ -517,8 +517,9 @@ fn extract_rules() -> String {
          note says why; nothing about people: `\"people\": []`. An item to read for people only: no `work` and no `note`.\n\
          - Where EXTRACT and PEOPLE speak of a file, `apply`, `people-apply` or `done`, read: the item's `work` and \
          `people`. Echo applies them in the order of your answer and marks the item done.\n\
-         - A `ref` is unique across your whole answer. A later item may name an earlier item's ref (as `parent`, \
-         `node`, `depends_on` or `into`): Echo puts the id it made in its place.\n\
+         - A `ref` is unique across your whole answer and never looks like a node's id (`s1`, `t2`, not `S001`). A \
+         later item may name an earlier item's ref (as `parent`, `node`, `depends_on` or `into`): Echo puts the id it \
+         made in its place.\n\
          - The report: items read, what changed (new stories and tasks, sessions held, dates moved, dependencies) and \
          what you proposed about people.\n\n\
          When Echo rejects any of your proposals, a second message gives your answer and each rejection (its item, the \
@@ -560,8 +561,9 @@ fn extract_pass(p: &projects::Project, items: &[Item], given: &Given, tag: &str)
     Ok(Pass { name: "extract", system: extract_rules(), message: m })
 }
 
-/// The extract's fix run: the first message, then the first answer, what Echo rejected and the ids the refs got.
-fn fix_pass(first: &Pass, answer: &str, rejected: &[Value], refs: &BTreeMap<String, String>) -> Pass {
+/// The extract's fix run: the first message, then the first answer as Echo read it (its JSON, none of the text around
+/// it), what Echo rejected and the ids the refs got.
+fn fix_pass(first: &Pass, answer: &Value, rejected: &[Value], refs: &BTreeMap<String, String>) -> Pass {
     let message = format!(
         "{}\n\n## Your answer\n\n{answer}\n\n## What Echo rejected\n\n{}\n\n## The ids your refs got\n\n{}\n\nAnswer with only the fixed proposals.",
         first.message,
@@ -586,7 +588,7 @@ fn answer_of(answer: &str) -> Option<Value> {
 fn with_ids(proposals: &[Value], refs: &BTreeMap<String, String>) -> Vec<Value> {
     let own: Vec<&str> = proposals.iter().filter_map(|p| p["ref"].as_str()).collect();
     let id_of = |v: &Value| match v.as_str() {
-        Some(r) if !own.contains(&r) => refs.get(r).map(|id| json!(id)),
+        Some(r) if !own.contains(&r) && !node_id(r) => refs.get(r).map(|id| json!(id)),
         _ => None,
     };
     proposals
@@ -611,6 +613,12 @@ fn with_ids(proposals: &[Value], refs: &BTreeMap<String, String>) -> Vec<Value> 
         .collect()
 }
 
+/// A node's id as the tree has them (`E01`, `T003`): never taken for a ref.
+fn node_id(r: &str) -> bool {
+    let digits = r.trim_start_matches(|c: char| c.is_ascii_uppercase());
+    digits.len() < r.len() && !digits.is_empty() && digits.chars().all(|c| c.is_ascii_digit())
+}
+
 /// What Echo made of the extract's answers.
 #[derive(Default)]
 struct Extracted {
@@ -623,48 +631,65 @@ struct Extracted {
     events: u64,
     people: u64,
     report: String,
+    /// Items an error stopped part-way (`ledger::apply` or a write failed): not marked done, said in the message.
+    errors: Vec<String>,
 }
 
-/// Apply one extract answer, item by item in its order (only the run's own items; work only for those read for the
-/// work): its proposals written to the run folder as before (`<id>.json`, `<id>_people.json`, `_fix` the second
-/// time), applied as `apply` and `people-apply` do, rejections kept.
-fn apply_answer(id: &str, items: &[Item], answer: &Value, run_dir: &Path, fix: bool, x: &mut Extracted) -> Result<()> {
-    let suffix = if fix { "_fix" } else { "" };
+/// Apply one extract answer, item by item in its order: only the run's own items, each once, work only for those read
+/// for the work (the fix run's answer: only items `fixing`, whose proposals were rejected). Its proposals are written
+/// to the run folder as before (`<id>.json`, `<id>_people.json`, `_fix` the second time), applied as `apply` and
+/// `people-apply` do, their rejections kept. An item an error stops is logged and skipped; the others go on.
+fn apply_answer(id: &str, items: &[Item], answer: &Value, run_dir: &Path, fixing: Option<&[&str]>, x: &mut Extracted, log: &mut fs::File) {
+    let suffix = if fixing.is_some() { "_fix" } else { "" };
+    let mut seen: Vec<&str> = vec![];
     for a in answer["items"].as_array().into_iter().flatten() {
         let Some(item) = a["id"].as_str().and_then(|e| items.iter().find(|i| i.id == e)) else { continue };
-        if let (true, Some(work)) = (item.work, a["work"].as_array()) {
-            let work = with_ids(work, &x.refs);
-            fs::write(run_dir.join(format!("{}{suffix}.json", item.id)), serde_json::to_vec_pretty(&work)?)?;
-            if !work.is_empty() {
-                let r = ledger::apply(id, &item.id, &work)?;
-                x.events += r["events"].as_u64().unwrap_or(0);
-                for (k, v) in r["refs"].as_object().into_iter().flatten() {
-                    x.refs.insert(k.clone(), v.as_str().unwrap_or_default().to_string());
-                }
-                x.rejected.extend(r["rejected"].as_array().into_iter().flatten().map(|j| json!({"item": item.id, "in": "work", "rejection": j})));
-            }
-            if !fix {
-                x.noted.push((item.id.clone(), a["note"].as_str().filter(|n| !n.trim().is_empty()).unwrap_or("read").to_string()));
-            }
+        if seen.contains(&item.id.as_str()) || fixing.is_some_and(|f| !f.contains(&item.id.as_str())) {
+            continue;
         }
-        if let Some(people) = a["people"].as_array() {
-            fs::write(run_dir.join(format!("{}_people{suffix}.json", item.id)), serde_json::to_vec_pretty(people)?)?;
-            if !people.is_empty() {
-                let r = crate::people::apply_suggestions(id, &item.id, people)?;
-                x.people += r["added"].as_u64().unwrap_or(0) + r["facts"].as_u64().unwrap_or(0) + r["about"].as_u64().unwrap_or(0);
-                x.rejected.extend(r["rejected"].as_array().into_iter().flatten().map(|j| json!({"item": item.id, "in": "people", "rejection": j})));
+        seen.push(&item.id);
+        let mut one = || -> Result<()> {
+            if let (true, Some(work)) = (item.work, a["work"].as_array()) {
+                let work = with_ids(work, &x.refs);
+                fs::write(run_dir.join(format!("{}{suffix}.json", item.id)), serde_json::to_vec_pretty(&work)?)?;
+                if fixing.is_none() {
+                    x.noted.push((item.id.clone(), a["note"].as_str().filter(|n| !n.trim().is_empty()).unwrap_or("read").to_string()));
+                }
+                if !work.is_empty() {
+                    let r = ledger::apply(id, &item.id, &work)?;
+                    x.events += r["events"].as_u64().unwrap_or(0);
+                    for (k, v) in r["refs"].as_object().into_iter().flatten() {
+                        x.refs.insert(k.clone(), v.as_str().unwrap_or_default().to_string());
+                    }
+                    x.rejected.extend(r["rejected"].as_array().into_iter().flatten().map(|j| json!({"item": item.id, "in": "work", "rejection": j})));
+                }
             }
-            // Read for people (`read_for_people`), as `people-apply` notes it.
-            fs::OpenOptions::new().create(true).append(true).open(run_dir.join(PEOPLE_APPLIED))?.write_all(format!("{}\n", item.id).as_bytes())?;
+            if let Some(people) = a["people"].as_array() {
+                fs::write(run_dir.join(format!("{}_people{suffix}.json", item.id)), serde_json::to_vec_pretty(people)?)?;
+                if !people.is_empty() {
+                    let r = crate::people::apply_suggestions(id, &item.id, people)?;
+                    x.people += r["added"].as_u64().unwrap_or(0) + r["facts"].as_u64().unwrap_or(0) + r["about"].as_u64().unwrap_or(0);
+                    x.rejected.extend(r["rejected"].as_array().into_iter().flatten().map(|j| json!({"item": item.id, "in": "people", "rejection": j})));
+                }
+                // Read for people (`read_for_people`), as `people-apply` notes it.
+                fs::OpenOptions::new().create(true).append(true).open(run_dir.join(PEOPLE_APPLIED))?.write_all(format!("{}\n", item.id).as_bytes())?;
+            }
+            Ok(())
+        };
+        if let Err(e) = one() {
+            let _ = writeln!(log, "{}  {}: couldn't be applied: {e:#}", Local::now().format("%H:%M:%S"), item.id);
+            x.noted.retain(|(i, _)| *i != item.id);
+            x.errors.push(item.id.clone());
         }
     }
-    Ok(())
 }
 
 /// The extract: one run with no tools whose answer Echo applies; when any proposal was rejected, one fix run given
-/// the rejections, its fixes applied. Then each answered item for the work is marked done with its note (an item the
-/// answers left out waits for the next sync, as does every item when the fix run failed). Its line for the sync's
-/// message.
+/// the answer (as Echo read it) and the rejections, its fixes applied. Then each item for the work the answer named is
+/// marked done with its note — whatever the fix run did: what was accepted stays applied, and a rejection still standing
+/// (refused again, left out of the fix, or the fix run failed or answered nothing Echo could read) is counted as left
+/// unfixed. An item the answer left out waits for the next sync, as does every item when the answer can't be read, and
+/// an item an error stopped. Its line for the sync's message.
 #[allow(clippy::too_many_arguments)]
 fn extract(p: &projects::Project, run: Run, items: &[Item], given: &Given, tag: &str, log: &mut fs::File, used: &mut serde_json::Map<String, Value>) -> Result<String> {
     let (profile, model, plugin, cwd, settings, run_dir, run_id) = run;
@@ -675,12 +700,14 @@ fn extract(p: &projects::Project, run: Run, items: &[Item], given: &Given, tag: 
     let Some(first_answer) = answer_of(&answer) else {
         return Ok("Extract: its answer couldn't be read; the items wait for the next sync.".into());
     };
-    apply_answer(&p.id, items, &first_answer, run_dir, false, &mut x)?;
+    apply_answer(&p.id, items, &first_answer, run_dir, None, &mut x, log);
     x.report = first_answer["report"].as_str().unwrap_or_default().to_string();
+    let mut fix_failed = false;
     if !x.rejected.is_empty() {
         let rejected = std::mem::take(&mut x.rejected);
-        let fixing = fix_pass(&first, &answer, &rejected, &x.refs);
-        let fixed = claude(profile, model, plugin, cwd, settings, &fixing, &p.id, run_dir, log).and_then(|r| {
+        let fixing: Vec<&str> = rejected.iter().filter_map(|r| r["item"].as_str()).collect();
+        let fix = fix_pass(&first, &first_answer, &rejected, &x.refs);
+        let fixed = claude(profile, model, plugin, cwd, settings, &fix, &p.id, run_dir, log).and_then(|r| {
             let earlier = used.remove("extract");
             let a = pass(&p.id, run_id, "extract", r, log, used);
             if let (Some(earlier), Some(now)) = (&earlier, used.get_mut("extract")) {
@@ -688,30 +715,39 @@ fn extract(p: &projects::Project, run: Run, items: &[Item], given: &Given, tag: 
             }
             a
         });
-        match fixed {
-            Ok(a) => match answer_of(&a) {
-                Some(fixes) => {
-                    apply_answer(&p.id, items, &fixes, run_dir, true, &mut x)?;
-                    if let Some(more) = fixes["report"].as_str().filter(|r| !r.trim().is_empty()) {
-                        x.report = format!("{}\n{more}", x.report).trim().to_string();
-                    }
+        match fixed.map(|a| answer_of(&a)) {
+            Ok(Some(fixes)) => {
+                apply_answer(&p.id, items, &fixes, run_dir, Some(&fixing), &mut x, log);
+                if let Some(more) = fixes["report"].as_str().filter(|r| !r.trim().is_empty()) {
+                    x.report = format!("{}\n{more}", x.report).trim().to_string();
                 }
-                None => x.rejected = rejected,
-            },
-            Err(e) => {
-                let _ = writeln!(log, "{}  the fix run failed: {e:#}; its items wait for the next sync", Local::now().format("%H:%M:%S"));
-                let waiting: Vec<&str> = rejected.iter().filter_map(|r| r["item"].as_str()).collect();
-                x.noted.retain(|(i, _)| !waiting.contains(&i.as_str()));
+                // A rejection whose item and part the fix left out still stands.
+                let fixed_in = |r: &Value| {
+                    fixes["items"].as_array().into_iter().flatten().any(|f| f["id"] == r["item"] && f[r["in"].as_str().unwrap_or("")].as_array().is_some_and(|a| !a.is_empty()))
+                };
+                x.rejected.extend(rejected.iter().filter(|r| !fixed_in(r)).cloned());
+            }
+            Ok(None) => {
+                let _ = writeln!(log, "{}  the fix run's answer couldn't be read: its rejections stand", Local::now().format("%H:%M:%S"));
                 x.rejected = rejected;
+            }
+            Err(e) => {
+                let _ = writeln!(log, "{}  the fix run failed: {e:#}; its rejections stand", Local::now().format("%H:%M:%S"));
+                x.rejected = rejected;
+                fix_failed = true;
             }
         }
     }
     for (item, note) in &x.noted {
         ledger::mark_processed(&p.id, item, note)?;
     }
-    let mut line = format!("Extract: {} item{} read, {} change{} to the work, {} about people.", x.noted.len(), if x.noted.len() == 1 { "" } else { "s" }, x.events, if x.events == 1 { "" } else { "s" }, x.people);
+    let n = |k: usize, one: &str, many: &str| format!("{k} {}", if k == 1 { one } else { many });
+    let mut line = format!("Extract: {} read, {} to the work, {} about people.", n(x.noted.len(), "item", "items"), n(x.events as usize, "change", "changes"), x.people);
     if !x.rejected.is_empty() {
-        line += &format!(" {} rejection{} left unfixed.", x.rejected.len(), if x.rejected.len() == 1 { "" } else { "s" });
+        line += &format!(" {} left unfixed{}.", n(x.rejected.len(), "rejection", "rejections"), if fix_failed { " (the fix run failed)" } else { "" });
+    }
+    if !x.errors.is_empty() {
+        line += &format!(" Couldn't be applied, waiting for the next sync: {}.", x.errors.join(", "));
     }
     Ok(format!("{line}\n{}", x.report).trim().to_string())
 }
@@ -760,7 +796,8 @@ fn people_handled(id: &str, items: &[Item], run_dir: &Path, since: chrono::DateT
     (read, given_up)
 }
 
-/// The run folder's note of the items `people-apply` ran on, one id a line (written by the CLI, not the model).
+/// The run folder's note of the items whose people were read, one id a line (written by Echo, or by `people-apply` in a
+/// run, never by the model).
 pub const PEOPLE_APPLIED: &str = "people-applied.txt";
 
 /// What the verifier is given: the packets, and how the user works (About me) and what this thread is about, for
@@ -1754,11 +1791,11 @@ mod tests {
         assert_eq!(lines.lines().filter(|l| l.contains("\"pass\":\"extract\"")).count(), 2);
     }
 
-    /// An answer Echo can't read applies nothing: the items wait for the next sync; so do an item the answer left out,
-    /// and the items of a fix run that failed.
+    /// An answer Echo can't read applies nothing: the items wait for the next sync, as does an item the answer left out.
+    /// A fix run that failed leaves its rejections standing, counted, and its item done (what was accepted stays).
     #[cfg(unix)]
     #[test]
-    fn an_unreadable_answer_or_a_failed_fix_run_leaves_the_items_waiting() {
+    fn an_unreadable_answer_leaves_the_items_waiting_and_a_failed_fix_run_its_rejections_standing() {
         let (_env, root) = crate::paths::testenv::folders("sync-unread-answer");
         let (_fake, prof, id) = fake_thread(&root);
         ledger::ensure_first_epic(&ledger::Ledger::of(&id).unwrap()).unwrap();
@@ -1768,18 +1805,54 @@ mod tests {
         let v = run(&id).unwrap();
         assert_eq!(v["processed"], 0);
         assert!(v["message"].as_str().unwrap().starts_with("Extract: its answer couldn't be read; the items wait for the next sync."), "{v}");
-        // The first item rejected, its fix run failed: it waits; the second, left out of the answer, waits too.
         fs::remove_file(crate::ai::fake::file(&prof, "p.runs")).unwrap();
         let bad = json!({"items": [{"id": "2026-11-10_100000", "note": "x", "work": [{"op": "status", "node": "E01", "effect": "due", "quote": "words nobody said in this call"}]}], "report": ""});
         answers(&prof, Some(1), &bad.to_string());
         let failed = json!({"type": "result", "subtype": "error_max_turns", "result": "out of turns", "is_error": true, "num_turns": 1, "usage": {"input_tokens": 9, "output_tokens": 1}});
         fs::write(crate::ai::fake::file(&prof, "p.reply.2"), format!("{}\n{failed}", json!({"type": "system", "subtype": "init", "claude_code_version": "9.0.0"}))).unwrap();
         let v = run(&id).unwrap();
-        assert_eq!((v["state"].as_str(), v["processed"].as_u64()), (Some("done"), Some(0)), "{v}");
-        assert!(v["message"].as_str().unwrap().starts_with("Extract: 0 items read, 0 changes to the work, 0 about people. 1 rejection left unfixed."), "{v}");
-        assert_eq!(ledger::pending(&id).unwrap().len(), 2);
+        assert_eq!((v["state"].as_str(), v["processed"].as_u64()), (Some("done"), Some(1)), "{v}");
+        let message = v["message"].as_str().unwrap();
+        assert!(message.starts_with("Extract: 1 item read, 0 changes to the work, 0 about people. 1 rejection left unfixed (the fix run failed)."), "{message}");
+        assert_eq!(ledger::pending(&id).unwrap().iter().map(|i| i["id"].as_str().unwrap().to_string()).collect::<Vec<_>>(), ["2026-11-11_100000"], "the item left out waits");
         // Offered for people twice without an answer on them: marked read for people, said in the sync's message.
-        assert!(v["message"].as_str().unwrap().contains("Read for people without people-apply 2 times, marked read: 2026-11-10_100000, 2026-11-11_100000"), "{v}");
+        assert!(message.contains("Read for people without people-apply 2 times, marked read: 2026-11-11_100000"), "{message}");
+    }
+
+    /// The answer counts only for the run's own items, each once; work only for items read for the work; the fix
+    /// answer only for items with rejections, and a rejection it leaves out still stands; a node's id is never a ref.
+    #[cfg(unix)]
+    #[test]
+    fn an_answer_counts_only_for_its_own_items_once_and_a_rejection_the_fix_leaves_out_stands() {
+        let (_env, root) = crate::paths::testenv::folders("sync-answer-bounds");
+        let (_fake, prof, id) = fake_thread(&root);
+        ledger::ensure_first_epic(&ledger::Ledger::of(&id).unwrap()).unwrap();
+        call_item(&id, "2026-11-10_100000", "Then SSO has to land first, and the pilot moves to the 24th of November.");
+        call_item(&id, "2026-11-11_100000", "Dana will book the training room for the SSO rollout next week.");
+        call_item(&id, "2026-11-12_100000", "Nothing new here for the pilot today, thanks all.");
+        let story = |title: &str| json!({"op": "create", "ref": "E01", "kind": "story", "parent": "E01", "title": title, "ac": ["SAML works"], "quote": "Then SSO has to land first"});
+        let answer = json!({"items": [
+            {"id": "2026-11-10_100000", "note": "SSO", "work": [story("SSO for the pilot"), {"op": "status", "node": "E01", "effect": "due", "due_text": "24th", "quote": "words nobody said in this call"}]},
+            {"id": "2026-11-10_100000", "note": "again", "work": [story("SSO once more")]},
+            {"id": "2026-11-11_100000", "note": "the room", "work": [{"op": "create", "kind": "task", "parent": "E01", "title": "Book the training room", "type": "action", "internal_owner": "Dana Kowal", "quote": "Dana will book the training room"}]},
+            {"id": "2026-11-09_100000", "note": "not this run's", "work": []}],
+            "report": ""});
+        answers(&prof, Some(1), &answer.to_string());
+        // The fix: only for 2026-11-11 (no rejection there) and nothing for the rejected item.
+        let fix = json!({"items": [{"id": "2026-11-11_100000", "work": [{"op": "create", "kind": "task", "parent": "E01", "title": "Another room task", "type": "action", "internal_owner": "Dana Kowal", "quote": "Dana will book the training room"}]}], "report": ""});
+        answers(&prof, Some(2), &fix.to_string());
+        answers(&prof, None, "[]");
+        let v = run(&id).unwrap();
+        let message = v["message"].as_str().unwrap();
+        // The task under E01 is rejected (a task needs a story): two rejections, neither fixed.
+        assert!(message.starts_with("Extract: 2 items read, ") && message.contains(" 2 rejections left unfixed."), "{message}");
+        let events = ledger::Ledger::of(&id).unwrap().events().unwrap();
+        let titles: Vec<&str> = events.iter().filter(|e| e["type"] == "create").filter_map(|e| e["fields"]["title"].as_str()).collect();
+        assert!(titles.contains(&"SSO for the pilot") && !titles.contains(&"SSO once more") && !titles.contains(&"Another room task"), "{titles:?}");
+        assert!(events.iter().filter(|e| e["type"] == "agent" && e["op"] == "status").all(|e| e["node"] == "E01"), "E01 stays E01 though a ref was named so");
+        let done: Vec<&str> = events.iter().filter(|e| e["type"] == "processed").filter_map(|e| e["evidence"].as_str()).collect();
+        assert_eq!(done, ["2026-11-10_100000", "2026-11-11_100000"], "each once; the third, left out, waits");
+        assert!(with_ids(&[json!({"op": "link", "node": "T020", "depends_on": ["s1", "T019"]})], &BTreeMap::from([("s1".to_string(), "S004".to_string())]))[0]["depends_on"] == json!(["S004", "T019"]));
     }
 
     /// A verify run that fails leaves its claims and the later batches' for the next sync; the sync goes on.
