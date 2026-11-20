@@ -14,12 +14,12 @@ const acGroup = (t) => (AC_GROUPS.some(([k]) => k === t.job) ? t.job : 'other')
 /** A trace's name as the user reads it: its job's, else what it was. */
 function acLabel(t) {
   const name = String(t.name || '')
-  if (t.job && name.startsWith('job.')) return AC_JOBS[t.job] || t.job
+  if (t.job && name.startsWith('job.')) return Object.hasOwn(AC_JOBS, t.job) ? AC_JOBS[t.job] : String(t.job)
   if (name === 'claude.run') return 'Claude Code run'
   if (name === 'model.request') return `Model call${t.model ? ` · ${t.model}` : ''}`
   if (name === 'http.request') return 'Request to another service'
   if (name === 'transcription') return 'Transcription'
-  if (name.startsWith('app.')) return AC_APPS[name.slice(4)] || name.slice(4)
+  if (name.startsWith('app.')) return Object.hasOwn(AC_APPS, name.slice(4)) ? AC_APPS[name.slice(4)] : name.slice(4)
   if (name.startsWith('cli.')) return `echoctl ${name.slice(4)} failed`
   return name
 }
@@ -64,8 +64,10 @@ function acDays(traces, now, days) {
       : d.getDate() === 1 && i > 6 ? AC_MON[d.getMonth()] : ''
     out.push({ key: acDayKey(d), label, total: 0, by: {} })
   }
+  const byKey = new Map(out.map((x) => [x.key, x]))
   for (const t of traces || []) {
-    const day = out.find((x) => x.key === acDayKey(new Date(t.start)))
+    // By the day it ended, as Echo files it.
+    const day = byKey.get(acDayKey(new Date(t.end || t.start)))
     if (!day || !t.tokens) continue
     const g = acGroup(t)
     day.by[g] = (day.by[g] || 0) + t.tokens
@@ -90,8 +92,8 @@ function acByJob(traces) {
   return [...rows.values()].sort((a, b) => b.tokens - a.tokens || b.runs - a.runs || a.label.localeCompare(b.label))
 }
 /** Tokens in few characters: 950, 12.4K, 6.4M. */
-const acNum = (n) => !n ? '—' : n >= 1e6 ? `${(n / 1e6).toFixed(n >= 1e7 ? 0 : 1)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(n >= 1e4 ? 0 : 1)}K` : String(n)
-const acMoney = (c) => (c ? `$${c.toFixed(2)}` : '—')
+const acNum = (v) => { const n = Number(v) || 0; return !n ? '—' : n >= 1e6 ? `${(n / 1e6).toFixed(n >= 1e7 ? 0 : 1)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(n >= 1e4 ? 0 : 1)}K` : String(n) }
+const acMoney = (v) => { const c = Number(v) || 0; return c ? `$${c.toFixed(2)}` : '—' }
 /** How long, in few characters. */
 const acTook = (ms) => ms == null ? '' : ms < 1000 ? `${Math.round(ms)} ms` : ms < 60000 ? `${(ms / 1000).toFixed(ms < 10000 ? 1 : 0)} s` : `${Math.floor(ms / 60000)} min ${Math.round((ms % 60000) / 1000)} s`
 /** A tick of the timeline's axis: seconds with one decimal under a minute. */
@@ -123,7 +125,7 @@ function acSpanTokens(s) {
 /** A step's name on the timeline. */
 function acStepLabel(s) {
   const a = s.attrs || {}, name = String(s.name || '')
-  if (name.startsWith('job.')) return AC_JOBS[name.slice(4)] || name.slice(4)
+  if (name.startsWith('job.')) return Object.hasOwn(AC_JOBS, name.slice(4)) ? AC_JOBS[name.slice(4)] : name.slice(4)
   if (name === 'claude.run') {
     const head = Object.values(a.files || {}).map((t) => String(t).split('\n')[0]).find((l) => l.startsWith('# Echo: '))
     return head ? `Claude Code · ${head.slice(8)}` : `Claude Code${a.model ? ` · ${a.model}` : ''}`
@@ -132,7 +134,7 @@ function acStepLabel(s) {
   if (name === 'claude_code.tool') return `${a.tool_name || 'Tool'}`
   if (name === 'http.request') return `${a.method || 'GET'} ${a.host || ''}${a.path || ''}`
   if (name === 'model.request') return `Model call · ${a.model || ''}`
-  if (name.startsWith('app.')) return AC_APPS[name.slice(4)] || name.slice(4)
+  if (name.startsWith('app.')) return Object.hasOwn(AC_APPS, name.slice(4)) ? AC_APPS[name.slice(4)] : name.slice(4)
   if (name.startsWith('cli.')) return `echoctl ${a.command || name.slice(4)}`
   return name
 }
@@ -253,11 +255,17 @@ async function loadActivity() {
   try { S.ac.data = await get(`api/activity?days=${S.ac.days}`) } catch { /* app restarting */ }
   if (S.view === 'settings' && S.setSection === 'activity') render()
 }
+/** A run's trace, read once — again while it may still be filling (Claude Code sends its spans a few seconds after its
+ *  run: a trace read within 2 min of its end is read again on the next open). The last 20 read are kept. */
 async function loadActivityTrace(id) {
-  if (S.ac.traces[id] && !S.ac.traces[id].error) return
+  const had = S.ac.traces[id], t = acTrace(id)
+  const settled = had && !had.error && (!t || had.at - Date.parse(t.end) > 120000)
+  if (settled) return
   let v = null
   try { v = await get(`api/activity/trace?id=${encodeURIComponent(id)}`) } catch { /* app restarting */ }
-  S.ac.traces[id] = v || { error: "This run can't be read now." }
+  S.ac.traces[id] = v ? { ...v, at: Date.now() } : { error: "This run can't be read now." }
+  const ids = Object.keys(S.ac.traces)
+  for (const old of ids.slice(0, Math.max(0, ids.length - 20))) if (old !== id) delete S.ac.traces[old]
   render()
 }
 // Read when the section is entered, then every 30 s while it is open (a month or more: every 5 min).
@@ -275,14 +283,26 @@ function activitySettings() {
   if (!d) return `<div class="ac"><div class="skeleton" style="padding:20px">${'<i></i>'.repeat(5)}</div></div>`
   return S.ac.trace && acTrace(S.ac.trace) ? activityTimeline(acTrace(S.ac.trace)) : activityList(d)
 }
+/** The list's sums, kept until the data or the day changes (Settings draws again every few seconds). */
+let acMemo = { data: null, day: '', sums: null }
+function acSums(d, now) {
+  const day = acDayKey(now)
+  if (acMemo.data !== d || acMemo.day !== day) {
+    const traces = d.traces || []
+    acMemo = { data: d, day, sums: { s: acSummary(traces), days: acDays(traces, now, S.ac.days), jobs: acByJob(traces) } }
+  }
+  return acMemo.sums
+}
+/** A trace's timeline rows, kept for the trace read. */
+const acRowsMemo = new WeakMap()
+const acRowsOf = (tr) => { if (!acRowsMemo.has(tr)) acRowsMemo.set(tr, acRows(tr)); return acRowsMemo.get(tr) }
 function activityList(d) {
   const now = new Date(), traces = d.traces || []
-  const s = acSummary(traces)
-  const days = acDays(traces, now, S.ac.days === 1 ? 1 : S.ac.days)
+  const { s, days, jobs: byJob } = acSums(d, now)
   const max = Math.max(1, ...days.map((x) => x.total))
   const bars = days.map((x) => `<div class="ac-day" title="${esc(`${x.label}: ${acNum(x.total)} tokens`)}"><div class="ac-stack">${AC_GROUPS.map(([g], i) => x.by[g] ? `<i class="ac-k${i + 1}" style="height:${Math.max(2, Math.round((x.by[g] / max) * 70))}px"></i>` : '').join('')}</div><span>${esc(x.label)}</span></div>`).join('')
   const legend = AC_GROUPS.map(([, l], i) => `<span class="ac-lg"><i class="ac-k${i + 1}"></i>${esc(l)}</span>`).join('')
-  const jobs = acByJob(traces).map((r) => `<div class="ac-tr" role="row"><span>${esc(r.label)}${r.failed ? ` ${acDot(false)}` : ''}</span><span class="num">${r.runs}</span><span class="num">${acNum(r.tokens)}</span><span class="num">${acMoney(r.cost)}</span><span class="set-sub">${esc(r.models.join(', ') || '—')}</span></div>`).join('')
+  const jobs = byJob.map((r) => `<div class="ac-tr" role="row"><span>${esc(r.label)}${r.failed ? ` ${acDot(false)}` : ''}</span><span class="num">${r.runs}</span><span class="num">${acNum(r.tokens)}</span><span class="num">${acMoney(r.cost)}</span><span class="set-sub">${esc(r.models.join(', ') || '—')}</span></div>`).join('')
   const shown = acShown(traces, S.ac.show)
   const runs = shown.slice(0, 300).map((t) => `<button class="ac-row${S.ac.sel === t.id ? ' on' : ''}" data-ac-run="${esc(t.id)}">${acDot(t.ok)}<span class="set-sub num">${esc(acWhen(t.start, now))}</span><span class="ac-what">${esc(acLine(t))}</span><span class="num">${acNum(t.tokens)}</span><span class="num set-sub">${acMoney(t.cost_usd)}</span></button>`).join('')
     || `<p class="set-sub ac-none">${traces.length ? 'Nothing here.' : 'Nothing yet: runs show here as Echo runs its jobs.'}</p>`
@@ -305,10 +325,10 @@ function activityList(d) {
 function activityTimeline(t) {
   const tr = S.ac.traces[t.id]
   const head = `<nav class="ac-crumb"><button class="link-btn" data-ac-back>Activity</button><span>›</span><span>${esc(acLabel(t))} · ${esc(acWhen(t.start, new Date()))}</span></nav>
-    <header class="ac-head"><div><h2>${acDot(t.ok)} ${esc(acLine(t))}</h2><div class="set-sub num">${esc([acWhenFull(t.start, new Date()), acTook(t.duration_ms), t.runs ? `${t.runs} Claude Code run${t.runs === 1 ? '' : 's'}` : '', t.tokens ? `${t.tokens.toLocaleString()} tokens${t.cached ? ` (${Math.round((t.cached / t.tokens) * 100)}% cached)` : ''}` : '', t.cost_usd ? `${acMoney(t.cost_usd)} estimated` : '', t.model].filter(Boolean).join(' · '))}</div></div><button class="btn" data-ac-copy="${esc(t.id)}">Copy id</button></header>`
+    <header class="ac-head"><div><h2>${acDot(t.ok)} ${esc(acLine(t))}</h2><div class="set-sub num">${esc([acWhenFull(t.start, new Date()), acTook(t.duration_ms), t.runs ? `${t.runs} Claude Code run${t.runs === 1 ? '' : 's'}` : '', t.tokens ? `${t.tokens.toLocaleString()} tokens${t.cached ? ` (${Math.round((t.cached / t.tokens) * 100)}% cached)` : ''}` : '', t.cost_usd ? `${acMoney(t.cost_usd)} estimated` : '', t.model].filter(Boolean).join(' · '))}</div></div><button class="btn" data-copy="${esc(t.id)}">Copy id</button></header>`
   if (!tr) return `<div class="ac">${head}<div class="skeleton" style="padding:20px">${'<i></i>'.repeat(5)}</div></div>`
   if (tr.error) return `<div class="ac">${head}<p class="error">${esc(tr.error)}</p></div>`
-  const { rows, took } = acRows(tr)
+  const { rows, took } = acRowsOf(tr)
   const pct = (ms) => (took ? Math.min(100, (ms / took) * 100) : 0)
   const ticks = [0, 0.25, 0.5, 0.75, 1].map((f) => `<span>${esc(acTick(took * f))}</span>`).join('')
   const lines = rows.map((r) => `<button class="ac-ln${S.ac.step === r.id ? ' on' : ''}" data-ac-step="${esc(r.id || '')}"><span class="ac-nm" style="padding-left:${r.depth * 14}px">${esc(r.label)}</span><span class="ac-lane"><i class="ac-${r.kind}" style="left:${pct(r.at).toFixed(2)}%;width:${Math.max(0.6, pct(r.took)).toFixed(2)}%"></i></span><span class="num set-sub">${r.tokens ? acNum(r.tokens) : ''}</span></button>`).join('')
@@ -335,7 +355,7 @@ function activityPanel() {
   const steps = tr && !tr.error ? ((tr.spans[0] && tr.spans[0].children) || []).map((c) => [acStepLabel(c), acSpanTokens(c) || (c.children || []).reduce((n, k) => n + acSpanTokens(k), 0)]) : []
   const most = Math.max(1, ...steps.map(([, n]) => n))
   return `<div class="ac-pane"><b class="ac-pt">${acDot(t.ok)} ${esc(acLabel(t))}</b><div class="set-sub num">${esc([acWhen(t.start, new Date()), acTook(t.duration_ms), t.runs ? `${t.runs} Claude Code run${t.runs === 1 ? '' : 's'}` : '', t.summary].filter(Boolean).join(' · '))}</div>
-    ${t.detail === false ? `<p class="set-sub">Its steps are gone: a run's detail is kept ${(S.ac.data && S.ac.data.kept_days) || 7} days, its numbers ${(S.ac.data && S.ac.data.numbers_days) || 90}.</p>` : `<div class="ac-btns"><button class="btn" data-ac-open="${esc(t.id)}">Open timeline</button><button class="btn" data-ac-copy="${esc(t.id)}">Copy id</button></div>`}
+    ${t.detail === false ? `<p class="set-sub">Its steps are gone: a run's detail is kept ${(S.ac.data && S.ac.data.kept_days) || 7} days, its numbers ${(S.ac.data && S.ac.data.numbers_days) || 90}.</p>` : `<div class="ac-btns"><button class="btn" data-ac-open="${esc(t.id)}">Open timeline</button><button class="btn" data-copy="${esc(t.id)}">Copy id</button></div>`}
     <div class="ac-kv">${[['Model', t.model], ['Tokens', t.tokens ? `${t.tokens.toLocaleString()}${t.cached ? ` · ${Math.round((t.cached / t.tokens) * 100)}% from cache` : ''}` : ''], ['Cost', t.cost_usd ? `${acMoney(t.cost_usd)} estimated` : ''], ['Requests', t.requests || ''], ['Error', t.ok === false ? t.error : '']].filter(([, v]) => v).map(([k, v]) => `<span>${esc(k)}</span><div>${esc(String(v))}</div>`).join('')}</div>
     ${steps.length ? `<h4 class="ac-h4">Steps</h4><div class="ac-mini">${steps.map(([l, n]) => `<span>${esc(l)}</span><span class="num set-sub">${acNum(n)}</span><i style="width:${Math.max(2, Math.round((n / most) * 100))}%"></i><span></span>`).join('')}</div>` : ''}
     ${t.detail === false ? '' : `<p class="set-sub">The prompt, every reply, tool call and result are in the timeline. Detail goes after ${(S.ac.data && S.ac.data.kept_days) || 7} days.</p>`}</div>`
@@ -349,7 +369,7 @@ function acReveal() {
   layoutChanged()
 }
 document.addEventListener('click', (e) => {
-  const t = e.target.closest && e.target.closest('[data-ac-days],[data-ac-show],[data-ac-run],[data-ac-open],[data-ac-back],[data-ac-step],[data-ac-copy]')
+  const t = e.target.closest && e.target.closest('[data-ac-days],[data-ac-show],[data-ac-run],[data-ac-open],[data-ac-back],[data-ac-step]')
   if (!t) return
   const d = t.dataset
   if (d.acDays) { const n = Number(d.acDays); S.ac.days = AC_PERIODS.some(([x]) => x === n) ? n : 7; S.ac.data = null; render(); return loadActivity() }
@@ -358,6 +378,5 @@ document.addEventListener('click', (e) => {
   if (d.acOpen) { S.ac.trace = d.acOpen; S.ac.step = null; render(); return loadActivityTrace(S.ac.trace) }
   if (d.acBack !== undefined) { S.ac.trace = null; S.ac.step = null; return render() }
   if (d.acStep) { S.ac.step = d.acStep; acReveal(); return render() }
-  if (d.acCopy) { try { navigator.clipboard.writeText(d.acCopy) } catch { /* no clipboard */ } }
 })
 SETTINGS_BODY.activity = () => activitySettings()

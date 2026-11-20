@@ -67,8 +67,19 @@ test('by job: a row a job, most tokens first, models once each; requests and com
   assert.deepEqual(rows[0].models, ['sonnet', 'haiku'])
 })
 
+test('a run is charted on the day it ended, as Echo files it', () => {
+  const late = { ...TRACES[0], start: new Date(2026, 10, 19, 23, 58).toISOString(), end: new Date(2026, 10, 20, 0, 3).toISOString() }
+  const days = acDays([late], now, 7)
+  assert.equal(days[6].total, 70000, 'today: it ended today')
+  assert.equal(days[5].total, 0)
+})
+
+test('a job named like an object\u2019s own key is named as it is', () => {
+  assert.equal(acLabel({ name: 'job.constructor', job: 'constructor' }), 'constructor')
+})
+
 test('tokens in few characters', () => {
-  assert.deepEqual([0, 950, 1234, 12400, 6400000, 19500000].map(acNum), ['—', '950', '1.2K', '12K', '6.4M', '20M'])
+  assert.deepEqual([0, 950, 1234, 12400, 6400000, 19500000, '<b>', null].map(acNum), ['—', '950', '1.2K', '12K', '6.4M', '20M', '—', '—'])
 })
 
 const T = (s) => new Date(Date.UTC(2026, 10, 20, 12, 0, 0, s)).toISOString()

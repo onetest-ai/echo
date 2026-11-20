@@ -86,7 +86,7 @@
 .ac-ev:last-child { border-bottom: 0; }
 .ac-k { font-size: 10.5px; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.06em; font-weight: 600; }
 .ac-k span { text-transform: none; letter-spacing: 0; font-weight: 500; color: var(--text-2); margin-left: 6px; }
-.ac-mono { font: 11.5px/1.55 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; margin-top: 3px; max-height: 220px; overflow-y: auto; }
+.ac-mono { font: 11.5px/1.55 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; margin-top: 3px; }
 .ac-tx { margin-top: 3px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .ac-mono.bad, .ac-tx.bad { color: var(--danger); }
 /* Narrow (a panel open beside it): the table above the runs, each a card of its own height. */
