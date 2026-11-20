@@ -121,8 +121,18 @@ reads the data folder's files.
   `.lock`, a batch of up to 1,000 lines at once; past 512 MB in a day only spans and the index are written (events
   dropped and counted); a trace's root span ending is also a line of that day's `index.jsonl` (`telemetry::list`); day folders 7
   days old go (`telemetry::KEEP_DAYS`, swept by the writer once a day). A CLI command waits up to 500 ms for its
-  records at its end (`telemetry::flush`). `echoctl traces [--job --days --limit]` lists, `echoctl traces show <id>`
-  gives one nested.
+  records at its end (`telemetry::flush`). `echoctl traces [--job --kind --days --limit]` lists, `echoctl traces show
+  <id>` gives one nested; each index line has a `kind` (`job`, `claude`, `request`, `model`, `transcription`,
+  `command`, from its name).
+- Echo's own steps are spans through `telemetry::traced(name, attrs, f)` (its answer as it was; `ok`, and `error` when
+  it failed), a child of the thread's current span, else a trace: Microsoft 365 requests `http.request`
+  (`graph::traced` over `curl`, `post`, `request`, `graph_raw`; `telemetry::outbound` — service, method, host, path,
+  query, never a header), a model call without Claude Code `model.request` (`livenotes::model::complete_local_body`:
+  its system, input, output, usage; its tokens counted in the trace by `telemetry::count_usage`), a call's
+  `transcription` (`transcribe::transcribe`: model, language, segments, audio seconds), the threads' mail and chat
+  fetch `job.fetch` (`projectsync::run_with`, under the sync's span). A span's ended children wait on their thread
+  until its root ends (`HELD`): a discarded root drops them, unless one failed — then it is kept, `ok` false and that
+  step's `error`. A CLI command that fails is a span `cli.<command>` with its `args` and `error` (`main`).
 - The page polls a call's revision, `/api/call/<name>/rev` (`window::call::call_rev`), and fetches the call only when it
   changed.
 

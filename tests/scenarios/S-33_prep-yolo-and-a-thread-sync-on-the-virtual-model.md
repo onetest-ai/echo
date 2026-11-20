@@ -6,6 +6,7 @@ data: standard
 ai: virtual
 cases:
   - tests/cases/prep/TC-015_prep-write-on-the-virtual-model-writes-its-summary.md
+  - tests/cases/traces/TC-004_a-prep-on-the-virtual-model-leaves-a-trace-of-its-model-call.md
   - tests/cases/tasks/TC-026_yolo-on-the-virtual-model-does-the-task-and-says-so-above-it.md
   - tests/cases/work/TC-028_sync-on-the-virtual-model-reads-a-call-and-keeps-what-you-set.md
   - tests/cases/traces/TC-001_a-threads-sync-leaves-one-trace-with-its-runs-and-claude-codes-own-requests.md
@@ -29,25 +30,27 @@ auto: [tests/auto/specs/S-33.spec.mjs]
 | Asset | Made by | Used by stages |
 |---|---|---|
 | Data build (`standard --ai virtual`) and its virtual model | the lead (`serve.sh up … --set standard --ai virtual`), right before the run | all |
-| The prep script (`prep-summary.json`) and model job 1: Acme renewal follow-up's prep (one request, no Claude Code) | stage 1's Preconditions and step 2 | 1 |
-| The Yolo script (`yolo-task.json`) and model run 2: Yolo on Globex pilot's T005 | stage 2's Preconditions and step 3 | 2 (bar, task-asks, log, drafts, file diff, git, History) |
-| The sync script (`thread-sync.json`) and model run 3: Acme rollout's sync (extract with who's who, then verify) | stage 3's Preconditions and step 3 | 3 (status, run folder, tree, pinned fields, log, people, window), 4 (its trace) |
-| The asks script (`yolo-asks.json`) and model run 4: Yolo on Globex pilot's T009 on Auto (edits accepted on the virtual model) | stage 5's Preconditions and step 1 | 5 (model log, drafts, record, ledger), 6 (its row on Yolo runs) |
-| The runs script (`yolo-runs.json`) and model runs 5–8: Yolo on Acme rollout's T010 and T016 (a failed run), Globex pilot's T001 and the Needs you now item "Mail to you" | stage 7's step 1 | 7 (the list, task link, log, ⌘K), 8 (filters), 9 (their traces; one more run there, with telemetry configured elsewhere) |
+| The prep script (`prep-summary.json`) and model job 1: Acme renewal follow-up's prep (one request, no Claude Code) | stage 1's Preconditions and step 2 | 1, 2 (its trace) |
+| The Yolo script (`yolo-task.json`) and model run 2: Yolo on Globex pilot's T005 | stage 3's Preconditions and step 3 | 3 (bar, task-asks, log, drafts, file diff, git, History) |
+| The sync script (`thread-sync.json`) and model run 3: Acme rollout's sync (extract with who's who, then verify) | stage 4's Preconditions and step 3 | 4 (status, run folder, tree, pinned fields, log, people, window), 5 (its trace) |
+| The asks script (`yolo-asks.json`) and model run 4: Yolo on Globex pilot's T009 on Auto (edits accepted on the virtual model) | stage 6's Preconditions and step 1 | 6 (model log, drafts, record, ledger), 7 (its row on Yolo runs) |
+| The runs script (`yolo-runs.json`) and model runs 5–8: Yolo on Acme rollout's T010 and T016 (a failed run), Globex pilot's T001 and the Needs you now item "Mail to you" | stage 8's step 1 | 8 (the list, task link, log, ⌘K), 9 (filters), 10 (their traces; one more run there, with telemetry configured elsewhere) |
 
 ## Stages
 
 | # | Case | Depends on | Before it |
 |---|------|------------|-----------|
 | 1 | `prep/TC-015_prep-write-on-the-virtual-model-writes-its-summary.md` | — | Load `{{base_url}}/` (the cookie). Write the prep script and clear the log (its Preconditions). Steps 4–5 in one shell call |
-| 2 | `tasks/TC-026_yolo-on-the-virtual-model-does-the-task-and-says-so-above-it.md` | — (another thread, another job) | Write the Yolo script; clear `<dir>/model/model-log.jsonl` (`: > …`) so its step 7 reads only this run. Step 1's commands in one shell call |
-| 3 | `work/TC-028_sync-on-the-virtual-model-reads-a-call-and-keeps-what-you-set.md` | — (another thread) | Write the sync script; clear `<dir>/model/model-log.jsonl` so its step 9 reads only this sync. Step 1 and step 2's first `pending` in one shell call; step 2's two `done` (the ids from that `pending`), its second `pending` and the saved tree in a second |
-| 4 | `traces/TC-001_a-threads-sync-leaves-one-trace-with-its-runs-and-claude-codes-own-requests.md` | 3 (its sync) | — |
-| 5 | `tasks/TC-031_yolo-on-auto-without-auto-mode-drafts-instead-of-sending.md` | 2 (its teardown set Yolo back to Auto) | Write the asks script; clear `<dir>/model/model-log.jsonl` |
-| 6 | `tasks/TC-034_yolo-runs-shows-a-prepared-draft-not-a-send.md` | 5 (its run) | — |
-| 7 | `tasks/TC-032_yolo-runs-lists-every-run-with-what-it-did.md` | — (its own runs; the list also holds stages 2 and 5's) | Write the runs script; clear `<dir>/model/model-log.jsonl` |
-| 8 | `tasks/TC-033_yolo-runs-filters.md` | 7 (its runs) | — |
-| 9 | `traces/TC-002_a-yolo-run-leaves-a-trace-and-telemetry-configured-elsewhere-is-left-alone.md` | 7 (its runs) | — (after stage 8: its run would change stages 7 and 8's lists) |
+| 2 | `traces/TC-004_a-prep-on-the-virtual-model-leaves-a-trace-of-its-model-call.md` | 1 (its prep) | — |
+| 3 | `tasks/TC-026_yolo-on-the-virtual-model-does-the-task-and-says-so-above-it.md` | — (another thread, another job) | Write the Yolo script; clear `<dir>/model/model-log.jsonl` (`: > …`) so its step 7 reads only this run. Step 1's commands in one shell call |
+| 4 | `work/TC-028_sync-on-the-virtual-model-reads-a-call-and-keeps-what-you-set.md` | — (another thread) | Write the sync script; clear `<dir>/model/model-log.jsonl` so its step 9 reads only this sync. Step 1 and step 2's first `pending` in one shell call; step 2's two `done` (the ids from that `pending`), its second `pending` and the saved tree in a second |
+| 5 | `traces/TC-001_a-threads-sync-leaves-one-trace-with-its-runs-and-claude-codes-own-requests.md` | 4 (its sync) | — |
+| 6 | `tasks/TC-031_yolo-on-auto-without-auto-mode-drafts-instead-of-sending.md` | 3 (its teardown set Yolo back to Auto) | Write the asks script; clear `<dir>/model/model-log.jsonl` |
+| 7 | `tasks/TC-034_yolo-runs-shows-a-prepared-draft-not-a-send.md` | 6 (its run) | — |
+| 8 | `tasks/TC-032_yolo-runs-lists-every-run-with-what-it-did.md` | — (its own runs; the list also holds stages 3 and 6's) | Write the runs script; clear `<dir>/model/model-log.jsonl` |
+| 9 | `tasks/TC-033_yolo-runs-filters.md` | 8 (its runs) | — |
+| 10 | `traces/TC-002_a-yolo-run-leaves-a-trace-and-telemetry-configured-elsewhere-is-left-alone.md` | 8 (its runs) | — (after stage 9: its run would change stages 8 and 9's lists) |
+| 11 | `traces/TC-005_a-command-that-fails-leaves-a-trace-with-its-words-and-error.md` | — | — |
 
 ## Teardown
 - `tests/fixtures/serve.sh down <dir>` (it stops the virtual model too)

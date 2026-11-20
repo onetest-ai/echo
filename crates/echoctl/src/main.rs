@@ -783,6 +783,7 @@ fn main() -> Result<()> {
     }
     // What a command an unattended run makes changes or sends is noted for its outcome (`notes::note_action`).
     let argv: Vec<String> = std::env::args().skip(1).collect();
+    let started = chrono::Local::now();
     let out = match Cli::parse().cmd {
         Cmd::Attention => {
             cli::print_json(&attention::peek());
@@ -939,6 +940,11 @@ fn main() -> Result<()> {
     };
     // A change that failed is noted too, with why.
     notes::note_action(&argv, out.as_ref().err().map(|e| format!("failed: {e:#}")).as_deref());
+    // A command that failed is a trace of its own (its words and why), not only a line on stderr.
+    if let Err(e) = &out {
+        let name = argv.iter().find(|a| !a.starts_with('-')).map_or("echoctl", String::as_str);
+        telemetry::record_span(&format!("cli.{name}"), started, serde_json::json!({"args": argv, "ok": false, "error": format!("{e:#}")}));
+    }
     // What this command traced is written before it ends (a moment at most: never waits on a full disk).
     telemetry::flush(std::time::Duration::from_millis(500));
     out

@@ -230,6 +230,8 @@ fn run_with(id: &str, batch: bool) -> Result<Value> {
     if !(batch && crate::jobs::paused("fetch", started.time())) {
         let fetching = ledger::chat_due(&p) || ledger::mail_due(&p);
         let (fetch_from, fetch_at) = (written.len(), Local::now());
+        // Its trace: the fetch's span, its requests under it (kept only when it brought something or failed).
+        let fetch_span = fetching.then(|| crate::telemetry::start("job.fetch", json!({"echo.job": "fetch"})));
         let mut fetch_errors: Vec<String> = vec![];
         // Its meeting chats between calls (a chat that can't be read keeps its error; the calls go on).
         match ledger::chat_sync(id) {
@@ -254,6 +256,9 @@ fn run_with(id: &str, batch: bool) -> Result<Value> {
             if n > 0 || !fetch_errors.is_empty() {
                 let outcome = if fetch_errors.is_empty() { Ok(format!("{n} new item{}", if n == 1 { "" } else { "s" })) } else { Err("mail or a meeting chat couldn't be read (the thread says why)".into()) };
                 crate::jobs::record("fetch", fetch_at, outcome, json!({}));
+                drop(fetch_span);
+            } else if let Some(span) = fetch_span {
+                span.discard();
             }
         }
     }

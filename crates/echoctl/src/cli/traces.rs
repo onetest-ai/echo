@@ -15,6 +15,10 @@ pub struct ListArgs {
     /// Only this job's (`thread_sync`, `minutes`, a routine's `<plugin>.<routine>`, …)
     #[arg(long)]
     job: Option<String>,
+    /// Only this kind: `job`, `claude` (a Claude Code run of no job), `request` (to another service), `model` (a model
+    /// call without Claude Code), `transcription`, `command` (a CLI command that failed)
+    #[arg(long)]
+    kind: Option<String>,
     /// At most this many, newest first
     #[arg(long, default_value_t = 50)]
     limit: usize,
@@ -29,7 +33,7 @@ pub enum TracesCmd {
 
 pub fn traces(cmd: Option<TracesCmd>, list: ListArgs) -> Result<()> {
     match cmd {
-        None => print_json(&telemetry::list(list.days, list.job.as_deref(), list.limit)),
+        None => print_json(&telemetry::list(list.days, list.job.as_deref(), list.kind.as_deref(), list.limit)),
         Some(TracesCmd::Show { id }) => print_json(&telemetry::show(&id)?),
     }
     Ok(())
