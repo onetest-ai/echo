@@ -189,7 +189,26 @@ fn query_param(query: &str, key: &str) -> Option<String> {
 
 // ── HTTP via curl (tokens never on the command line: curl reads its config from stdin) ─────
 
+/// `f`, the request `config` names, as a span of its trace (`telemetry`): its method and URL, never a header.
+fn traced<T>(config: &str, f: impl FnOnce() -> Result<T>) -> Result<T> {
+    let field = |k: &str| config.lines().find_map(|l| l.strip_prefix(k)).map(|v| v.trim().trim_matches('"').to_string());
+    let method = field("request = ").unwrap_or_else(|| "GET".into());
+    crate::telemetry::traced("http.request", crate::telemetry::outbound("microsoft", &method, &field("url = ").unwrap_or_default()), f)
+}
+
 fn curl(config: &str) -> Result<Value> {
+    traced(config, || {
+        let v = curl_untraced(config)?;
+        // Microsoft's own error in its answer (raised by the caller): the request's span says so.
+        if let Some(e) = v.get("error") {
+            let why = e["code"].as_str().or(e.as_str()).unwrap_or("error");
+            crate::telemetry::annotate(json!({"ok": false, "error": format!("{why} {}", e["message"].as_str().unwrap_or(""))}));
+        }
+        Ok(v)
+    })
+}
+
+fn curl_untraced(config: &str) -> Result<Value> {
     let mut child = Command::new("curl").no_window()
         .args(["-sS", "-K", "-"])
         .stdin(Stdio::piped())
@@ -811,6 +830,10 @@ fn graph_error(code: u16, v: &Value) -> String {
 
 /// GET whose answer isn't JSON (a transcript): its status and body.
 fn graph_raw(token: &str, url: &str) -> Result<(u16, String)> {
+    crate::telemetry::traced("http.request", crate::telemetry::outbound("microsoft", "GET", url), || graph_raw_untraced(token, url))
+}
+
+fn graph_raw_untraced(token: &str, url: &str) -> Result<(u16, String)> {
     let mut child = Command::new("curl").no_window()
         .args(["-sS", "-K", "-"])
         .stdin(Stdio::piped())
@@ -832,6 +855,10 @@ fn graph_raw(token: &str, url: &str) -> Result<(u16, String)> {
 /// POST a JSON body to Graph (`path` after `/v1.0`): the answer's JSON (`{}` for an empty one), or the
 /// error in words. Only what Echo sends the user themselves (`deliver.rs`): their own chat, their mailbox.
 pub fn post(path: &str, body: &Value) -> Result<Value> {
+    crate::telemetry::traced("http.request", crate::telemetry::outbound("microsoft", "POST", &format!("{GRAPH}{path}")), || post_untraced(path, body))
+}
+
+fn post_untraced(path: &str, body: &Value) -> Result<Value> {
     let token = access_token()?;
     let url = at(&format!("{GRAPH}{path}"))?;
     let mut child = Command::new("curl").no_window()
@@ -875,6 +902,11 @@ pub enum Body<'a> {
 /// followed, the token not sent on to the storage host). The answer's JSON (`{}` for an empty one; `{saved}` for a
 /// download), or the error in words. `headers`: extra ones (`ConsistencyLevel: eventual`).
 pub fn request(method: &str, path: &str, body: Body, save_to: Option<&std::path::Path>, headers: &[&str]) -> Result<Value> {
+    let url = if path.contains("://") { path.to_string() } else { format!("{GRAPH}{path}") };
+    crate::telemetry::traced("http.request", crate::telemetry::outbound("microsoft", method, &url), || request_untraced(method, path, body, save_to, headers))
+}
+
+fn request_untraced(method: &str, path: &str, body: Body, save_to: Option<&std::path::Path>, headers: &[&str]) -> Result<Value> {
     let token = access_token()?;
     let test = test_graph()?;
     let url = if path.starts_with("https://graph.microsoft.com/") || test.is_some_and(|b| path.starts_with(&format!("{b}/"))) { path.to_string() } else { format!("{GRAPH}{path}") };
@@ -1148,6 +1180,48 @@ pub fn find_call_chat(recording_start: DateTime<Utc>, began: Option<DateTime<Utc
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_request_to_microsoft_is_traced_by_its_method_and_url_never_its_headers() {
+        let (_env, _root) = crate::paths::testenv::folders("graph-traced");
+        let job = crate::jobs::begin("fetch");
+        let config = format!("url = {}\nrequest = \"POST\"\nheader = {}\n", quote("https://graph.microsoft.com/v1.0/me/sendMail"), quote("Authorization: Bearer secret-token"));
+        assert_eq!(traced(&config, || Ok(1)).unwrap(), 1);
+        job.done(Some("fetched".into()));
+        crate::telemetry::flush(std::time::Duration::from_secs(5));
+        let id = crate::telemetry::list(7, Some("fetch"), None, 1)["traces"][0]["id"].as_str().unwrap().to_string();
+        let shown = crate::telemetry::show(&id).unwrap();
+        let req = &shown["spans"][0]["children"][0];
+        assert_eq!((req["attrs"]["method"].clone(), req["attrs"]["path"].clone(), req["attrs"]["service"].clone()), (json!("POST"), json!("/v1.0/me/sendMail"), json!("microsoft")));
+        assert!(!shown.to_string().contains("secret-token"), "no header, no token");
+    }
+
+    #[test]
+    fn a_request_microsoft_answers_with_its_error_is_traced_as_failed_and_answers_as_before() {
+        let (_env, _root) = crate::paths::testenv::folders("graph-traced-error");
+        // A server answering as Graph does for a missing item.
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = l.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            use std::io::{BufRead, Write as _};
+            let (mut s, _) = l.accept().unwrap();
+            let mut r = std::io::BufReader::new(s.try_clone().unwrap());
+            let mut h = String::new();
+            while r.read_line(&mut h).unwrap_or(0) > 0 && h.trim() != "" {
+                h.clear();
+            }
+            let body = r#"{"error": {"code": "ErrorItemNotFound", "message": "Not found"}}"#;
+            let _ = s.write_all(format!("HTTP/1.1 404 Not Found\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).as_bytes());
+        });
+        let job = crate::jobs::begin("fetch");
+        let answer = curl(&format!("url = {}\n", quote(&format!("http://127.0.0.1:{port}/v1.0/me/messages/none")))).unwrap();
+        assert_eq!(answer["error"]["code"], "ErrorItemNotFound", "the caller gets the answer as it was");
+        job.done(Some("fetched".into()));
+        crate::telemetry::flush(std::time::Duration::from_secs(5));
+        let id = crate::telemetry::list(7, Some("fetch"), None, 1)["traces"][0]["id"].as_str().unwrap().to_string();
+        let req = &crate::telemetry::show(&id).unwrap()["spans"][0]["children"][0];
+        assert_eq!((req["attrs"]["ok"].clone(), req["attrs"]["error"].clone(), req["attrs"]["path"].clone()), (json!(false), json!("ErrorItemNotFound Not found"), json!("/v1.0/me/messages/none")));
+    }
 
     #[test]
     fn the_fake_graph_is_only_a_local_address() {

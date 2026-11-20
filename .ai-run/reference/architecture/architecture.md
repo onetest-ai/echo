@@ -121,8 +121,21 @@ reads the data folder's files.
   `.lock`, a batch of up to 1,000 lines at once; past 512 MB in a day only spans and the index are written (events
   dropped and counted); a trace's root span ending is also a line of that day's `index.jsonl` (`telemetry::list`); day folders 7
   days old go (`telemetry::KEEP_DAYS`, swept by the writer once a day). A CLI command waits up to 500 ms for its
-  records at its end (`telemetry::flush`). `echoctl traces [--job --days --limit]` lists, `echoctl traces show <id>`
-  gives one nested.
+  records at its end (`telemetry::flush`). `echoctl traces [--job --kind --days --limit]` lists, `echoctl traces show
+  <id>` gives one nested; each index line has a `kind` (`job`, `claude`, `request`, `model`, `transcription`,
+  `command`, from its name).
+- Echo's own steps are spans through `telemetry::traced(name, attrs, f)` (its answer as it was; `ok`, and `error` when
+  it failed), a child of the thread's current span, else a trace: Microsoft 365 requests `http.request`
+  (`graph::traced` over `curl`, `post`, `request`, `graph_raw`; `telemetry::outbound` — service, method, host, path,
+  query, never a header), a model call without Claude Code `model.request` (`livenotes::model::complete_local_body`:
+  its system, input, output, usage; its tokens counted in the trace by `telemetry::count_usage`), a call's
+  `transcription` (`transcribe::transcribe`: model, language, segments, audio seconds), the threads' mail and chat
+  fetch `job.fetch` (`projectsync::run_with`: a trace of its own, `telemetry::start_root`, kept when it brought
+  something or failed), the calendar's sync `app.calendar_sync` and the Teams transcript scan `app.transcript_scan`.
+  A Microsoft 365 answer carrying `error` marks its request's span failed (`graph::curl`; the caller gets the answer
+  as before). A span's ended children wait on their thread until their trace's root ends (`HELD`): a discarded root
+  drops them, a discarded step the ones under it. A CLI command that fails is a span `cli.<command>` with its command
+  words (`command`, at most two, before any option) and `error`, never its arguments (`main`).
 - The page polls a call's revision, `/api/call/<name>/rev` (`window::call::call_rev`), and fetches the call only when it
   changed.
 

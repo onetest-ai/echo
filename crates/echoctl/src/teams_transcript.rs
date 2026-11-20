@@ -334,6 +334,11 @@ pub fn check(events: &[Value], threads_only: bool) -> Result<()> {
 /// Look for meetings of the last 3 days in the user's threads that ended, weren't recorded and have a
 /// Teams transcript (the app, with the agenda's sync).
 pub fn scan() -> Result<()> {
+    // Its trace (`telemetry`): one for the scan, its requests under it.
+    crate::telemetry::traced("app.transcript_scan", json!({}), scan_untraced)
+}
+
+fn scan_untraced() -> Result<()> {
     if graph::account().is_none() {
         return Ok(());
     }

@@ -200,6 +200,9 @@ thread_local! {
     static CURRENT: RefCell<Vec<(String, String, String)>> = const { RefCell::new(Vec::new()) };
     /// Attributes added to an open span of this thread (`annotate`), by its id.
     static EXTRA: RefCell<HashMap<String, Map<String, Value>>> = RefCell::new(HashMap::new());
+    /// The ended children of this thread's open root spans, by trace: written when the root ends, dropped with it
+    /// when it is discarded (a look that found nothing leaves nothing).
+    static HELD: RefCell<HashMap<String, Vec<Value>>> = RefCell::new(HashMap::new());
 }
 
 /// What the Claude Code runs of a trace used, summed for its index line: runs, tokens, cost, models.
@@ -243,8 +246,19 @@ fn current_job() -> Option<String> {
 
 /// Start a span on this thread: a child of its current span, else a new trace.
 pub fn start(name: &str, attrs: Value) -> Span {
-    let (trace, parent) = match current() {
-        Some((t, s, _)) => (t, Some(s)),
+    let at = current().map(|(t, s, _)| (t, s));
+    begin(name, attrs, at)
+}
+
+/// Start a trace of its own on this thread, whatever span is open (a job of its own run inside another's pass): the
+/// current span until it ends.
+pub fn start_root(name: &str, attrs: Value) -> Span {
+    begin(name, attrs, None)
+}
+
+fn begin(name: &str, attrs: Value, under: Option<(String, String)>) -> Span {
+    let (trace, parent) = match under {
+        Some((t, s)) => (t, Some(s)),
         None => (new_id(16), None),
     };
     let id = new_id(8);
@@ -257,10 +271,29 @@ impl Span {
         self.attrs.insert(k.to_string(), v.into());
     }
 
-    /// Not kept: a look that found nothing to do.
+    /// Not kept, nor the spans under it it held: a look that found nothing to do.
     pub fn discard(mut self) {
         self.pop();
         self.open = false;
+        if self.parent.is_none() {
+            HELD.with(|h| h.borrow_mut().remove(&self.trace));
+            TOTALS.lock().unwrap_or_else(|e| e.into_inner()).remove(&self.trace);
+            return;
+        }
+        // A step's: the spans held under it go with it.
+        HELD.with(|h| {
+            if let Some(held) = h.borrow_mut().get_mut(&self.trace) {
+                let mut gone: HashSet<String> = HashSet::from([self.id.clone()]);
+                loop {
+                    let more: Vec<String> = held.iter().filter(|l| l["parent"].as_str().is_some_and(|p| gone.contains(p))).filter_map(|l| l["span"].as_str().map(str::to_owned)).filter(|s| !gone.contains(s)).collect();
+                    if more.is_empty() {
+                        break;
+                    }
+                    gone.extend(more);
+                }
+                held.retain(|l| !l["span"].as_str().is_some_and(|s| gone.contains(s)));
+            }
+        });
     }
 
     fn pop(&mut self) {
@@ -281,6 +314,8 @@ impl Span {
         }
         self.open = false;
         self.pop();
+        // Its trace's root still open on this thread: held until it ends.
+        let root_open = CURRENT.with(|c| c.borrow().iter().any(|(t, _, _)| *t == self.trace));
         // Its Claude Code runs that gave no result (stopped, failed to start) end with it.
         let orphans: Vec<String> = RUNS.lock().unwrap_or_else(|e| e.into_inner()).iter().filter(|r| r.parent.as_deref() == Some(self.id.as_str())).map(|r| r.id.clone()).collect();
         for r in orphans {
@@ -289,6 +324,13 @@ impl Span {
         let end = Utc::now();
         let line = json!({"t": "span", "source": "echo", "trace": self.trace, "span": self.id, "parent": self.parent, "name": self.name,
                           "start": ts(self.start), "end": ts(end), "attrs": self.attrs});
+        if root_open {
+            HELD.with(|h| h.borrow_mut().entry(self.trace.clone()).or_default().push(line));
+            return;
+        }
+        for held in HELD.with(|h| h.borrow_mut().remove(&self.trace)).unwrap_or_default() {
+            send(&self.trace, held);
+        }
         send(&self.trace, line);
         if self.parent.is_none() {
             index(&self.trace, &self.name, self.start, end, &self.attrs);
@@ -299,6 +341,40 @@ impl Span {
 impl Drop for Span {
     fn drop(&mut self) {
         self.close();
+    }
+}
+
+/// `f` as a span `name` of this thread (`attrs`), with how it ended: `ok`, and the error when it failed. Its answer as
+/// it is.
+pub fn traced<T>(name: &str, attrs: Value, f: impl FnOnce() -> anyhow::Result<T>) -> anyhow::Result<T> {
+    let mut s = start(name, attrs);
+    let out = f();
+    s.set("ok", out.is_ok());
+    if let Err(e) = &out {
+        s.set("error", format!("{e:#}"));
+    }
+    out
+}
+
+/// What a request to another service is: its service, method, host, path and query (never a header: no token).
+pub fn outbound(service: &str, method: &str, url: &str) -> Value {
+    let rest = url.split_once("://").map_or(url, |(_, r)| r);
+    let (host, path) = rest.split_once('/').map_or((rest, String::from("/")), |(h, p)| (h, format!("/{p}")));
+    let (path, query) = path.split_once('?').map_or((path.as_str(), ""), |(p, q)| (p, q));
+    json!({"service": service, "method": method, "host": host, "path": path, "query": query})
+}
+
+/// A model call made without Claude Code (a local profile's server) used this: counted in its trace's totals.
+pub fn count_usage(model: &str, v: &Value) {
+    let Some((trace, _, _)) = current() else { return };
+    let u = &v["usage"];
+    let n = |k: &str| u[k].as_u64().unwrap_or(0);
+    let mut totals = TOTALS.lock().unwrap_or_else(|e| e.into_inner());
+    let t = totals.entry(trace).or_default();
+    t.tokens += n("input_tokens") + n("output_tokens") + n("cache_read_input_tokens") + n("cache_creation_input_tokens");
+    t.cost_usd += v["total_cost_usd"].as_f64().unwrap_or(0.0);
+    if !model.is_empty() && !t.models.iter().any(|x| x == model) {
+        t.models.push(model.to_string());
     }
 }
 
@@ -319,10 +395,23 @@ pub fn record_span(name: &str, started: DateTime<Local>, attrs: Value) {
 fn index(trace: &str, name: &str, start: DateTime<Utc>, end: DateTime<Utc>, attrs: &Map<String, Value>) {
     let t = TOTALS.lock().unwrap_or_else(|e| e.into_inner()).remove(trace).unwrap_or_default();
     let job = attrs.get("echo.job").cloned().or_else(|| name.strip_prefix("job.").map(|j| json!(j)));
-    let line = json!({"id": trace, "name": name, "job": job, "start": ts(start), "end": ts(end), "duration_ms": (end - start).num_milliseconds().max(0),
+    let line = json!({"id": trace, "name": name, "kind": kind_of(name), "job": job, "start": ts(start), "end": ts(end), "duration_ms": (end - start).num_milliseconds().max(0),
         "ok": attrs.get("ok").cloned().unwrap_or(json!(true)), "summary": attrs.get("summary"), "error": attrs.get("error"),
         "runs": t.runs, "tokens": t.tokens, "cost_usd": (t.cost_usd * 1e6).round() / 1e6, "model": t.models.join(", ")});
     queue(INDEX.into(), line);
+}
+
+/// A trace's kind, from its root's name: `job`, `claude`, `request`, `model`, `command`, else the name's first word
+/// (`transcription`, `app`).
+fn kind_of(name: &str) -> &str {
+    match name.split('.').next().unwrap_or("") {
+        "job" => "job",
+        "claude" => "claude",
+        "http" => "request",
+        "model" => "model",
+        "cli" => "command",
+        other => other,
+    }
 }
 
 // ── Claude Code runs ─────────────────────────────────────────────────────────────────────────
@@ -605,7 +694,7 @@ fn lines(p: &Path) -> Vec<Value> {
 }
 
 /// `echoctl traces`: the traces of the last `days` days (today included), newest first, at most `limit`; of one job.
-pub fn list(days: i64, job: Option<&str>, limit: usize) -> Value {
+pub fn list(days: i64, job: Option<&str>, kind: Option<&str>, limit: usize) -> Value {
     let oldest = Local::now().date_naive() - chrono::Duration::days(days.max(1) - 1);
     let mut out: Vec<Value> = Vec::new();
     for d in day_dirs() {
@@ -613,7 +702,17 @@ pub fn list(days: i64, job: Option<&str>, limit: usize) -> Value {
         if day.is_none_or(|x| x < oldest) {
             continue;
         }
-        let mut of_day: Vec<Value> = lines(&d.join(INDEX)).into_iter().filter(|v| job.is_none_or(|j| v["job"] == j)).collect();
+        let mut of_day: Vec<Value> = lines(&d.join(INDEX))
+            .into_iter()
+            .map(|mut v| {
+                // A line written before kinds: its kind from its name.
+                if v["kind"].is_null() {
+                    v["kind"] = json!(kind_of(v["name"].as_str().unwrap_or("")));
+                }
+                v
+            })
+            .filter(|v| job.is_none_or(|j| v["job"] == j) && kind.is_none_or(|k| v["kind"] == k))
+            .collect();
         of_day.reverse();
         out.extend(of_day);
     }
@@ -718,7 +817,7 @@ mod tests {
         run.done(Some("checked".into()));
         flush(Duration::from_secs(5));
 
-        let l = list(KEEP_DAYS, None, 10);
+        let l = list(KEEP_DAYS, None, None, 10);
         let t = &l["traces"][0];
         assert_eq!(l["traces"].as_array().unwrap().len(), 1, "{l}");
         assert_eq!((t["name"].clone(), t["job"].clone(), t["ok"].clone(), t["summary"].clone()), (json!("job.needs"), json!("needs"), json!(true), json!("checked")));
@@ -749,7 +848,7 @@ mod tests {
         let (_env, _root) = testenv::folders("telemetry-nothing");
         crate::jobs::begin("needs").done(None);
         flush(Duration::from_secs(5));
-        assert_eq!(list(KEEP_DAYS, None, 10)["traces"], json!([]));
+        assert_eq!(list(KEEP_DAYS, None, None, 10)["traces"], json!([]));
     }
 
     #[test]
@@ -781,7 +880,7 @@ mod tests {
         assert!(!run(&root).is_empty(), "elsewhere: Echo's again");
 
         flush(Duration::from_secs(5));
-        let said: Vec<Value> = list(KEEP_DAYS, None, 10)["traces"].as_array().unwrap().iter().map(|t| show(t["id"].as_str().unwrap()).unwrap()["spans"][0]["attrs"]["echo.telemetry"].clone()).collect();
+        let said: Vec<Value> = list(KEEP_DAYS, None, None, 10)["traces"].as_array().unwrap().iter().map(|t| show(t["id"].as_str().unwrap()).unwrap()["spans"][0]["attrs"]["echo.telemetry"].clone()).collect();
         assert_eq!(said.iter().filter(|s| **s == "configured elsewhere").count(), 3, "{said:?}");
     }
 
@@ -893,7 +992,7 @@ mod tests {
         claude_event(&json!({"type": "system", "subtype": "init", "model": "claude-haiku-5-5"}));
         run.failed("stopped by its time limit");
         flush(Duration::from_secs(5));
-        let t = &list(KEEP_DAYS, None, 10)["traces"][0];
+        let t = &list(KEEP_DAYS, None, None, 10)["traces"][0];
         assert_eq!((t["ok"].clone(), t["runs"].clone(), t["error"].clone()), (json!(false), json!(1), json!("stopped by its time limit")));
         let c = &show(t["id"].as_str().unwrap()).unwrap()["spans"][0]["children"][0];
         assert_eq!((c["name"].clone(), c["attrs"]["ok"].clone(), c["attrs"]["error"].clone()), (json!("claude.run"), json!(false), json!("Claude Code ended without a result")));
@@ -914,7 +1013,7 @@ mod tests {
         claude_event_of(&session, &json!({"type": "stream_event", "event": {"delta": {"text": "par"}}}));
         claude_event_of(&session, &result(7));
         flush(Duration::from_secs(5));
-        let l = list(KEEP_DAYS, Some("live_notes"), 10);
+        let l = list(KEEP_DAYS, Some("live_notes"), None, 10);
         let t = &l["traces"][0];
         assert_eq!((t["name"].clone(), t["ok"].clone(), t["tokens"].clone()), (json!("claude.run"), json!(true), json!(112)), "{l}");
         let names: Vec<Value> = show(t["id"].as_str().unwrap()).unwrap()["spans"][0]["events"].as_array().unwrap().iter().map(|e| e["name"].clone()).collect();
@@ -960,6 +1059,77 @@ mod tests {
         let mut left: Vec<String> = std::fs::read_dir(&dir).unwrap().flatten().map(|e| e.file_name().to_string_lossy().to_string()).collect();
         left.sort();
         assert_eq!(left, ["2026-11-14", "notes"]);
+    }
+
+    #[test]
+    fn a_traced_step_answers_as_it_did_and_says_how_it_ended() {
+        let (_env, _root) = testenv::folders("telemetry-traced");
+        let job = crate::jobs::begin("prep");
+        assert_eq!(traced("http.request", outbound("microsoft", "GET", "https://graph.microsoft.com/v1.0/me/events?$top=5"), || Ok(7)).unwrap(), 7);
+        let e = traced("model.request", json!({"model": "virtual"}), || -> anyhow::Result<()> {
+            count_usage("virtual", &json!({"usage": {"input_tokens": 30, "output_tokens": 12}}));
+            anyhow::bail!("the server didn't answer")
+        });
+        assert_eq!(e.unwrap_err().to_string(), "the server didn't answer");
+        job.done(Some("prepared".into()));
+        flush(Duration::from_secs(5));
+        let t = &list(KEEP_DAYS, None, Some("job"), 10)["traces"][0];
+        assert_eq!((t["kind"].clone(), t["tokens"].clone(), t["model"].clone()), (json!("job"), json!(42), json!("virtual")));
+        let kids = show(t["id"].as_str().unwrap()).unwrap()["spans"][0]["children"].clone();
+        assert_eq!((kids[0]["name"].clone(), kids[0]["attrs"]["ok"].clone(), kids[0]["attrs"]["host"].clone(), kids[0]["attrs"]["path"].clone(), kids[0]["attrs"]["query"].clone()),
+                   (json!("http.request"), json!(true), json!("graph.microsoft.com"), json!("/v1.0/me/events"), json!("$top=5")));
+        assert_eq!((kids[1]["name"].clone(), kids[1]["attrs"]["ok"].clone(), kids[1]["attrs"]["error"].clone()), (json!("model.request"), json!(false), json!("the server didn't answer")));
+    }
+
+    #[test]
+    fn a_look_that_found_nothing_leaves_nothing_and_a_discarded_step_takes_its_own_with_it() {
+        let (_env, _root) = testenv::folders("telemetry-held");
+        let req = |path: &str, ok: bool| traced("http.request", outbound("microsoft", "GET", &format!("https://graph.microsoft.com/v1.0{path}")), || if ok { Ok(()) } else { anyhow::bail!("ErrorItemNotFound") });
+        let quiet = start("job.needs", json!({"echo.job": "needs"}));
+        let _ = req("/me/messages", true);
+        let _ = req("/me/messages/gone", false);
+        quiet.discard();
+        flush(Duration::from_secs(5));
+        assert_eq!(list(KEEP_DAYS, None, None, 10)["traces"], json!([]), "its requests went with it, a handled failure too");
+
+        let kept = start("job.thread_sync", json!({"echo.job": "thread_sync"}));
+        let step = start("step", json!({}));
+        let _ = req("/me/chats", true);
+        step.discard();
+        let _ = req("/me/messages", true);
+        drop(kept);
+        flush(Duration::from_secs(5));
+        let t = &list(KEEP_DAYS, None, None, 10)["traces"][0];
+        let shown = show(t["id"].as_str().unwrap()).unwrap();
+        assert_eq!(shown["spans"].as_array().unwrap().len(), 1, "one root, no orphan: {shown}");
+        let kids: Vec<Value> = shown["spans"][0]["children"].as_array().unwrap().iter().map(|k| k["attrs"]["path"].clone()).collect();
+        assert_eq!(kids, [json!("/v1.0/me/messages")]);
+    }
+
+    #[test]
+    fn a_job_of_its_own_inside_another_s_pass_is_kept_when_that_pass_is_not() {
+        let (_env, _root) = testenv::folders("telemetry-own-root");
+        let sync = start("job.thread_sync", json!({"echo.job": "thread_sync"}));
+        let fetch = start_root("job.fetch", json!({"echo.job": "fetch"}));
+        let _ = traced("http.request", outbound("microsoft", "GET", "https://graph.microsoft.com/v1.0/me/messages"), || Ok(()));
+        crate::jobs::record("fetch", Local::now(), Ok("2 new items".into()), json!({}));
+        drop(fetch);
+        sync.discard();
+        flush(Duration::from_secs(5));
+        let l = list(KEEP_DAYS, None, None, 10);
+        assert_eq!(l["traces"].as_array().unwrap().len(), 1, "{l}");
+        let t = &l["traces"][0];
+        assert_eq!((t["name"].clone(), t["job"].clone(), t["summary"].clone()), (json!("job.fetch"), json!("fetch"), json!("2 new items")));
+        assert_eq!(show(t["id"].as_str().unwrap()).unwrap()["spans"][0]["children"][0]["name"], "http.request");
+    }
+
+    #[test]
+    fn an_index_line_from_before_kinds_gets_its_kind_from_its_name() {
+        let (_env, root) = testenv::folders("telemetry-old-index");
+        let day = root.join("config/telemetry").join(Local::now().format("%Y-%m-%d").to_string());
+        std::fs::create_dir_all(&day).unwrap();
+        std::fs::write(day.join(INDEX), format!("{}\n", json!({"id": new_id(16), "name": "job.minutes", "job": "minutes", "end": ts(Utc::now())}))).unwrap();
+        assert_eq!(list(KEEP_DAYS, None, Some("job"), 10)["traces"][0]["kind"], "job");
     }
 
     #[test]

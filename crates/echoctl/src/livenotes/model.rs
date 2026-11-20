@@ -98,6 +98,12 @@ pub(super) fn complete_local(p: &Profile, system: &str, user: &str, max_tokens: 
 }
 
 pub(super) fn complete_local_body(p: &Profile, model: &str, system: &str, content: Value, max_tokens: u32, whole: bool, cancelled: &dyn Fn() -> bool) -> Result<String> {
+    // Its trace (`telemetry`): what it was given and, below, what it answered and used.
+    let attrs = json!({"profile": p.id, "model": p.model(model), "max_tokens": max_tokens, "system": system, "input": content});
+    crate::telemetry::traced("model.request", attrs, || complete_local_untraced(p, model, system, content, max_tokens, whole, cancelled))
+}
+
+fn complete_local_untraced(p: &Profile, model: &str, system: &str, content: Value, max_tokens: u32, whole: bool, cancelled: &dyn Fn() -> bool) -> Result<String> {
     let body = json!({
         "model": p.model(model),
         "max_tokens": max_tokens,
@@ -136,6 +142,8 @@ pub(super) fn complete_local_body(p: &Profile, model: &str, system: &str, conten
     }
     // Counted towards the background job running on this thread, if any (its runs: `jobs`; no cost on a local server).
     crate::jobs::add_usage(&p.model(model), &v);
+    crate::telemetry::count_usage(&p.model(model), &v);
+    crate::telemetry::annotate(json!({"usage": v["usage"], "stop_reason": v["stop_reason"], "output": v["content"]}));
     if whole && v["stop_reason"] == "max_tokens" {
         bail!("{}'s reply was cut off at the token limit", p.name);
     }

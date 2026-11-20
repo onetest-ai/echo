@@ -1201,6 +1201,10 @@ pub(crate) fn write_transcript(dir: &Path, cfg: &Config, model_name: &str, mut s
 }
 
 pub fn transcribe(call: &str, model_override: Option<&str>, keep_audio: bool) -> Result<()> {
+    crate::telemetry::traced("transcription", serde_json::json!({"call": call, "model_override": model_override}), || transcribe_untraced(call, model_override, keep_audio))
+}
+
+fn transcribe_untraced(call: &str, model_override: Option<&str>, keep_audio: bool) -> Result<()> {
     let dir = resolve_call(call)?;
     if !dir.join("mic.wav").exists() && !dir.join("remote.wav").exists() {
         bail!("{} has no audio (it was already transcribed and the audio deleted)", dir.display());
@@ -1254,6 +1258,8 @@ pub fn transcribe(call: &str, model_override: Option<&str>, keep_audio: bool) ->
     }
     let suffix = model_override.map(|m| format!(".{m}")).unwrap_or_default();
     // A comparison run (--model) must leave the audio for the real transcript.
+    let seconds = |a: &Option<Vec<f32>>| a.as_ref().map(|x| x.len() as f64 / 16_000.0);
+    crate::telemetry::annotate(serde_json::json!({"model": tr.model_name(), "language": tr.language(), "segments": segs.len(), "mic_s": seconds(&mic_audio), "remote_s": seconds(&remote)}));
     let md_path = write_transcript(&dir, &cfg, &tr.model_name(), segs, &suffix, keep_audio || model_override.is_some())?;
     eprintln!("done in {:.0}s", t.elapsed().as_secs_f64());
     println!("{}", md_path.display());

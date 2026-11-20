@@ -213,6 +213,11 @@ pub fn local_midnight(day: chrono::NaiveDate) -> Option<DateTime<Utc>> {
 /// `echoctl agenda sync`: refresh today's agenda from the calendar command, if any.
 /// Prints one JSON line; never fails just because no calendar is available.
 pub fn sync(quiet: bool) -> Result<()> {
+    // Its trace (`telemetry`): one for the sync, its requests under it.
+    crate::telemetry::traced("app.calendar_sync", json!({}), || sync_untraced(quiet))
+}
+
+fn sync_untraced(quiet: bool) -> Result<()> {
     // The app's own Microsoft 365 sign-in, when there is one.
     if crate::graph::account().is_some() {
         let today = Local::now().date_naive();
