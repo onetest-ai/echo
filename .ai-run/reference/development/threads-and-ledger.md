@@ -24,16 +24,27 @@ PR. The rules are in `.ai-run/guides/development/threads-and-ledger.md`.
   is said in the sync's message; one that can't be read for another reason waits for the next sync.
 - Its fixed instructions — how the run works, then the project-sync skill's `EXTRACT.md` and `PEOPLE.md`, compiled in —
   go in `--append-system-prompt-file`, the same for every run and thread (`projectsync::extract_rules`); its one message
-  — the thread, the run's folder, the items in order, the run's evidence tag, `context`, `people-context` (without its
-  file list), then each item's `pending` entry and text in a block `<evidence-<12 hex> id="…">` … `</evidence-<12 hex>>`,
-  the tag random for each run (`projectsync::evidence_tag`) — on stdin (`projectsync::extract_pass`).
-- Tools `Bash,Write`: it writes `<id>.json` and `<id>_people.json` (`[]` when none) in its run folder and runs `apply`,
-  `people-apply` and `done`. `apply --done '<note>'` marks the item processed in the same step only when nothing was
-  rejected (else `done: null`, `not_done`: fixed first, then `done`); `done` and `--done` only for the run's own items for
-  the work (`ECHOCTL_RUN_ITEMS`). `people-apply` in a run notes the item in the run folder's `people-applied.txt`; once
-  the run ends Echo marks read for people only the items noted there or marked processed during the run
-  (`projectsync::read_for_people`); an item offered `PEOPLE_OFFERS` (2) times without is marked read anyway, said in
-  the run's log and the sync's message (`ledger/people-offered.json`, `projectsync::people_handled`).
+  — the thread, the items in order, the run's evidence tag, `context`, `people-context` (without its file list), then
+  each item's `pending` entry and text in a block `<evidence-<12 hex> id="…">` … `</evidence-<12 hex>>`, the tag random
+  for each run (`projectsync::evidence_tag`) — on stdin (`projectsync::extract_pass`).
+- No tools: its answer is one JSON object, `{items: [{id, work, note, people}], report}`, one entry per item in order
+  (`work` and `note` only for items read for the work). Echo reads it (a fenced JSON block first, else the first JSON
+  object with an `items` array of entries with an `id`: `projectsync::answer_of`) and applies each of the run's own
+  items in order (`projectsync::apply_answer`): `work` through `ledger::apply`, `people` through
+  `people::apply_suggestions`, each written to the run folder first (`<id>.json`, `<id>_people.json`). A `ref` an earlier
+  item made, named by a later one (`parent`, `node`, `into`, `depends_on`), becomes the id it got (`apply`'s `refs`;
+  `projectsync::with_ids`). An item with `people` is noted in the run folder's `people-applied.txt`.
+- When any proposal was rejected, one fix run (`projectsync::fix_pass`): the same instructions; its message the first
+  one, then the answer, the rejections (`{item, in: work|people, rejection}`) and the ids the refs got. Its fixes are
+  applied the same way (`<id>_fix.json`, `<id>_people_fix.json`); its usage is summed into the state's `usage.extract`
+  (a line in `sync-usage.jsonl` for each run). Then each item for the work the answer named is marked processed with its
+  `note` ("read" when none). An item the answer left out waits for the next sync; so does every item when the answer
+  can't be read ("Extract: its answer couldn't be read; …"), and an item with rejections when the fix run failed. The
+  sync's message starts "Extract: N items read, M changes to the work, K about people." (with "R rejections left
+  unfixed." when some stand), then the answers' reports (`projectsync::extract`).
+- Once the run ends Echo marks read for people only the items noted in `people-applied.txt` or marked processed during
+  the run (`projectsync::read_for_people`); an item offered `PEOPLE_OFFERS` (2) times without is marked read anyway,
+  said in the run's log and the sync's message (`ledger/people-offered.json`, `projectsync::people_handled`).
 - **verify** runs when `verify_prep` has packets: no tools, one request a batch of packets within `MAX_PACKETS` (60,000
   characters of their JSON; each batch a fresh run, their usage summed in the state's `usage.verify`); its fixed
   instructions are `VERIFY.md` and the answer's form, its message the packets with `me_patterns` and `thread_scope`
@@ -43,7 +54,7 @@ PR. The rules are in `.ai-run/guides/development/threads-and-ledger.md`.
   verify run that fails leaves its packets and the later batches' (`projectsync::verify`): the sync still ends done,
   with the extract's report. The run
   folder keeps `packets.json` and `verdicts.json`; the sync's message gets "Verify: N supports, …".
-- The skill (`plugin/skills/project-sync/SKILL.md`) runs the same instructions by hand, with the ledger's CLI steps
+- The skill (`plugin/skills/project-sync/SKILL.md`) runs `EXTRACT.md`, `PEOPLE.md` and `VERIFY.md` by hand, with the ledger's CLI steps
   (`pending`, `context`, `people-context`, `apply`, `people-apply`, `done`, `verify-prep`, `verify-apply`).
 
 ## The user's edits

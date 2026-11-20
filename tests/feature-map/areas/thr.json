@@ -257,7 +257,7 @@
   },
   {
    "id": "F-THR-27",
-   "feature": "A sync gives the model what it reads: one extract run gets the thread's work, its people and each item's text in its message (the skill's instructions fixed first, for every thread alike; each item in an evidence block tagged anew each run; within a character limit, an item too long read in part and said so, one that can't be read set aside with a note) and proposes the work and who's who item by item (`apply --done` only when nothing was rejected, `people-apply`; done only for its own items); the verifier, a fresh run with no tools, answers its verdicts in batches, which Echo applies to their own packets only; nothing of the thread's on the command line",
+   "feature": "A sync gives the model what it reads: one extract run gets the thread's work, its people and each item's text in its message (the skill's instructions fixed first, for every thread alike; each item in an evidence block tagged anew each run; within a character limit, an item too long read in part and said so, one that can't be read set aside with a note) and answers, with no tools, one JSON object with the work and who's who item by item, which Echo applies (a ref named by a later item becomes the id it got; an item marked done with its note; one left out, or every item when the answer can't be read, waits); what Echo rejected goes to one fix run, its fixes applied; the verifier, a fresh run with no tools, answers its verdicts in batches, which Echo applies to their own packets only; nothing of the thread's on the command line",
    "priority": "high",
    "check": "agent",
    "axes": [

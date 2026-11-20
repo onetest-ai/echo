@@ -815,9 +815,9 @@ mod tests {
         // The fake answers a run at once (Echo writes nothing on its stdin).
         let script = root.join("fake-claude");
         let text = fs::read_to_string(&script).unwrap();
-        let turns = r#"while IFS= read -r l; do printf '%s\n' "$l" >> "$d/p.turns"; cat "$d/p.reply"; echo; done"#;
+        let turns = r#"while IFS= read -r l; do printf '%s\n' "$l" >> "$d/p.turns"; cat "$r"; echo; done"#;
         assert!(text.contains(turns));
-        fs::write(&script, text.replace(turns, r#"cat "$d/p.reply""#)).unwrap();
+        fs::write(&script, text.replace(turns, r#"cat "$r""#)).unwrap();
         let p = crate::ai::fake::profile("work", None, &crate::ai::fake::signed_in("pat@example.com"));
         crate::ai::Settings::update(|s| {
             s.default = Some("work".into());
