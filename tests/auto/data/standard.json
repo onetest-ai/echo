@@ -159,6 +159,8 @@
       "^config/my-skills/",
       "^config/telemetry/",
       "^config/minutes-run/echo-mcp-[^/]+\\.json$",
+      "^config/minutes-run/echo-plugins-mcp(-read)?\\.json$",
+      "^config/plugins/offers/[^/]+\\.json$",
       "^config/claude/ollama/",
       "^config/claude/[^/]+\\.lock$",
       "^home/\\.echo/task-asks\\.(json|lock)$",

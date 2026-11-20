@@ -1,5 +1,13 @@
 [
   {
+    "version": "0.10.5",
+    "items": [
+      { "icon": "plugin", "title": "Plugins that work together", "text": "Plugins can offer their commands to each other and to Claude in Echo, so one plugin or Claude uses what another one does.", "open": "settings/plugins" },
+      { "icon": "sparkle", "title": "Claude finds the right plugin", "text": "Claude in Echo sees each plugin in one short list and asks it for its commands, skills and guide only when it needs them.", "open": "settings/plugins" },
+      { "icon": "plugin", "title": "Plugins' Claude works on their files", "text": "A plugin's Claude can work through the pages and files the plugin gathered, with the tools it needs, in the plugin's own folder.", "open": "settings/plugins" }
+    ]
+  },
+  {
     "version": "0.10.4",
     "items": [
       { "icon": "sparkle", "title": "See everything Echo ran", "text": "Settings → Activity shows each run, its tokens and cost, and what went in and came out, step by step on a timeline.", "open": "settings/activity" },
