@@ -19,6 +19,7 @@ in the same PR. The rules are in `.ai-run/guides/architecture/architecture.md`.
 | Recall (Intake and search) | `intake/` (feature `intake`; `brain` is its alias) |
 | Echo plugins | `plugins.rs`, `jshost.rs`, `web/` (a page read as Markdown, the public-address check, the render gate proxy, the render child `web/render/`), `netif/` (this computer's own addresses), `claudejob.rs`, `share.rs` (feature `js`) |
 | Claude Code plugin | `plugin/` |
+| Traces | `telemetry.rs`, `telemetry/receiver.rs`, `cli/traces.rs` |
 
 ## Feature gates
 
@@ -111,6 +112,17 @@ reads the data folder's files.
   `jobs-runs/.<id>.lock`. `jobs::routines` lists them after Echo's jobs (`jobs::list` only Echo's); the app runs those
   due every 30 s (`plugins::routines::start_scheduler`, `jobs::routine_next`); `echoctl jobs run <id>` runs one now and
   `echoctl jobs outcome <id> [--run <run>]` gives its answer, changes and sends and log.
+- Traces (`telemetry`, #859): a job's run is a span `job.<id>` (`jobs::begin` … `Run::done` / `failed`, discarded
+  when it leaves no run; `jobs::record` adds to the job's open span of its thread, else keeps one after the fact); a
+  thread's sync (`projectsync::run`, `run_scheduled`), a plugin's routine and a Yolo run or plugin's job
+  (`claudejob::run_with`: `job.yolo`, `job.plugin_run`, when no span is open) open one too; Claude Code runs under them
+  (`claude-code-runs.md` § Telemetry and traces). Records go on a bounded queue (20,000; full: dropped and counted,
+  never waited for) that a thread appends to `<config dir>/telemetry/<YYYY-MM-DD>/<trace>.jsonl` under the day's
+  `.lock`, a batch of up to 1,000 lines at once; past 512 MB in a day only spans and the index are written (events
+  dropped and counted); a trace's root span ending is also a line of that day's `index.jsonl` (`telemetry::list`); day folders 7
+  days old go (`telemetry::KEEP_DAYS`, swept by the writer once a day). A CLI command waits up to 500 ms for its
+  records at its end (`telemetry::flush`). `echoctl traces [--job --days --limit]` lists, `echoctl traces show <id>`
+  gives one nested.
 - The page polls a call's revision, `/api/call/<name>/rev` (`window::call::call_rev`), and fetches the call only when it
   changed.
 

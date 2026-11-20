@@ -275,11 +275,14 @@ pub(super) fn ensure(stamp: &str, dir: &Path, ready: ai::Ready, lock: Option<cra
     if let Some(n) = read_notes(dir) {
         first = format!("{first}\n\nThe notes so far (covering the call up to {}):\n{}", super::clock(n.covered_until), notes_for_prompt(&n));
     }
-    writeln!(stdin, "{}", json!({"type": "user", "message": {"role": "user", "content": first}}))?;
+    let message = json!({"type": "user", "message": {"role": "user", "content": first}}).to_string();
+    crate::telemetry::claude_input(&message);
+    writeln!(stdin, "{message}")?;
     stdin.flush()?;
     let ended = Arc::new(Mutex::new(None));
     let (out, err) = (child.stdout.take(), child.stderr.take());
-    let (done, p2, stamp2) = (ended.clone(), p.clone(), stamp.to_string());
+    // The session outlives the job that started it: its run is a trace of its own, read on the thread below.
+    let (done, p2, stamp2, run) = (ended.clone(), p.clone(), stamp.to_string(), crate::telemetry::detach_last_run());
     std::thread::spawn(move || {
         let err_text = Arc::new(Mutex::new(String::new()));
         if let Some(mut e) = err {
@@ -294,6 +297,9 @@ pub(super) fn ensure(stamp: &str, dir: &Path, ready: ai::Ready, lock: Option<cra
         let mut result = None;
         for line in out.into_iter().flat_map(|o| BufReader::new(o).lines().map_while(Result::ok)) {
             if let Ok(v) = serde_json::from_str::<Value>(line.trim()) {
+                if let Some(r) = &run {
+                    crate::telemetry::claude_event_of(r, &v);
+                }
                 if v["type"] == "result" {
                     super::set_usage(&v, None);
                     super::count_usage(&stamp2);
@@ -303,7 +309,7 @@ pub(super) fn ensure(stamp: &str, dir: &Path, ready: ai::Ready, lock: Option<cra
                     let used = serde_json::json!({"calls": v["num_turns"].as_u64().unwrap_or(1), "input": n("input_tokens"), "output": n("output_tokens"),
                         "cache_read": n("cache_read_input_tokens"), "cache_write": n("cache_creation_input_tokens"), "cost_usd": v["total_cost_usd"].as_f64()});
                     let outcome = if v["is_error"] == true { Err("the live notes session failed".to_string()) } else { Ok("live notes of a call".to_string()) };
-                    crate::jobs::record("live_notes", session_started, outcome, used);
+                    crate::jobs::record_run("live_notes", session_started, outcome, used); // its trace: the session's own run
                     result = Some(v);
                     break;
                 }

@@ -584,7 +584,21 @@ pub fn run(spec: &Spec) -> Result<(String, String, Value)> {
 /// `run`, each piece of Claude's text handed to `on_text` as it comes (`ctx.claude.run({onText})`): Claude Code's
 /// partial messages (`--include-partial-messages`), its text between tool calls too; `""` when a block of it ended. The
 /// answer at the end is the same.
-pub fn run_with(spec: &Spec, mut on_text: Option<&mut dyn FnMut(&str)>) -> Result<(String, String, Value)> {
+pub fn run_with(spec: &Spec, on_text: Option<&mut dyn FnMut(&str)>) -> Result<(String, String, Value)> {
+    // Its trace (`telemetry`): a Yolo run's or a plugin's job of its own, under a routine's when one runs it.
+    let job = if spec.yolo { "yolo" } else { "plugin_run" };
+    let mut span = crate::telemetry::current_name().is_none().then(|| crate::telemetry::start(&format!("job.{job}"), serde_json::json!({"echo.job": job, "title": spec.title})));
+    let out = run_job(spec, on_text);
+    if let Some(s) = span.as_mut() {
+        s.set("ok", out.is_ok());
+        if let Err(e) = &out {
+            s.set("error", format!("{e:#}"));
+        }
+    }
+    out
+}
+
+fn run_job(spec: &Spec, mut on_text: Option<&mut dyn FnMut(&str)>) -> Result<(String, String, Value)> {
     fs::create_dir_all(&spec.run_dir)?;
     let mut log = fs::File::create(spec.run_dir.join("log.txt"))?;
     let profile_id = if spec.profile.is_empty() { crate::ai::default_id() } else { spec.profile.clone() };
@@ -759,6 +773,7 @@ pub fn run_with(spec: &Spec, mut on_text: Option<&mut dyn FnMut(&str)>) -> Resul
     let mut writer = None;
     let child = child.map(|mut c| {
         if let (Some(line), Some(mut i)) = (message, c.stdin.take()) {
+            crate::telemetry::claude_input(&line);
             writer = Some(std::thread::spawn(move || drop(i.write_all(line.as_bytes()))));
         }
         c

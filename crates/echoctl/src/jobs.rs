@@ -241,6 +241,8 @@ pub struct Run {
     job: &'static str,
     started: DateTime<Local>,
     ended: bool,
+    /// Its trace (`telemetry`): the job's span, its Claude Code runs under it.
+    span: Option<crate::telemetry::Span>,
 }
 
 /// The jobs running now in this process (the app's, whose window lists them): a job's name, how many of its runs.
@@ -250,7 +252,8 @@ static RUNNING: std::sync::Mutex<Vec<&'static str>> = std::sync::Mutex::new(Vec:
 pub fn begin(job: &'static str) -> Run {
     CURRENT.with(|c| *c.borrow_mut() = Some(Used::default()));
     RUNNING.lock().unwrap_or_else(|e| e.into_inner()).push(job);
-    Run { job, started: Local::now(), ended: false }
+    let span = crate::telemetry::start(&format!("job.{job}"), json!({"echo.job": job}));
+    Run { job, started: Local::now(), ended: false, span: Some(span) }
 }
 
 fn not_running(job: &str) {
@@ -268,7 +271,23 @@ impl Run {
         not_running(self.job);
         let used = CURRENT.with(|c| c.borrow_mut().take()).unwrap_or_default();
         if summary.is_some() || used.calls > 0 {
+            self.trace(Ok(summary.as_deref().unwrap_or_default()), &used.value());
             write_run(self.job, self.started, Ok(summary.unwrap_or_default()), used.value());
+        } else if let Some(s) = self.span.take() {
+            s.discard();
+        }
+    }
+
+    /// Its span ends: how it ended and what it used.
+    fn trace(&mut self, result: Result<&str, &str>, used: &Value) {
+        if let Some(mut s) = self.span.take() {
+            s.set("ok", result.is_ok());
+            match result {
+                Ok(t) if !t.is_empty() => s.set("summary", t),
+                Ok(_) => {}
+                Err(e) => s.set("error", e),
+            }
+            s.set("used", used.clone());
         }
     }
 
@@ -297,6 +316,7 @@ impl Run {
         self.ended = true;
         not_running(self.job);
         let used = CURRENT.with(|c| c.borrow_mut().take()).unwrap_or_default();
+        self.trace(Err(error), &used.value());
         write_run(self.job, self.started, Err(error.to_string()), used.value());
     }
 }
@@ -306,6 +326,7 @@ impl Drop for Run {
         if !self.ended {
             not_running(self.job);
             let used = CURRENT.with(|c| c.borrow_mut().take()).unwrap_or_default();
+            self.trace(Err("it stopped before it ended"), &used.value());
             write_run(self.job, self.started, Err("it stopped before it ended".into()), used.value());
         }
     }
@@ -334,6 +355,18 @@ pub fn add_usage(model: &str, v: &Value) {
 /// A run that happened elsewhere (its own process or session, a plugin's routine): `used` as `{calls, input, output,
 /// cache_read, cache_write, cost_usd, model}` (a routine's also `run`, `changes`, `sends`), any of them absent.
 pub fn record(job: &str, started: DateTime<Local>, result: Result<String, String>, used: Value) {
+    // Its trace: the job's span open on this thread gets how it ended, else one is kept for it now.
+    let attrs = json!({"echo.job": job, "ok": result.is_ok(), "summary": result.as_ref().ok(), "error": result.as_ref().err(), "used": used});
+    if crate::telemetry::current_name().is_some_and(|n| n == format!("job.{job}")) {
+        crate::telemetry::annotate(attrs);
+    } else {
+        crate::telemetry::record_span(&format!("job.{job}"), started, attrs);
+    }
+    write_run(job, started, result, used);
+}
+
+/// `record` for a run whose trace is already kept (a live notes session's own Claude Code run): its line only.
+pub fn record_run(job: &str, started: DateTime<Local>, result: Result<String, String>, used: Value) {
     write_run(job, started, result, used);
 }
 
