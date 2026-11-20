@@ -53,8 +53,8 @@ $E plugin marketplace add "$M" --name acme-offers
 | 2 | `$E plugin commands` | One plugin: `[{"description": "Search and notes across the Acme vaults", "id": "acme-vaults", "name": "Acme vaults"}]` — Acme quiet isn't listed |
 | 3 | `$E plugin commands acme-vaults` | Its `commands` are exactly `search` (`"reads": true`, description `Find notes by words, when a fact from a vault is needed`) and `note` (`"reads": false`); `secret` isn't among them |
 | 4 | `$E plugin commands acme-vaults search`; then `$E plugin commands acme-vaults secret` | The first: `args` are `query` (`"optional": false`, `"about": "the words to find"`) and `limit` (`"optional": true`, `"default": "10"`); the second fails: `acme-vaults offers no command “secret”` |
-| 5 | `$E core \| sed -n '/## Plugins. commands/,$p'` | A section `## Plugins' commands` that names the `echo_plugins` tools and has the line ``- `acme-vaults`: Search and notes across the Acme vaults``; no line for `acme-quiet` |
-| 6 | `$E plugin disable acme-vaults`; `$E plugin commands`; `$E core \| grep -c "Plugins' commands"` | `[]`; `0` — switched off, it is offered to nobody |
+| 5 | `$E core \| sed -n '/^## Plugins$/,$p'` | The plugins' table (`\| Plugin \| Id \| What it gives \| Read first \|`), its line naming the `echo_plugins` tools, and the row ``\| Acme vaults \| `acme-vaults` \| Search and notes across the Acme vaults \| — \|`` (no guide: nothing to Read); no row for `acme-quiet` |
+| 6 | `$E plugin disable acme-vaults`; `$E plugin commands`; `$E core \| grep -c acme-vaults` | `[]`; `0` — switched off, it is offered to nobody |
 | 7 | `$E plugin enable acme-vaults`; `$E plugin commands \| grep -c acme-vaults` | `1`: listed again |
 
 ## Teardown
