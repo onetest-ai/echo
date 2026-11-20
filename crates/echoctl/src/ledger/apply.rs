@@ -4,6 +4,12 @@ use super::*;
 
 // ── apply: agent proposals ───────────────────────────────────────────────────────────────────────
 
+/// A node's id as the tree has them (`E01`, `T003`): capitals, then digits.
+pub fn node_id(r: &str) -> bool {
+    let digits = r.trim_start_matches(|c: char| c.is_ascii_uppercase());
+    digits.len() < r.len() && !digits.is_empty() && digits.chars().all(|c| c.is_ascii_digit())
+}
+
 /// Owners as the project knows them: a member's name for their name, email, or unique first name.
 pub(super) fn canonical(p: &crate::projects::Project, who: Option<&str>) -> Option<String> {
     let w = who?.trim();
@@ -125,7 +131,8 @@ pub fn apply(project: &str, evid: &str, proposals: &[Value]) -> Result<Value> {
                 continue;
             }
             let cmid = mid_of(&[evid, &q, "create", k, par.as_deref().unwrap_or("None"), &title]);
-            let handle = pr["ref"].as_str().map(str::to_owned).unwrap_or_else(|| format!("#{i}"));
+            // A ref shaped like a node's id (`E01`) would shadow that node for the proposals after it: not a ref.
+            let handle = pr["ref"].as_str().filter(|r| !node_id(r)).map(str::to_owned).unwrap_or_else(|| format!("#{i}"));
             if let Some(id) = made.get(&cmid) {
                 handles.insert(handle, id.clone());
                 continue;

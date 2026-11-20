@@ -39,9 +39,10 @@ PR. The rules are in `.ai-run/guides/development/threads-and-ledger.md`.
   the refs got. Its fixes count only for items with rejections and are applied the same way (`<id>_fix.json`,
   `<id>_people_fix.json`); its usage is summed into the state's `usage.extract` (a line in `sync-usage.jsonl` for each
   run). Then each item for the work the answer named is marked processed with its `note` ("read" when none), whatever
-  the fix run did: a rejection still standing (refused again, left out of the fix, or the fix run failed or answered
-  nothing readable) is counted as unfixed. Each item counts once; a value shaped like a node's id (`E01`, `T003`) is never
-  taken for a ref. An item the answer left out waits for the next sync; so does every item when the answer can't be read
+  the fix run did: a rejection still standing (one per rejection a fix for its item and part didn't make good — refused
+  again or left out — or all when the fix run failed or answered nothing readable: `projectsync::standing`) is counted as
+  unfixed; an error applying a fix leaves what the first answer gave. Each item counts once; a value shaped like a node's id (`E01`, `T003`: `ledger::node_id`) is never
+  taken for a ref, within an item (`apply`) or across items. An item the answer left out waits for the next sync; so does every item when the answer can't be read
   ("Extract: its answer couldn't be read; …"), and an item an error stopped (logged; the other items go on). The sync's
   message starts "Extract: N items read, M changes to the work, K about people." (with "R rejections left unfixed." —
   "(the fix run failed)" when it did — and the items an error stopped), then the answers' reports

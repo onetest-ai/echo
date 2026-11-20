@@ -588,7 +588,7 @@ fn answer_of(answer: &str) -> Option<Value> {
 fn with_ids(proposals: &[Value], refs: &BTreeMap<String, String>) -> Vec<Value> {
     let own: Vec<&str> = proposals.iter().filter_map(|p| p["ref"].as_str()).collect();
     let id_of = |v: &Value| match v.as_str() {
-        Some(r) if !own.contains(&r) && !node_id(r) => refs.get(r).map(|id| json!(id)),
+        Some(r) if !own.contains(&r) && !ledger::node_id(r) => refs.get(r).map(|id| json!(id)),
         _ => None,
     };
     proposals
@@ -611,12 +611,6 @@ fn with_ids(proposals: &[Value], refs: &BTreeMap<String, String>) -> Vec<Value> 
             p
         })
         .collect()
-}
-
-/// A node's id as the tree has them (`E01`, `T003`): never taken for a ref.
-fn node_id(r: &str) -> bool {
-    let digits = r.trim_start_matches(|c: char| c.is_ascii_uppercase());
-    digits.len() < r.len() && !digits.is_empty() && digits.chars().all(|c| c.is_ascii_digit())
 }
 
 /// What Echo made of the extract's answers.
@@ -678,10 +672,43 @@ fn apply_answer(id: &str, items: &[Item], answer: &Value, run_dir: &Path, fixing
         };
         if let Err(e) = one() {
             let _ = writeln!(log, "{}  {}: couldn't be applied: {e:#}", Local::now().format("%H:%M:%S"), item.id);
-            x.noted.retain(|(i, _)| *i != item.id);
-            x.errors.push(item.id.clone());
+            // The first answer's: the item waits. A fix's: what the first answer gave stands, the item is done as answered.
+            if fixing.is_none() {
+                x.noted.retain(|(i, _)| *i != item.id);
+                x.errors.push(item.id.clone());
+            }
         }
     }
+}
+
+/// The first round's rejections still standing after the fix answer: for each item and part (`work`, `people`), as many
+/// as the fix's proposals there didn't make good — its proposals counted once an item (as `apply_answer` takes them,
+/// only items `fixing`), less those `refused` again.
+fn standing(rejected: &[Value], fixes: &Value, fixing: &[&str], refused: Vec<Value>) -> Vec<Value> {
+    let key = |r: &Value| (r["item"].as_str().unwrap_or("").to_string(), r["in"].as_str().unwrap_or("").to_string());
+    let mut made_good: BTreeMap<(String, String), usize> = BTreeMap::new();
+    let mut seen: Vec<&str> = vec![];
+    for f in fixes["items"].as_array().into_iter().flatten() {
+        let Some(id) = f["id"].as_str().filter(|i| fixing.contains(i) && !seen.contains(i)) else { continue };
+        seen.push(id);
+        for part in ["work", "people"] {
+            let n = f[part].as_array().map_or(0, Vec::len);
+            *made_good.entry((id.to_string(), part.to_string())).or_default() += n;
+        }
+    }
+    for r in &refused {
+        if let Some(n) = made_good.get_mut(&key(r)) {
+            *n = n.saturating_sub(1);
+        }
+    }
+    let mut out = vec![];
+    for r in rejected {
+        match made_good.get_mut(&key(r)) {
+            Some(n) if *n > 0 => *n -= 1,
+            _ => out.push(r.clone()),
+        }
+    }
+    out
 }
 
 /// The extract: one run with no tools whose answer Echo applies; when any proposal was rejected, one fix run given
@@ -721,11 +748,7 @@ fn extract(p: &projects::Project, run: Run, items: &[Item], given: &Given, tag: 
                 if let Some(more) = fixes["report"].as_str().filter(|r| !r.trim().is_empty()) {
                     x.report = format!("{}\n{more}", x.report).trim().to_string();
                 }
-                // A rejection whose item and part the fix left out still stands.
-                let fixed_in = |r: &Value| {
-                    fixes["items"].as_array().into_iter().flatten().any(|f| f["id"] == r["item"] && f[r["in"].as_str().unwrap_or("")].as_array().is_some_and(|a| !a.is_empty()))
-                };
-                x.rejected.extend(rejected.iter().filter(|r| !fixed_in(r)).cloned());
+                x.rejected = standing(&rejected, &fixes, &fixing, std::mem::take(&mut x.rejected));
             }
             Ok(None) => {
                 let _ = writeln!(log, "{}  the fix run's answer couldn't be read: its rejections stand", Local::now().format("%H:%M:%S"));
@@ -1819,11 +1842,11 @@ mod tests {
         assert!(message.contains("Read for people without people-apply 2 times, marked read: 2026-11-11_100000"), "{message}");
     }
 
-    /// The answer counts only for the run's own items, each once; work only for items read for the work; the fix
-    /// answer only for items with rejections, and a rejection it leaves out still stands; a node's id is never a ref.
+    /// The answer counts only for the run's own items, each once; the fix answer only for items with rejections; a
+    /// node's id is never a ref, within an item or across items.
     #[cfg(unix)]
     #[test]
-    fn an_answer_counts_only_for_its_own_items_once_and_a_rejection_the_fix_leaves_out_stands() {
+    fn an_answer_counts_only_for_its_own_items_once_and_the_fix_only_for_rejected_ones() {
         let (_env, root) = crate::paths::testenv::folders("sync-answer-bounds");
         let (_fake, prof, id) = fake_thread(&root);
         ledger::ensure_first_epic(&ledger::Ledger::of(&id).unwrap()).unwrap();
@@ -1832,27 +1855,65 @@ mod tests {
         call_item(&id, "2026-11-12_100000", "Nothing new here for the pilot today, thanks all.");
         let story = |title: &str| json!({"op": "create", "ref": "E01", "kind": "story", "parent": "E01", "title": title, "ac": ["SAML works"], "quote": "Then SSO has to land first"});
         let answer = json!({"items": [
-            {"id": "2026-11-10_100000", "note": "SSO", "work": [story("SSO for the pilot"), {"op": "status", "node": "E01", "effect": "due", "due_text": "24th", "quote": "words nobody said in this call"}]},
+            {"id": "2026-11-10_100000", "note": "SSO", "work": [story("SSO for the pilot"),
+                {"op": "status", "node": "E01", "effect": "due", "due_text": "24th of November", "quote": "the pilot moves to the 24th of November"},
+                {"op": "status", "node": "E01", "effect": "progress", "quote": "words nobody said in this call"}]},
             {"id": "2026-11-10_100000", "note": "again", "work": [story("SSO once more")]},
-            {"id": "2026-11-11_100000", "note": "the room", "work": [{"op": "create", "kind": "task", "parent": "E01", "title": "Book the training room", "type": "action", "internal_owner": "Dana Kowal", "quote": "Dana will book the training room"}]},
+            {"id": "2026-11-11_100000", "note": "nothing for the work", "work": []},
             {"id": "2026-11-09_100000", "note": "not this run's", "work": []}],
             "report": ""});
         answers(&prof, Some(1), &answer.to_string());
-        // The fix: only for 2026-11-11 (no rejection there) and nothing for the rejected item.
-        let fix = json!({"items": [{"id": "2026-11-11_100000", "work": [{"op": "create", "kind": "task", "parent": "E01", "title": "Another room task", "type": "action", "internal_owner": "Dana Kowal", "quote": "Dana will book the training room"}]}], "report": ""});
+        // The fix: only for 2026-11-11, which had no rejection; nothing for the rejected one.
+        let fix = json!({"items": [{"id": "2026-11-11_100000", "work": [{"op": "create", "ref": "t9", "kind": "task", "parent": "E01", "title": "Another room task", "type": "session", "quote": "Dana will book the training room"}]}], "report": ""});
         answers(&prof, Some(2), &fix.to_string());
         answers(&prof, None, "[]");
         let v = run(&id).unwrap();
         let message = v["message"].as_str().unwrap();
-        // The task under E01 is rejected (a task needs a story): two rejections, neither fixed.
-        assert!(message.starts_with("Extract: 2 items read, ") && message.contains(" 2 rejections left unfixed."), "{message}");
+        assert!(message.starts_with("Extract: 2 items read, ") && message.contains(" 1 rejection left unfixed."), "{message}");
         let events = ledger::Ledger::of(&id).unwrap().events().unwrap();
         let titles: Vec<&str> = events.iter().filter(|e| e["type"] == "create").filter_map(|e| e["fields"]["title"].as_str()).collect();
         assert!(titles.contains(&"SSO for the pilot") && !titles.contains(&"SSO once more") && !titles.contains(&"Another room task"), "{titles:?}");
-        assert!(events.iter().filter(|e| e["type"] == "agent" && e["op"] == "status").all(|e| e["node"] == "E01"), "E01 stays E01 though a ref was named so");
+        let due: Vec<&Value> = events.iter().filter(|e| e["op"] == "status" && e["effect"] == "due").collect();
+        assert!(due.len() == 1 && due[0]["node"] == "E01", "the epic's date, not the story's that named itself E01: {due:?}");
+        let run_dir = ledger_dir(&id).join("runs").join(v["run"].as_str().unwrap());
+        assert!(!run_dir.join("2026-11-11_100000_fix.json").exists(), "a fix for an item with no rejection isn't taken");
         let done: Vec<&str> = events.iter().filter(|e| e["type"] == "processed").filter_map(|e| e["evidence"].as_str()).collect();
         assert_eq!(done, ["2026-11-10_100000", "2026-11-11_100000"], "each once; the third, left out, waits");
         assert!(with_ids(&[json!({"op": "link", "node": "T020", "depends_on": ["s1", "T019"]})], &BTreeMap::from([("s1".to_string(), "S004".to_string())]))[0]["depends_on"] == json!(["S004", "T019"]));
+        assert!(with_ids(&[json!({"op": "note", "node": "E01"})], &BTreeMap::from([("E01".to_string(), "S004".to_string())]))[0]["node"] == "E01");
+    }
+
+    /// The first round's rejections that stand: one per rejection the fix didn't make good, by item and part.
+    #[test]
+    fn a_rejection_stands_unless_a_fix_for_its_item_and_part_was_taken() {
+        let rej = |item: &str, part: &str, i: u64| json!({"item": item, "in": part, "rejection": {"i": i}});
+        let rejected = [rej("a", "work", 0), rej("a", "work", 2), rej("a", "people", 0), rej("b", "work", 1)];
+        let fixes = json!({"items": [
+            {"id": "a", "work": [{"op": "note"}], "people": [{"who": "x"}]},
+            {"id": "a", "work": [{"op": "note"}, {"op": "note"}]},
+            {"id": "b", "work": [{"op": "note"}]},
+            {"id": "c", "work": [{"op": "note"}]}]});
+        // b's fix refused again; a's second entry not taken (once an item); c had no rejection.
+        let left = standing(&rejected, &fixes, &["a", "b"], vec![rej("b", "work", 0)]);
+        assert_eq!(left, [rej("a", "work", 2), rej("b", "work", 1)]);
+    }
+
+    /// An error on one item (its proposals can't be written) leaves it waiting, said; the next item goes on.
+    #[test]
+    fn an_item_an_error_stops_waits_and_the_others_go_on() {
+        let (_env, root) = crate::paths::testenv::folders("sync-item-error");
+        let id = projects::create("Acme pilot", None, None).unwrap().id;
+        call_item(&id, "2026-11-10_100000", "Nothing new here for the pilot today, thanks all.");
+        call_item(&id, "2026-11-11_100000", "Nothing new here either, see you next week.");
+        let items = take_items(&id, &["2026-11-10_100000".into(), "2026-11-11_100000".into()], &[], MAX_TEXT).unwrap().items;
+        let run_dir = root.join("run");
+        fs::create_dir_all(run_dir.join("2026-11-10_100000.json")).unwrap();
+        let answer = json!({"items": [{"id": "2026-11-10_100000", "work": [], "note": "a"}, {"id": "2026-11-11_100000", "work": [], "note": "b"}]});
+        let (mut x, mut log) = (Extracted::default(), fs::File::create(root.join("log.txt")).unwrap());
+        apply_answer(&id, &items, &answer, &run_dir, None, &mut x, &mut log);
+        assert_eq!(x.noted, [("2026-11-11_100000".to_string(), "b".to_string())]);
+        assert_eq!(x.errors, ["2026-11-10_100000"]);
+        assert!(fs::read_to_string(root.join("log.txt")).unwrap().contains("2026-11-10_100000: couldn't be applied"));
     }
 
     /// A verify run that fails leaves its claims and the later batches' for the next sync; the sync goes on.
