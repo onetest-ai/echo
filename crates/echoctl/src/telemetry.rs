@@ -467,38 +467,27 @@ pub fn telemetry_var(name: &str) -> bool {
 /// The settings files whose `env` a run of `p` in `cwd` may read: the managed ones, the profile's (or the user's own)
 /// and the folder's project settings.
 fn settings_files(p: &Profile, cwd: &Path) -> Vec<PathBuf> {
-    let mut v = Vec::new();
-    #[cfg(target_os = "macos")]
-    let managed = PathBuf::from("/Library/Application Support/ClaudeCode");
-    #[cfg(windows)]
-    let managed = PathBuf::from(r"C:\Program Files\ClaudeCode");
-    #[cfg(not(any(target_os = "macos", windows)))]
-    let managed = PathBuf::from("/etc/claude-code");
-    v.push(managed.join("managed-settings.json"));
-    let mut dropins: Vec<PathBuf> = std::fs::read_dir(managed.join("managed-settings.d")).into_iter().flatten().flatten().map(|e| e.path()).collect();
-    dropins.sort();
-    v.extend(dropins);
     let user = if p.kind.managed() {
         p.config_folder()
     } else {
         std::env::var_os("CLAUDE_CONFIG_DIR").map(PathBuf::from).unwrap_or_else(|| paths::user_home().join(".claude"))
     };
-    v.push(user.join("settings.json"));
-    v.push(cwd.join(".claude").join("settings.json"));
-    v.push(cwd.join(".claude").join("settings.local.json"));
-    v
+    vec![user.join("settings.json"), cwd.join(".claude").join("settings.json"), cwd.join(".claude").join("settings.local.json")]
 }
 
-/// Does something already configure Claude Code's telemetry for a run of `p` in `cwd`: this process's environment, or a
-/// settings file's `env`? (The login shell's start-up files are checked in its script.)
+/// Does a settings document set a telemetry variable in its `env` (server-managed settings may wrap it in `settings`)?
+fn sets_telemetry(v: &Value) -> bool {
+    [&v["env"], &v["settings"]["env"]].iter().any(|e| e.as_object().is_some_and(|e| e.keys().any(|k| telemetry_var(k))))
+}
+
+/// Does something already configure Claude Code's telemetry for a run of `p` in `cwd`: this process's environment, a
+/// settings file's `env`, or the organisation's policy (`ai::policy_docs`: managed settings, macOS managed preferences,
+/// Windows policy keys, server-managed settings) — one that can't be read counts, so Echo leaves it alone. (The login
+/// shell's start-up files are checked in its script.)
 pub fn configured_elsewhere(p: &Profile, cwd: &Path) -> bool {
     std::env::vars_os().any(|(k, _)| k.to_str().is_some_and(telemetry_var))
-        || settings_files(p, cwd).iter().any(|f| {
-            std::fs::read(f)
-                .ok()
-                .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
-                .is_some_and(|v| v["env"].as_object().is_some_and(|e| e.keys().any(|k| telemetry_var(k))))
-        })
+        || settings_files(p, cwd).iter().any(|f| std::fs::read(f).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok()).is_some_and(|v| sets_telemetry(&v)))
+        || crate::ai::policy_docs(p).iter().any(|d| d.as_ref().map_or(true, sets_telemetry))
 }
 
 /// What a run's arguments are, with the text of the instruction files they name.
@@ -910,9 +899,18 @@ mod tests {
         assert!(run(&folder).is_empty(), "the folder's project settings'");
         assert!(!run(&root).is_empty(), "elsewhere: Echo's again");
 
+        // The organisation's: server-managed settings Claude Code cached (wrapped in `settings`), and one it can't read.
+        let remote = p.config_folder().join("remote-settings.json");
+        std::fs::write(&remote, r#"{"settings": {"env": {"OTEL_METRICS_EXPORTER": "otlp"}}}"#).unwrap();
+        assert!(run(&root).is_empty(), "the organisation's server-managed settings'");
+        std::fs::write(&remote, "{not json").unwrap();
+        assert!(run(&root).is_empty(), "a policy Echo can't read: left alone");
+        std::fs::write(&remote, r#"{"settings": {"env": {"MY_OWN": "1"}}}"#).unwrap();
+        assert!(!run(&root).is_empty(), "a policy without telemetry: Echo's");
+
         flush(Duration::from_secs(5));
         let said: Vec<Value> = list(KEEP_DAYS, None, None, 10)["traces"].as_array().unwrap().iter().map(|t| show(t["id"].as_str().unwrap()).unwrap()["spans"][0]["attrs"]["echo.telemetry"].clone()).collect();
-        assert_eq!(said.iter().filter(|s| **s == "configured elsewhere").count(), 3, "{said:?}");
+        assert_eq!(said.iter().filter(|s| **s == "configured elsewhere").count(), 5, "{said:?}");
     }
 
     /// One HTTP request on `s` (to `host`, of `kind`), its status line back.

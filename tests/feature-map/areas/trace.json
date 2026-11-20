@@ -21,7 +21,7 @@
   },
   {
    "id": "F-TRACE-03",
-   "feature": "When anything else configures Claude Code's telemetry for a run — Echo's environment, the login shell's start-up files, the managed, user (the profile's own) or project settings' `env` — Echo leaves it as configured: the run's trace has Echo's part only and says \"configured elsewhere\"; sign-ins, version checks and terminal sessions never get Echo's telemetry",
+   "feature": "When anything else configures Claude Code's telemetry for a run — Echo's environment, the login shell's start-up files, the user (the profile's own) or project settings' `env`, or the organisation's policy (managed settings, macOS managed preferences, Windows policy keys, server-managed settings; one Echo can't read counts) — Echo leaves it as configured: the run's trace has Echo's part only and says \"configured elsewhere\"; sign-ins, version checks and terminal sessions never get Echo's telemetry",
    "priority": "critical",
    "check": "agent",
    "axes": []
