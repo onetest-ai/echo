@@ -18,11 +18,13 @@ tags: [plugins, host-half, offers, cli]
 ## Preconditions
 - Standard data set built right before the run: `tests/fixtures/make-data.sh <dir>`
 - Every Bash call starts with the prelude (a fresh shell each time): `. <dir>/env; D="$(dirname "$ECHOCTL_HOME")"; E=target/debug/echoctl`
-- A made-up local marketplace `acme-offers` with four plugins: **Acme vaults** offers two commands, **Acme asker** asks to call other plugins, **Acme nosy** doesn't, **Acme quiet** offers nothing:
+- A made-up local marketplace `acme-offers` with five plugins: **Acme vaults** offers two commands, **Acme asker** asks to call other plugins, **Acme nosy** doesn't, **Acme quiet** offers nothing, **Acme guide** offers no commands but gives Claude a guide:
 
 ```bash
-M="$D/market-offers"; for p in acme-vaults acme-asker acme-nosy acme-quiet; do mkdir -p "$M/plugins/$p"; done
-echo '{"name":"acme-offers","plugins":[{"id":"acme-vaults","source":"./plugins/acme-vaults"},{"id":"acme-asker","source":"./plugins/acme-asker"},{"id":"acme-nosy","source":"./plugins/acme-nosy"},{"id":"acme-quiet","source":"./plugins/acme-quiet"}]}' > "$M/echo-marketplace.json"
+M="$D/market-offers"; for p in acme-vaults acme-asker acme-nosy acme-quiet acme-guide/agent; do mkdir -p "$M/plugins/$p"; done
+echo '{"name":"acme-offers","plugins":[{"id":"acme-vaults","source":"./plugins/acme-vaults"},{"id":"acme-asker","source":"./plugins/acme-asker"},{"id":"acme-nosy","source":"./plugins/acme-nosy"},{"id":"acme-quiet","source":"./plugins/acme-quiet"},{"id":"acme-guide","source":"./plugins/acme-guide"}]}' > "$M/echo-marketplace.json"
+echo '{"id":"acme-guide","name":"Acme guide","version":"0.1.0","summary":"A made-up plugin for tests","agent":{"summary":"Staffing of Acme projects"}}' > "$M/plugins/acme-guide/echo-plugin.json"
+printf '# Acme guide\n' > "$M/plugins/acme-guide/agent/CLAUDE.md"
 echo '{"id":"acme-vaults","name":"Acme vaults","version":"0.1.0","summary":"A made-up plugin for tests","main":"main.js"}' > "$M/plugins/acme-vaults/echo-plugin.json"
 cat > "$M/plugins/acme-vaults/main.js" <<'JS'
 export function apply(ctx) {

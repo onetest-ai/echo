@@ -1117,7 +1117,12 @@ pub fn render_with(home: &Path, rows: &[Row], offers: &[(String, String)]) -> St
             format!("| {} | {} | {} | `{}` |\n", cell(&r.plugin, 80), cell(&r.what, MAX_SUMMARY), skills.join(", "), cell(&r.read, 120))
         })
         .collect();
-    let note = |left: usize| format!("\n{left} more left out for room: list `.plugins/` and Read the CLAUDE.md of the one you need.\n");
+    // Where the `echo_plugins` server is (a build that runs plugins' code), its `plugins` tool lists them all.
+    let note = |left: usize| if cfg!(feature = "js") {
+        format!("\n{left} more left out for room: the `plugins` tool (echo_plugins) lists every plugin with its CLAUDE.md to Read.\n")
+    } else {
+        format!("\n{left} more left out for room: list `.plugins/` and Read the CLAUDE.md of the one you need.\n")
+    };
     let fits = |n: usize| {
         let left = rows.len() - n;
         s.chars().count() + lines[..n].iter().map(|l| l.chars().count()).sum::<usize>() + if left > 0 { note(left).chars().count() } else { 0 } < BUDGET
@@ -1805,5 +1810,7 @@ mod tests {
         assert!(shown > 0 && block.contains(&format!("{} more: the plugins tool lists them all.", 200 - shown)), "{shown}");
         let rows_shown = table.lines().filter(|l| l.starts_with("| Plugin ") && !l.starts_with("| Plugin |")).count();
         assert!(rows_shown > 0 && table.contains(&format!("{} more left out for room", 200 - rows_shown)), "{rows_shown}");
+        #[cfg(feature = "js")]
+        assert!(table.contains("the `plugins` tool (echo_plugins) lists every plugin with its CLAUDE.md to Read."), "{table}");
     }
 }

@@ -1040,7 +1040,7 @@
   },
   {
    "id": "F-PLUG-158",
-   "feature": "Echo's sessions (folder session, plugin sessions, routines, Yolo, plugins' runs) get the `echo_plugins` MCP server when a plugin offers itself: four tools — plugins, plugin(id), command(id, name), call — its tools allowed without asking; in a run that only reads, `call` runs only commands marked `reads`",
+   "feature": "Echo's sessions (folder session, plugin sessions, routines, Yolo, plugins' runs) get the `echo_plugins` MCP server when a plugin offers commands or gives Claude a guide: four tools — plugins (every such plugin: its commands counted, its guide and entries), plugin(id), command(id, name), call — its tools allowed without asking; in a run that only reads, `call` runs only commands marked `reads`; the core's table, when rows are left out for room, points to the plugins tool",
    "priority": "high",
    "check": "agent",
    "axes": [
