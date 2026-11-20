@@ -1,5 +1,14 @@
 [
   {
+    "version": "0.10.4",
+    "items": [
+      { "icon": "sparkle", "title": "See everything Echo ran", "text": "Settings → Activity shows each run, its tokens and cost, and what went in and came out, step by step on a timeline.", "open": "settings/activity" },
+      { "icon": "export", "title": "Send traces to Langfuse", "text": "Send Echo's runs to Langfuse or your own collector, off until you set it up, never your account and only with text when you allow it.", "open": "settings/activity" },
+      { "icon": "thread", "title": "Thread sync at a fraction of the tokens", "text": "Each thread sync now reads its new calls, mail and chats in one answer instead of many steps, using far fewer tokens.", "open": "projects" },
+      { "icon": "shield", "title": "Your company's telemetry left alone", "text": "When your organisation sets up Claude Code's telemetry, Echo leaves it as it is and keeps only its own record.", "open": "settings/activity" }
+    ]
+  },
+  {
     "version": "0.10.3",
     "items": [
       { "icon": "plugin", "title": "Plugins that read the web", "text": "A plugin you allow can read any public web page over https, never this computer or your own network.", "open": "settings/plugins" },
