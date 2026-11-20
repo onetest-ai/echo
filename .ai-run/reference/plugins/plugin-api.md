@@ -1031,8 +1031,8 @@ No line on the sheet: handing a file over is the user's own act. Evidence: `jsho
   only folders checked as the core's are, its text one plain line), `plugin(id)` (its commands, guide, skills and
   entries), `command(id, name)`, `call(id, name, args)`; a run that only reads (`read`) gets it with `--read`, where `call` runs only
   commands marked `reads`; a call of a command not marked `reads` — Claude's, or one a command makes in turn — is in a routine's or Yolo's
-  outcome as `plugin call <id> <name>`; a refused one isn't. The core's one table has a row a plugin — its name, id and what it gives (a guide's words win
-  over `ctx.expose`'s) — sorted by id; its commands, skills, guide and entries come from `plugin(id)`, which the core
+  outcome as `plugin call <id> <name>`; a refused one isn't. The core's one table has a row a plugin — its name, id and what it is for (`plugins::agent::about`:
+  what its host half set, else `agent.summary`, else `summary`) — sorted by id; its commands, skills, guide and entries come from `plugin(id)`, which the core
   tells Claude to ask before reading the guide; rows left out for room are counted and pointed to the `plugins` tool. Never a
   minutes run, a project sync, the window's session on a call or a run with no tools. Evidence: `jshost::mcp::config`,
   `plugins::agent::render_with`
