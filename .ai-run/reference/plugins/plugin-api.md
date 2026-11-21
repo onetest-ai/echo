@@ -1290,8 +1290,8 @@ Evidence: `jshost::work::check_rows`
   a key or `{key, draw: false}` (a setting it takes in its own flow, by `ctx.settings.set`: no field; an address list
   is drawn anyway, with the line "“x” is an address: only Echo takes it, so its field is drawn here"); a key that isn't
   one of its settings shows "“x” isn't one of its settings". After a save of one of them the section is drawn again
-  and `changed(key)` is called once Echo's settings, read again, show the change (3 s at most). On Settings → Plugins → the plugin, a setting a section claims is
-  not drawn while the plugin is on: one row per section, its labels, "Set in <label>" and Open. Evidence:
+  and `changed(key)` is called on the section claiming it then once Echo's settings, read again, show the change, or after 3 s (a refused save or a secret replaced by another shows none; not when the plugin was switched off or reloaded meanwhile); a key listed twice counts once. On Settings → Plugins → the plugin, a setting a section claims is
+  not drawn while the plugin is on and its window part has loaded (registered the section): one row per section, its labels, "Set in <label>" and Open. Evidence:
   `plSectionFields`, `plClaimer`, `plSaved` (window script)
 - `ctx.echo.routines` (manifest `uses.echo.jobs`): Echo's jobs in the routines' one shape (§ Routines).
 - `ctx.echo.routines.offer(ids?)` (no capability: its routines are on its sheet already): Echo's sheet of the plugin's own

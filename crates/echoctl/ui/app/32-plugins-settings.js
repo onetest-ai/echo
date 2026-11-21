@@ -28,8 +28,14 @@ function plField(id, d) {
 }
 /** The settings a plugin's own section claims (`ctx.settings.section({settings})`): each `{key, draw}`, from a key or
  *  `{key, draw: false}` (the section takes it in its own flow; Echo draws no field for it). */
-const plClaims = (sec) => (Array.isArray(sec && sec.settings) ? sec.settings : [])
-  .map((c) => (typeof c === 'string' ? { key: c, draw: true } : c && typeof c.key === 'string' ? { key: c.key, draw: c.draw !== false } : null)).filter(Boolean)
+function plClaims(sec) {
+  try {
+    const seen = new Set()
+    return (Array.isArray(sec && sec.settings) ? sec.settings : [])
+      .map((c) => (typeof c === 'string' ? { key: c, draw: true } : c && typeof c.key === 'string' ? { key: c.key, draw: c.draw !== false } : null))
+      .filter((c) => c && !seen.has(c.key) && seen.add(c.key))
+  } catch { return [] }
+}
 /** The section of plugin `id` that claims setting `key` (the first), while the plugin is on and its window part loaded. */
 const plClaimer = (id, key) => Plugins.sections.find((s) => s.plugin === id && plClaims(s).some((c) => c.key === key))
 /** A setting's row as Settings → Plugins draws it: its name and help above, the field the full width below, an address
@@ -44,7 +50,8 @@ function plSectionFields(sec) {
   const claims = plClaims(sec)
   if (!claims.length) return ''
   const p = S.plugins
-  if (!p) { if (!S.pluginsLoading) { S.pluginsLoading = true; loadPluginsView().then(() => { S.pluginsLoading = false; render() }) } return '<div class="skeleton" style="padding:12px"><i></i></div>' }
+  // Not read yet: read once, again after 2 s while the app doesn't answer.
+  if (!p) { if (!S.pluginsLoading) { S.pluginsLoading = true; loadPluginsView().then(() => { S.pluginsLoading = false; if (S.plugins) render(); else setTimeout(render, 2000) }) } return '<div class="skeleton" style="padding:12px"><i></i></div>' }
   const x = (p.installed || []).find((i) => i.id === sec.plugin)
   if (!x) return ''
   const rows = claims.map((c) => {
@@ -56,15 +63,16 @@ function plSectionFields(sec) {
   return rows ? `<div class="pl-h4">Its settings</div><div class="pl-fields sec-fields">${rows}</div>` : ''
 }
 /** A claimed setting saved: what Echo keeps is read again until it shows the change (a page action has no answer: 3 s
- *  at most), then the section is told (`changed(key)`) and drawn again with it. */
+ *  at most — a refused save, or a secret replaced by another, shows none), then the section claiming it now is told
+ *  (`changed(key)`; none when the plugin was switched off or reloaded meanwhile) and drawn again. */
 function plSaved(id, key) {
-  const sec = plClaimer(id, key)
-  if (!sec) return
+  if (!plClaimer(id, key)) return
   const view = () => { const x = ((S.plugins && S.plugins.installed) || []).find((i) => i.id === id); const d = x && (x.settings || []).find((s) => s.key === key); return JSON.stringify(d ? [d.value, d.set] : null) }
   const was = view()
   const look = (n) => setTimeout(() => loadPluginsView().then(() => {
     if (view() === was && n > 0) return look(n - 1)
-    if (typeof sec.changed === 'function') { try { sec.changed(key) } catch (e) { console.error(e) } }
+    const sec = plClaimer(id, key)
+    if (sec && typeof sec.changed === 'function') { try { sec.changed(key) } catch (e) { console.error(e) } }
     render()
   }), 200)
   look(15)

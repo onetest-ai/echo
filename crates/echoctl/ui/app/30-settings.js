@@ -116,7 +116,8 @@ function settingsView() {
   const ownBody = (o) => {
     let html
     try { html = o.render() } catch (e) { html = `<p class="error">${esc(o.label)}: ${esc(String((e && e.message) || e))}</p>` }
-    const f = plSectionFields(o)
+    let f
+    try { f = plSectionFields(o) } catch (e) { f = `<p class="error">${esc(String((e && e.message) || e))}</p>` }
     return o.settingsAt === 'bottom' ? html + f : f + html
   }
   const body = own ? ownBody(own)
