@@ -1,5 +1,11 @@
 [
   {
+    "version": "0.10.8",
+    "items": [
+      { "icon": "layout", "title": "Plugin pages read in order", "text": "A plugin's own page in Settings shows its settings where they belong, under its title.", "open": "settings/plugins" }
+    ]
+  },
+  {
     "version": "0.10.7",
     "items": [
       { "icon": "plugin", "title": "Plugin settings in one place", "text": "A plugin's own page in Settings can show its settings, so you set its server, key or token where you use it.", "open": "settings/plugins" }
