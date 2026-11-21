@@ -1284,8 +1284,9 @@ Evidence: `jshost::work::check_rows`
   `pluginCtx`, `loadPluginClients`, `pluginStylesheetHref`, `unloadPlugin` (window script)
 - A Settings section of its own: `ctx.settings.section({id, label, icon, render, badge, settings, settingsAt, changed})`
   — under "From plugins", its hash `settings/<plugin>:<id>` (`id` `main` when left out). `settings`: its manifest
-  settings the section shows, in that order, as Echo's fields under "Its settings" — above what `render()` gives, below
-  with `settingsAt: 'bottom'` — each the Plugins page's field (`plFieldRow`: an address list with its notes, a secret
+  settings the section shows, in that order, as Echo's fields under "Its settings" — where `render()`'s HTML has
+  `<!--echo-settings-->` (the first; later ones stay as comments), else above what it gives, below with
+  `settingsAt: 'bottom'` — each the Plugins page's field (`plFieldRow`: an address list with its notes, a secret
   only as set or not with type-to-replace and Forget, a bool a switch), saved as there (`plugin_op` `set`); an entry is
   a key or `{key, draw: false}` (a setting it takes in its own flow, by `ctx.settings.set`: no field; an address list
   is drawn anyway, with the line "“x” is an address: only Echo takes it, so its field is drawn here"); a key that isn't
