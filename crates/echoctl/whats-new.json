@@ -1,5 +1,11 @@
 [
   {
+    "version": "0.10.7",
+    "items": [
+      { "icon": "plugin", "title": "Plugin settings in one place", "text": "A plugin's own page in Settings can show its settings, so you set its server, key or token where you use it.", "open": "settings/plugins" }
+    ]
+  },
+  {
     "version": "0.10.6",
     "items": [
       { "icon": "shield", "title": "Safer work on web pages", "text": "A plugin's Claude can work through pages it gathered with file tools only, in that plugin's folder, never reaching your data or the web.", "open": "settings/plugins" }
