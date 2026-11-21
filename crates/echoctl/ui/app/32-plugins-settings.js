@@ -26,12 +26,64 @@ function plField(id, d) {
   if (d.type === 'secret') return `<input class="set-in" type="password" ${box} placeholder="${d.set ? '•••• set — type to replace' : 'not set'}" autocomplete="off">${d.set ? `<button class="btn ghost" ${at} data-forget>Forget</button>` : ''}`
   return `<input class="set-in" ${box} value="${esc(d.value == null ? '' : String(d.value))}" placeholder="${d.type === 'folder' ? '/path/to/folder' : ''}">`
 }
+/** The settings a plugin's own section claims (`ctx.settings.section({settings})`): each `{key, draw}`, from a key or
+ *  `{key, draw: false}` (the section takes it in its own flow; Echo draws no field for it). */
+function plClaims(sec) {
+  try {
+    const seen = new Set()
+    return (Array.isArray(sec && sec.settings) ? sec.settings : [])
+      .map((c) => (typeof c === 'string' ? { key: c, draw: true } : c && typeof c.key === 'string' ? { key: c.key, draw: c.draw !== false } : null))
+      .filter((c) => c && !seen.has(c.key) && seen.add(c.key))
+  } catch { return [] }
+}
+/** The section of plugin `id` that claims setting `key` (the first), while the plugin is on and its window part loaded. */
+const plClaimer = (id, key) => Plugins.sections.find((s) => s.plugin === id && plClaims(s).some((c) => c.key === key))
+/** A setting's row as Settings → Plugins draws it: its name and help above, the field the full width below, an address
+ *  list's notes under it (plain http outside the user's network, what its window part can't reach). */
+function plFieldRow(id, d) {
+  const notes = (d.notes || []).map((n) => `<span class="set-sub warn" role="note">${esc(n)}</span>`).join('')
+  return `<div class="pl-field"><b>${esc(d.label)}</b>${d.help ? `<span class="set-sub">${esc(d.help)}</span>` : ''}<div class="pl-field-ctl">${plField(id, d)}</div>${notes}</div>`
+}
+/** The settings a plugin's own section shows (`sec.settings`), as Echo's fields, from what Echo keeps (`S.plugins`):
+ *  a key that isn't one of its settings, or an address it would take in its own flow (`draw: false`), says so. */
+function plSectionFields(sec) {
+  const claims = plClaims(sec)
+  if (!claims.length) return ''
+  const p = S.plugins
+  // Not read yet: read once, again after 2 s while the app doesn't answer.
+  if (!p) { if (!S.pluginsLoading) { S.pluginsLoading = true; loadPluginsView().then(() => { S.pluginsLoading = false; if (S.plugins) render(); else setTimeout(render, 2000) }) } return '<div class="skeleton" style="padding:12px"><i></i></div>' }
+  const x = (p.installed || []).find((i) => i.id === sec.plugin)
+  if (!x) return ''
+  const rows = claims.map((c) => {
+    const d = (x.settings || []).find((s) => s.key === c.key)
+    if (!d) return `<p class="error">“${esc(c.key)}” isn't one of its settings</p>`
+    if (!c.draw && Array.isArray(d.notes)) return `<p class="error">“${esc(c.key)}” is an address: only Echo takes it, so its field is drawn here</p>${plFieldRow(x.id, d)}`
+    return c.draw ? plFieldRow(x.id, d) : ''
+  }).join('')
+  return rows ? `<div class="pl-h4">Its settings</div><div class="pl-fields sec-fields">${rows}</div>` : ''
+}
+/** A claimed setting saved: what Echo keeps is read again until it shows the change (a page action has no answer: 3 s
+ *  at most — a refused save, or a secret replaced by another, shows none), then the section claiming it now is told
+ *  (`changed(key)`; none when the plugin was switched off or reloaded meanwhile) and drawn again. */
+function plSaved(id, key) {
+  if (!plClaimer(id, key)) return
+  const view = () => { const x = ((S.plugins && S.plugins.installed) || []).find((i) => i.id === id); const d = x && (x.settings || []).find((s) => s.key === key); return JSON.stringify(d ? [d.value, d.set] : null) }
+  const was = view()
+  const look = (n) => setTimeout(() => loadPluginsView().then(() => {
+    if (view() === was && n > 0) return look(n - 1)
+    const sec = plClaimer(id, key)
+    if (sec && typeof sec.changed === 'function') { try { sec.changed(key) } catch (e) { console.error(e) } }
+    render()
+  }), 200)
+  look(15)
+}
 /** A plugin's setting being typed (not saved yet): renders wait until the box is left, so the text isn't lost. */
 const plTyping = () => { const a = document.activeElement; return !!(a && a.matches && a.matches('input[data-pl-set]') && a.value !== a.defaultValue) }
 document.addEventListener('change', (e) => {
   const t = e.target
   if (!t.matches || !t.matches('input[data-pl-set]')) return
   pluginOp('set', { id: t.dataset.plSet, key: t.dataset.key, value: t.value })
+  plSaved(t.dataset.plSet, t.dataset.key)
   if (t.type === 'password') t.value = ''
   t.defaultValue = t.value
 })
@@ -50,8 +102,9 @@ document.addEventListener('click', (e) => {
   if (c) return c.dataset.plCertTrust ? pluginOp('cert_trust', { id: c.dataset.plCertTrust, address: c.dataset.address, key: c.dataset.key }) : pluginOp('cert_forget', { id: c.dataset.plCertForget, address: c.dataset.address })
   const b = e.target.closest && e.target.closest('button[data-pl-set]')
   if (!b) return
-  if ('forget' in b.dataset) pluginOp('set', { id: b.dataset.plSet, key: b.dataset.key, value: '' })
-  else pluginOp('set', { id: b.dataset.plSet, key: b.dataset.key, value: b.dataset.val === 'true' })
+  const value = 'forget' in b.dataset ? '' : b.dataset.val === 'true'
+  pluginOp('set', { id: b.dataset.plSet, key: b.dataset.key, value })
+  plSaved(b.dataset.plSet, b.dataset.key)
 })
 /** Settings → Plugins (designed on the Workbench canvas): Installed — a row each, the chosen one on the right;
  *  Discover — categories, featured, cards, the install sheet over the page; Marketplaces — where plugins come from. */
@@ -99,10 +152,15 @@ function plDetail(p, x) {
   const open = sec && x.enabled ? `<button class="btn primary" data-pl-open="${esc(sec.id)}">Open its settings</button>` : ''
   const rm = S.plRemove === x.id ? `<div class="confirm"><span>Remove ${esc(x.name)}? Its settings and data can stay for when you install it again.</span>
     <button class="btn" data-pl-remove-cancel>Cancel</button><button class="btn" data-pl-remove="${esc(x.id)}" data-keep="1">Remove, keep data</button><button class="btn primary" style="background:var(--danger);border-color:var(--danger)" data-pl-remove="${esc(x.id)}" data-keep="0">Remove with data</button></div>` : ''
-  // Its own settings, stacked (the column is narrow): the name and its help above, the field the full width below.
-  // An address list's notes under it (plain http outside the user's network, what its window part can't reach).
-  const notes = (d) => (d.notes || []).map((n) => `<span class="set-sub warn" role="note">${esc(n)}</span>`).join('')
-  const fields = (x.settings || []).map((d) => `<div class="pl-field"><b>${esc(d.label)}</b>${d.help ? `<span class="set-sub">${esc(d.help)}</span>` : ''}<div class="pl-field-ctl">${plField(x.id, d)}</div>${notes(d)}</div>`)
+  // Its own settings, stacked (the column is narrow); those its own section shows are set there: one line each section.
+  const claimed = new Map()
+  const fields = (x.settings || []).flatMap((d) => {
+    const s = x.enabled && plClaimer(x.id, d.key)
+    if (!s) return [plFieldRow(x.id, d)]
+    claimed.set(s, [...(claimed.get(s) || []), d.label])
+    return []
+  })
+  for (const [s, labels] of claimed) fields.push(`<div class="pl-field"><b>${esc(labels.join(', '))}</b><span class="set-sub">Set in ${esc(s.label)}</span><div class="pl-field-ctl"><button class="btn" data-pl-open="${esc(s.id)}">Open</button></div></div>`)
   // Certificates of its https / wss addresses: what the user trusts, and what Echo met there and refused (Trust asks
   // again in a dialog of the system's).
   const cert = (c) => `<div class="pl-field" role="group" aria-label="Certificate of ${esc(c.address)}"><b>${esc(c.address)}</b>`
