@@ -112,12 +112,16 @@ function settingsView() {
   }).join('') : ''
   const none = q && !found.length && !mine.length ? `<p class="set-sub set-none">Nothing matches “${esc(S.setQuery.trim())}”.</p>` : ''
   setHitQ = q
-  // Its own settings (`settings`), Echo's fields, above what it draws (`settingsAt: 'bottom'`: below).
+  // Its own settings (`settings`), Echo's fields: where its HTML puts the mark, else above what it draws
+  // (`settingsAt: 'bottom'`: below).
   const ownBody = (o) => {
     let html
     try { html = o.render() } catch (e) { html = `<p class="error">${esc(o.label)}: ${esc(String((e && e.message) || e))}</p>` }
     let f
     try { f = plSectionFields(o) } catch (e) { f = `<p class="error">${esc(String((e && e.message) || e))}</p>` }
+    // Where its HTML says (`<!--echo-settings-->`, the first), else by `settingsAt`.
+    const at = typeof html === 'string' ? html.indexOf(SECTION_SETTINGS_MARK) : -1
+    if (at >= 0) return html.slice(0, at) + f + html.slice(at + SECTION_SETTINGS_MARK.length)
     return o.settingsAt === 'bottom' ? html + f : f + html
   }
   const body = own ? ownBody(own)

@@ -26,6 +26,8 @@ function plField(id, d) {
   if (d.type === 'secret') return `<input class="set-in" type="password" ${box} placeholder="${d.set ? '•••• set — type to replace' : 'not set'}" autocomplete="off">${d.set ? `<button class="btn ghost" ${at} data-forget>Forget</button>` : ''}`
   return `<input class="set-in" ${box} value="${esc(d.value == null ? '' : String(d.value))}" placeholder="${d.type === 'folder' ? '/path/to/folder' : ''}">`
 }
+/** Where a section's HTML puts Echo's fields for its settings (the first; without it, `settingsAt`). */
+const SECTION_SETTINGS_MARK = '<!--echo-settings-->'
 /** The settings a plugin's own section claims (`ctx.settings.section({settings})`): each `{key, draw}`, from a key or
  *  `{key, draw: false}` (the section takes it in its own flow; Echo draws no field for it). */
 function plClaims(sec) {

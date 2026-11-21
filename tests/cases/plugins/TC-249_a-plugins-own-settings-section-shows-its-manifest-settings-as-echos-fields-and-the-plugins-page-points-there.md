@@ -1,6 +1,6 @@
 ---
 id: TC-249
-title: A plugin's own Settings section shows the manifest settings it names as Echo's fields (an address with its notes, a secret as set or not), saves them as the Plugins page does and tells the section what changed; the Plugins page shows those settings only as "Set in <section> — Open"; a key it takes itself (draw false) has no field; an unknown key says so; switched off, the Plugins page shows the fields again
+title: A plugin's own Settings section shows the manifest settings it names as Echo's fields (an address with its notes, a secret as set or not; where its HTML marks, else above), saves them as the Plugins page does and tells the section what changed; the Plugins page shows those settings only as "Set in <section> — Open"; a key it takes itself (draw false) has no field; an unknown key says so; switched off, the Plugins page shows the fields again
 priority: high
 type: functional
 requirements: [F-PLUG-160]
@@ -52,6 +52,7 @@ $E plugin marketplace add "$M" --name acme-voice
 | 4 | Navigate to `{{base_url}}/#settings/plugins`, tab "Installed", choose "Acme voice" | Under "Its settings": the field "Voice" (value `calm`); no field "Speech server", "API key" or "Bot token"; one row "Speech server, API key, Bot token" with "Set in Acme voice" and a button "Open" |
 | 5 | Click "Open" in that row | The URL is `{{base_url}}/#settings/acme-voice:main`; the section shows its fields as in step 3 |
 | 6 | Click "Forget" beside "API key" | Within 3 s "Told: api_key,api_key"; the placeholder is "not set", no Forget button |
+| 6a | In the browser's console: `Plugins.sections.find((x) => x.id === 'acme-voice:main').render = () => '<h2>Acme voice</h2><!--echo-settings--><p id="acme-after">After</p>'`; then `render()` | The heading "Acme voice" comes first, then "Its settings" with its fields, then "After": Echo's fields where the section's HTML put `<!--echo-settings-->` |
 | 7 | Navigate to `{{base_url}}/#settings/plugins`, click the switch "Acme voice on" in the detail (off) | Settings has no "From plugins" button "Acme voice"; the detail's "Its settings" shows the fields "Speech server" (with the address), "API key", "Bot token" and "Voice", and no "Set in" row |
 
 ## Expected Final State
