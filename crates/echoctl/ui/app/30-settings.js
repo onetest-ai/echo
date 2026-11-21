@@ -112,7 +112,14 @@ function settingsView() {
   }).join('') : ''
   const none = q && !found.length && !mine.length ? `<p class="set-sub set-none">Nothing matches “${esc(S.setQuery.trim())}”.</p>` : ''
   setHitQ = q
-  const body = own ? (() => { try { return own.render() } catch (e) { return `<p class="error">${esc(own.label)}: ${esc(String((e && e.message) || e))}</p>` } })()
+  // Its own settings (`settings`), Echo's fields, above what it draws (`settingsAt: 'bottom'`: below).
+  const ownBody = (o) => {
+    let html
+    try { html = o.render() } catch (e) { html = `<p class="error">${esc(o.label)}: ${esc(String((e && e.message) || e))}</p>` }
+    const f = plSectionFields(o)
+    return o.settingsAt === 'bottom' ? html + f : f + html
+  }
+  const body = own ? ownBody(own)
     : !st ? `<div class="skeleton" style="padding:20px">${'<i></i>'.repeat(6)}</div>`
     : st.config_error ? `<p class="error">Echo's settings (config.json) can't be read: ${esc(st.config_error)}</p>`
     // A section that fails says so in its place; the rest of the window keeps working.

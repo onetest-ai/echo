@@ -1282,6 +1282,17 @@ Evidence: `jshost::work::check_rows`
   unloaded is refused), `graph`, `newGraph`, `sheet(html, opts)`, `closeSheet()`). Echo takes out what a plugin added when
   it unloads, and runs its `onUnload` cleanups first (one that throws is logged, the rest still run). Evidence:
   `pluginCtx`, `loadPluginClients`, `pluginStylesheetHref`, `unloadPlugin` (window script)
+- A Settings section of its own: `ctx.settings.section({id, label, icon, render, badge, settings, settingsAt, changed})`
+  — under "From plugins", its hash `settings/<plugin>:<id>` (`id` `main` when left out). `settings`: its manifest
+  settings the section shows, in that order, as Echo's fields under "Its settings" — above what `render()` gives, below
+  with `settingsAt: 'bottom'` — each the Plugins page's field (`plFieldRow`: an address list with its notes, a secret
+  only as set or not with type-to-replace and Forget, a bool a switch), saved as there (`plugin_op` `set`); an entry is
+  a key or `{key, draw: false}` (a setting it takes in its own flow, by `ctx.settings.set`: no field; an address list
+  is drawn anyway, with the line "“x” is an address: only Echo takes it, so its field is drawn here"); a key that isn't
+  one of its settings shows "“x” isn't one of its settings". After a save of one of them the section is drawn again
+  and `changed(key)` is called once Echo's settings, read again, show the change (3 s at most). On Settings → Plugins → the plugin, a setting a section claims is
+  not drawn while the plugin is on: one row per section, its labels, "Set in <label>" and Open. Evidence:
+  `plSectionFields`, `plClaimer`, `plSaved` (window script)
 - `ctx.echo.routines` (manifest `uses.echo.jobs`): Echo's jobs in the routines' one shape (§ Routines).
 - `ctx.echo.routines.offer(ids?)` (no capability: its routines are on its sheet already): Echo's sheet of the plugin's own
   routines over the window, in a plugin sheet's frame — those `ids` name (its manifest's routine ids, shown in its
