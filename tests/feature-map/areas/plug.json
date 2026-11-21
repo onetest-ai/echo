@@ -1058,7 +1058,7 @@
   },
   {
    "id": "F-PLUG-160",
-   "feature": "A plugin's own Settings section (`ctx.settings.section({settings, settingsAt, changed})`) shows the manifest settings it names as Echo's fields, where its HTML has `<!--echo-settings-->`, else above what it draws (`settingsAt: 'bottom'` below): the Plugins page's fields — an address list with its notes, a secret only as set or not (type to replace, Forget), a switch — saved as there, the section drawn again and told the key (`changed(key)`); `{key, draw: false}` claims a setting the section takes in its own flow, with no field (an address is drawn anyway, with an error line); a key that isn't one of its settings says so. On Settings → Plugins the claimed settings are one row, \"Set in <section>\" with Open; switched off, its fields are there again",
+   "feature": "A plugin's own Settings section (`ctx.settings.section({settings, settingsAt, changed})`) shows the manifest settings it names as Echo's fields, where its HTML has `<!--echo-settings-->`, else above what it draws (`settingsAt: 'bottom'` below): the Plugins page's fields — an address list with its notes, a secret only as set or not (type to replace, Forget), a switch — saved as there, the section drawn again and told the key (`changed(key)`); `{key, draw: false}` claims a setting the section takes in its own flow, with no field (an address is drawn anyway, with an error line); a key that isn't one of its settings says so. On Settings → Plugins the claimed settings are one row, \"Set in <section>\" with Open; switched off, its fields are there again; a plugin's setting is saved from Echo's fields only on the user's own typing or click (a script's event saves nothing)",
    "priority": "high",
    "check": "agent",
    "axes": [
