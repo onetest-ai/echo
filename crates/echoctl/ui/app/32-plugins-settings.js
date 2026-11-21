@@ -81,9 +81,11 @@ function plSaved(id, key) {
 }
 /** A plugin's setting being typed (not saved yet): renders wait until the box is left, so the text isn't lost. */
 const plTyping = () => { const a = document.activeElement; return !!(a && a.matches && a.matches('input[data-pl-set]') && a.value !== a.defaultValue) }
+// A plugin's setting is saved only on the user's own typing or click (`isTrusted`): a plugin's markup or script runs in
+// this realm, and an event it raises saves nothing, as for routines.
 document.addEventListener('change', (e) => {
   const t = e.target
-  if (!t.matches || !t.matches('input[data-pl-set]')) return
+  if (!e.isTrusted || !t.matches || !t.matches('input[data-pl-set]')) return
   pluginOp('set', { id: t.dataset.plSet, key: t.dataset.key, value: t.value })
   plSaved(t.dataset.plSet, t.dataset.key)
   if (t.type === 'password') t.value = ''
@@ -103,7 +105,7 @@ document.addEventListener('click', (e) => {
   const c = e.target.closest && e.target.closest('button[data-pl-cert-trust], button[data-pl-cert-forget]')
   if (c) return c.dataset.plCertTrust ? pluginOp('cert_trust', { id: c.dataset.plCertTrust, address: c.dataset.address, key: c.dataset.key }) : pluginOp('cert_forget', { id: c.dataset.plCertForget, address: c.dataset.address })
   const b = e.target.closest && e.target.closest('button[data-pl-set]')
-  if (!b) return
+  if (!b || !e.isTrusted) return
   const value = 'forget' in b.dataset ? '' : b.dataset.val === 'true'
   pluginOp('set', { id: b.dataset.plSet, key: b.dataset.key, value })
   plSaved(b.dataset.plSet, b.dataset.key)

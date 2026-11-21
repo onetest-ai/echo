@@ -1294,6 +1294,11 @@ Evidence: `jshost::work::check_rows`
   and `changed(key)` is called on the section claiming it then once Echo's settings, read again, show the change, or after 3 s (a refused save or a secret replaced by another shows none; not when the plugin was switched off or reloaded meanwhile); a key listed twice counts once. On Settings → Plugins → the plugin, a setting a section claims is
   not drawn while the plugin is on and its window part has loaded (registered the section): one row per section, its labels, "Set in <label>" and Open. Evidence:
   `plSectionFields`, `plClaimer`, `plSaved` (window script)
+- A plugin's setting is saved from Echo's fields (in its section or on Settings → Plugins) only on the user's own
+  typing or click (`isTrusted`): a `change` or `click` a plugin's markup or script raises on those fields saves
+  nothing, as for its routines' switches. It covers those events only: a window half runs in the page with the user's
+  rights (its sheet's line), and Echo's page actions can't tell it from the page. Evidence: the `data-pl-set`
+  listeners (window script)
 - `ctx.echo.routines` (manifest `uses.echo.jobs`): Echo's jobs in the routines' one shape (§ Routines).
 - `ctx.echo.routines.offer(ids?)` (no capability: its routines are on its sheet already): Echo's sheet of the plugin's own
   routines over the window, in a plugin sheet's frame — those `ids` name (its manifest's routine ids, shown in its
