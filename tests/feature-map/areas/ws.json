@@ -90,7 +90,7 @@
   },
   {
    "id": "F-WS-10",
-   "feature": "Every select in the window opens Echo's menu, not the system's list: a row a name with a line under it (a profile: its model and what it is; in the Claude panel 'a session to resume'), the chosen one checked; on its field as the Mac's own (the chosen row right over it, its text on the field's; moved and its list shortened only as far as the window needs), following it as the page scrolls; arrows, Home/End, typing a name's first letters, Enter or Space to pick, Escape or a click outside to close; a pick changes the setting as the select did and the focus stays on the field. A closed select is a quiet field with Echo's caret",
+   "feature": "Every select in the window opens Echo's menu, not the system's list: a row a name with a line under it (a profile: its model and what it is; in the Claude panel 'a session to resume'), the chosen one checked; on its field as the Mac's own (the chosen row right over it, its text on the field's; moved and its list shortened only as far as the window needs), following it as the page scrolls (a chip in a bar, as the account chip: below it instead); an action row at a menu's foot opens its place and changes nothing; arrows, Home/End, typing a name's first letters, Enter or Space to pick, Escape or a click outside to close; a pick changes the setting as the select did and the focus stays on the field. A closed select is a quiet field with Echo's caret. A people field's list: each name whole, what Echo knows of the person beside it, cut short with its whole text in the tooltip",
    "priority": "medium",
    "check": "agent",
    "axes": []

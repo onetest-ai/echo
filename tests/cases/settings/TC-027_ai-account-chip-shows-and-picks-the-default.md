@@ -37,7 +37,7 @@ auto: [tests/auto/specs/S-12.spec.mjs]
 | 2 | Read the chip's tooltip (`title`) | It names "Claude Code (as configured)" and "as Claude Code is set up" |
 | 3 | Click the chip | The Claude session opens in its panel (the bottom panel's tab "Claude" selected), as the status bar's Claude does; the page stays on Today (the profile itself is in Settings → AI & minutes) |
 | 4 | In Bash run `echoctl ai add-local local-llama --model llama3.2 --url http://127.0.0.1:9 --name "Local Llama"` | Prints `added Local Llama (local-llama)` |
-| 5 | Reload `{{base_url}}/#today` and wait for "Your day"; read the chip | It reads "Claude Code (as configured)" with a caret; `select[aria-label="AI profile"]` holds two options, "Claude Code (as configured)" (selected) and "Local Llama" |
+| 5 | Reload `{{base_url}}/#today` and wait for "Your day"; read the chip | It reads "Claude Code (as configured)" with a caret; `select[aria-label="AI profile"]` holds three options: "Claude Code (as configured)" (selected), "Local Llama" and "Manage profiles…" |
 | 6 | Read the Record pill (`#r-top .pill`) | The button "Record next call", the select "Language of the call" and the button "Memo"; `#r-top .pill select` finds exactly one select (no profile segment) |
 | 7 | Select "Local Llama" in "AI profile" (`browser_select_option`) | The chip reads "Local Llama" |
 | 8 | Wait 1 s, run `. <dir>/env && cat "$ECHOCTL_CONFIG_DIR/ai.json"` | The file has `"default": "local-llama"` |

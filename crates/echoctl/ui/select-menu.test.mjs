@@ -7,7 +7,7 @@ const src = appSource()
 const start = src.indexOf('// ── select menu\n')
 const end = src.indexOf('// end of the select menu block', start)
 assert.ok(start >= 0 && end > start, 'the select menu block not found in app.js')
-const { selectItems, selectStep, selectEnd, selectFind, selectPlace } = new Function(`${src.slice(start, end)}\nreturn { selectItems, selectStep, selectEnd, selectFind, selectPlace }`)()
+const { selectItems, selectStep, selectEnd, selectFind, selectPlace, selectDrop } = new Function(`${src.slice(start, end)}\nreturn { selectItems, selectStep, selectEnd, selectFind, selectPlace, selectDrop }`)()
 
 const rows = selectItems([
   { group: 'Claude' },
@@ -60,4 +60,22 @@ assert.equal(selectPlace({ left: 900, top: 100, height: 28, width: 90 }, { width
 const tall = selectPlace({ left: 10, top: 100, height: 28, width: 90 }, { width: 200, height: 2000, rowTop: 0, rowHeight: 16, inset: 0 }, view)
 assert.equal(tall.top, 100 + 14 - 8, 'the chosen row on the field')
 assert.equal(tall.maxHeight, 800 - 8 - 106, 'down to the view\'s bottom, scrolling')
+
+// An action at the foot (`data-go`): reached by the arrows, never the chosen one.
+const acts = selectItems([{ value: 'a', label: 'Acme work', sub: 'opus · dana@acme.example', selected: true }, { value: 'b', label: 'Local' }, { value: '', label: 'Manage profiles…', go: 'settings/ai' }])
+assert.deepEqual(acts.map((r) => r.kind), ['item', 'item', 'go'])
+assert.equal(acts[2].go, 'settings/ai')
+assert.equal(acts[2].selected, false)
+assert.equal(selectStep(acts, 1, 1), 2, 'the arrows reach the action')
+assert.equal(selectStep(acts, 2, 1), 0, 'and wrap past it')
+
+// A chip's menu (`data-drop`): under the chip, never on it.
+const chip = { left: 820, top: 10, height: 24, width: 150 }
+const drop = selectDrop(chip, { width: 300, height: 140 }, view)
+assert.equal(drop.top, 10 + 24 + 4, 'under the chip')
+assert.equal(drop.left, 820 + 150 - 300, 'near the right edge: its right edge on the chip\'s')
+assert.equal(drop.scroll, 0)
+assert.equal(selectDrop({ left: 100, top: 10, height: 24, width: 150 }, { width: 300, height: 140 }, view).left, 100, 'room to the right: from the chip\'s left')
+assert.equal(selectDrop({ left: 2, top: 10, height: 24, width: 20 }, { width: 300, height: 140 }, { width: 200, height: 800 }).left, 8, 'never past the left edge')
+assert.equal(selectDrop(chip, { width: 300, height: 2000 }, view).maxHeight, 800 - 8 - 38, 'to the view\'s bottom, scrolling')
 console.log('select-menu: ok')
