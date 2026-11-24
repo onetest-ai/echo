@@ -14,7 +14,8 @@
 //! Anything else is refused (exit 2, the reason on stderr), and so is anything it can't judge.
 //! Claude Code runs the hook before every tool call, also one no permission is needed for, and a
 //! refusal wins over any other hook or rule (code.claude.com/docs/en/hooks); `"onFailure":
-//! "block"` refuses a call whose guard didn't run (Claude Code ≥ 2.1.295, `MIN_CLAUDE`). The
+//! "block"` refuses a call whose guard didn't run (Claude Code ≥ 2.1.295, `MIN_CLAUDE`: an older one runs, and the
+//! user is told, `old_claude`). The
 //! run's call, its previous minutes and the CLI's names come only from the environment Echo set
 //! for the run, never from the tool call (a settings `env` could set them too: only the user's or
 //! an admin's, which the run can't write). Measured with Claude Code 2.1.310: a `cat` of another call that an
@@ -61,8 +62,10 @@ pub const BRAIN_TOOLS: &str = "mcp__echo__";
 /// The ledger steps a sync run may take (`echoctl project ledger <id> <step>`): its proposals and its items marked done.
 /// What it reads Echo gives it in its prompt (`projectsync`); the verifier runs with no tools.
 pub const PROJECT_STEPS: [&str; 3] = ["apply", "done", "people-apply"];
-/// The oldest Claude Code whose hooks block when they fail (`onFailure`).
+/// The oldest Claude Code whose hooks block when they fail (`onFailure`). An older one still runs: the user is told.
 pub const MIN_CLAUDE: [u32; 3] = [2, 1, 295];
+/// The oldest Claude Code that starts in Manual mode, never one that may allow more, when auto mode isn't available.
+pub const AUTO_SAFE_CLAUDE: [u32; 3] = [2, 1, 323];
 
 /// What a run may touch.
 #[derive(Debug)]
@@ -168,10 +171,46 @@ pub fn checked(value: &str, deny_all: bool, hold: std::time::Duration) -> Result
     }
 }
 
-/// Is `version` (Claude Code's `claude_code_version`, "2.1.310") at least `MIN_CLAUDE`?
-pub fn new_enough(version: &str) -> bool {
+/// Claude Code's version ("2.1.310", "2.1.310 (Claude Code)") as numbers; None when it isn't one.
+fn version_of(version: &str) -> Option<[u32; 3]> {
     let parts: Vec<u32> = version.split(['.', '-', ' ']).take(3).map_while(|p| p.parse().ok()).collect();
-    parts.len() == 3 && parts.as_slice() >= MIN_CLAUDE.as_slice()
+    parts.try_into().ok()
+}
+
+/// What Echo's runs lack on Claude Code `version`, in the user's words with the version to update to; None when it is
+/// new enough, or not a version. Never a reason to stop a run: it runs, and the user is told.
+pub fn old_claude(version: &str) -> Option<String> {
+    let v = version_of(version)?;
+    let lacks = if v < MIN_CLAUDE {
+        "Echo's guard can't stop a tool call when the guard itself fails, and auto mode may start with more permissions when it isn't available"
+    } else if v < AUTO_SAFE_CLAUDE {
+        "auto mode may start with more permissions when it isn't available"
+    } else {
+        return None;
+    };
+    let ([a, b, c], [x, y, z]) = (v, AUTO_SAFE_CLAUDE);
+    Some(format!("Claude Code {a}.{b}.{c} is older than Echo asks for: {lacks} — update it to {x}.{y}.{z} or later"))
+}
+
+/// The Claude Code version a profile's last run started (`<state>/claude-versions/<profile>`), one file each: written
+/// whole by whichever process ran it, read by Needs you.
+fn seen_file(profile: &str) -> Option<PathBuf> {
+    let ok = !profile.is_empty() && profile.len() <= 64 && profile.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_');
+    ok.then(|| crate::paths::state_dir().join("claude-versions").join(profile))
+}
+
+/// A run on `profile` started Claude Code `version` (its `system/init`): kept for Needs you.
+pub fn saw_claude(profile: &str, version: &str) {
+    if let (Some(f), Some(_)) = (seen_file(profile), version_of(version)) {
+        if claude_seen(profile).as_deref() != Some(version) {
+            let _ = std::fs::create_dir_all(f.parent().unwrap_or(&f)).and_then(|()| crate::paths::write_atomic(&f, version.as_bytes()));
+        }
+    }
+}
+
+/// The Claude Code version `profile`'s last run started, if one did.
+pub fn claude_seen(profile: &str) -> Option<String> {
+    seen_file(profile).and_then(|f| std::fs::read_to_string(f).ok()).map(|v| v.trim().to_string()).filter(|v| !v.is_empty())
 }
 
 /// The session's own saved tool output (`<transcript without .jsonl>/tool-results`), named by Claude Code's hook
@@ -859,8 +898,15 @@ mod tests {
 
     #[test]
     fn versions_and_the_hook_command() {
-        assert!(new_enough("2.1.295") && new_enough("2.1.310") && new_enough("2.2.0") && new_enough("3.0.0 (Claude Code)"));
-        assert!(!new_enough("2.1.294") && !new_enough("1.9.999") && !new_enough("") && !new_enough("2.1"));
+        // An older Claude Code is never refused: the user is told what it lacks and what to update to.
+        let old = old_claude("2.1.281 (Claude Code)").unwrap();
+        assert!(old.starts_with("Claude Code 2.1.281 is older than Echo asks for") && old.contains("guard can't stop a tool call") && old.contains("auto mode") && old.ends_with("update it to 2.1.323 or later"), "{old}");
+        let auto = old_claude("2.1.295").unwrap();
+        assert!(!auto.contains("guard") && auto.contains("auto mode may start with more permissions"), "{auto}");
+        assert!(old_claude("2.1.322").is_some());
+        for fine in ["2.1.323", "2.1.331 (Claude Code)", "2.2.0", "3.0.0", "", "2.1", "Python 3.12"] {
+            assert_eq!(old_claude(fine), None, "{fine}");
+        }
         let s = settings(Path::new("/Apps/Echo's.app/echoctl"), "/data/calls");
         assert_eq!(s["hooks"]["PreToolUse"][0]["matcher"], "*", "every tool");
         let hook = &s["hooks"]["PreToolUse"][0]["hooks"][0];

@@ -33,6 +33,8 @@ test('the form says each step: checking, found where with what version, refused 
   assert.equal(wrapperState({ busy: true }).kind, 'busy')
   const ok = wrapperState({ checked: true, command: 'acme-claude', path: '/opt/acme/bin/acme-claude', version: '2.1.400 (Claude Code)' })
   assert.deepEqual([ok.kind, ok.text, ok.command], ['ok', 'Found /opt/acme/bin/acme-claude — 2.1.400 (Claude Code)', 'acme-claude'])
+  const old = wrapperState({ checked: true, command: 'acme-old', path: '/opt/acme/bin/acme-old', version: '2.1.281', warning: 'Claude Code 2.1.281 is older than Echo asks for: … — update it to 2.1.323 or later' })
+  assert.deepEqual([old.kind, old.text], ['ok', 'Found /opt/acme/bin/acme-old — 2.1.281. Claude Code 2.1.281 is older than Echo asks for: … — update it to 2.1.323 or later'], 'an older Claude Code can be added: the form says what it lacks')
   assert.deepEqual(wrapperState({ error: "/x/node doesn't answer --version as Claude Code does" }), { kind: 'error', text: "/x/node doesn't answer --version as Claude Code does" })
   assert.equal(wrapperState({ added: true, name: 'Acme Claude' }).text, 'Added Acme Claude')
   assert.equal(wrapperState({ added: true, name: 'Acme Claude', path: '/opt/acme/bin/acme-claude' }).text, 'Added Acme Claude — it starts /opt/acme/bin/acme-claude')

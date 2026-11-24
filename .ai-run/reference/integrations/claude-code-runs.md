@@ -118,7 +118,7 @@ routing-policy check.
   (`ai::wrapper::proof_settings`): a `SessionStart` hook `echoctl proof hello <value>` and a `PreToolUse` gate
   `echoctl proof gate <value>` (`--deny-all` when Echo set no tools and no MCP server). `<value>`: 32 random hex digits
   per run. The prompt is sent once the hook's answer with that value is seen; the run's `system/init` is checked by
-  `ai::wrapper_ready` with `ai::wrapper::Expected` (a Claude Code `guard::new_enough`, the permission mode Echo set — `bypassPermissions` with
+  `ai::wrapper_ready` with `ai::wrapper::Expected` (the permission mode Echo set — `bypassPermissions` with
   `--dangerously-skip-permissions`, else `--permission-mode` (`auto` for a session on Auto); none set: anything but `bypassPermissions`; not checked
   when the run has no tool and no MCP server — no built-in tool beyond Echo's
   `--tools`, and with `--strict-mcp-config` no MCP server or tool beyond Echo's `--mcp-config`), then marked

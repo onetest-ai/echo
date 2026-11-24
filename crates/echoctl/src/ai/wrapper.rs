@@ -231,16 +231,12 @@ pub fn claude_version(path: &Path) -> Result<String> {
     let mut child = super::claude_command(&p, &["--version".into()], &paths::home(), false).map_err(|e| anyhow!("{} can't be started: {e:#}", path.display()))?;
     let (out, ..) = wait_output(&mut child, Duration::from_secs(20), &|| false).with_context(|| format!("asking {} its version", path.display()))?;
     let v = version_line(&out).ok_or_else(|| anyhow!("{} doesn't answer --version as Claude Code does", path.display()))?;
-    if !v.contains("(Claude Code") && !crate::guard::new_enough(&v) {
-        let [a, b, c] = crate::guard::MIN_CLAUDE;
-        bail!("{} starts Claude Code {v} — Echo's guard needs {a}.{b}.{c} or later", path.display());
-    }
     Ok(v)
 }
 
 /// The line of a `--version` answer that names Claude Code, or a bare version of Claude Code's 2.x as its last line
 /// ("2.1.325": a wrapper passing on the Claude Code it starts, after what a login shell's startup files printed). A line
-/// naming another program never, nor another program's bare version ("10.9.2"). How new it is: `guard::new_enough`.
+/// naming another program never, nor another program's bare version ("10.9.2"). What an older one lacks: `guard::old_claude`.
 pub(crate) fn version_line(out: &str) -> Option<String> {
     let mut lines = out.lines().map(str::trim).filter(|l| !l.is_empty());
     if let Some(l) = lines.clone().find(|l| l.contains("(Claude Code")) {
@@ -434,11 +430,6 @@ impl Expected {
 
     /// The start event (`system/init`) checked against it, or why it doesn't match.
     pub fn check(&self, init: &Value) -> Result<(), String> {
-        let v = init["claude_code_version"].as_str().unwrap_or("");
-        if !crate::guard::new_enough(v) {
-            let [a, b, c] = crate::guard::MIN_CLAUDE;
-            return Err(format!("it started Claude Code {} — Echo's guard needs {a}.{b}.{c} or later", if v.is_empty() { "of unknown version" } else { v }));
-        }
         // A run with no tools refuses every call at the gate: its mode doesn't matter.
         let mode = init["permissionMode"].as_str().unwrap_or("");
         match &self.mode {
@@ -823,8 +814,7 @@ mod tests {
         let exp = Expected::of(&args(&["-p", "x", "--tools", "Bash,Read,Skill", "--strict-mcp-config", "--permission-mode", "dontAsk"]));
         assert_eq!(exp, Expected { mode: Some("dontAsk".into()), tools: Some(args(&["Bash", "Read", "Skill"])), mcp: Some(vec![]) });
         assert!(exp.check(&init("2.1.400", "dontAsk", &["Bash", "Read"], &[])).is_ok(), "fewer tools are fine");
-        assert!(exp.check(&init("2.1.200", "dontAsk", &["Bash"], &[])).unwrap_err().contains("2.1.200"), "too old for the guard");
-        assert!(exp.check(&init("", "dontAsk", &["Bash"], &[])).unwrap_err().contains("unknown version"));
+        assert!(exp.check(&init("2.1.200", "dontAsk", &["Bash"], &[])).is_ok(), "an older Claude Code runs: the user is told elsewhere");
         assert!(exp.check(&init("2.1.400", "bypassPermissions", &["Bash"], &[])).unwrap_err().contains("bypassPermissions"));
         assert!(exp.check(&init("2.1.400", "dontAsk", &["Bash", "Write"], &[])).unwrap_err().contains("Write"));
         assert!(exp.check(&init("2.1.400", "dontAsk", &["Bash"], &["acme-audit"])).unwrap_err().contains("acme-audit"));

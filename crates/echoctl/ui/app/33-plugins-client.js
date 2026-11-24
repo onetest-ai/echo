@@ -710,7 +710,7 @@ function wrapperState(w) {
   if (!w) return null
   if (w.busy) return { kind: 'busy', text: 'Checking it — where your shell finds it, then its version…' }
   if (w.error) return { kind: 'error', text: w.error }
-  if (w.checked) return { kind: 'ok', text: `Found ${w.path} — ${w.version}`, path: w.path, version: w.version, command: w.command }
+  if (w.checked) return { kind: 'ok', text: `Found ${w.path} — ${w.version}${w.warning ? `. ${w.warning}` : ''}`, path: w.path, version: w.version, command: w.command }
   if (w.added) return { kind: 'done', text: w.path ? `Added ${w.name} — it starts ${w.path}` : `Added ${w.name}` }
   if (w.updated) return { kind: 'done', text: `It now starts ${w.path}` }
   return null

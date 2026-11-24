@@ -336,7 +336,8 @@ pub(super) fn handle(v: &Value) -> Option<Handled> {
             let command = v["command"].as_str().unwrap_or("").to_string();
             wrapper_job(move || {
                 let (path, version) = crate::ai::wrapper::admit(&command)?;
-                Ok(json!({ "checked": true, "command": command, "path": path, "version": version }))
+                let warning = crate::guard::old_claude(&version);
+                Ok(json!({ "checked": true, "command": command, "path": path, "version": version, "warning": warning }))
             })
         }
         "wrapper_add" => {

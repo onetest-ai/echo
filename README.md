@@ -139,7 +139,7 @@ Each AI profile has its own minutes model (`sonnet` by default; a local profile,
 added with, or its live model when that is cleared). Change the one new calls use under menu → AI for calls → **Minutes model for …**, or any
 profile's with `echoctl ai set <profile> --notes-model <name>`: `opus`, `haiku`, a full model
 name, or, for the built-in profile, `default` to use whatever your Claude Code is set up with
-(local models, a gateway, Bedrock or Vertex). Minutes runs need Claude Code 2.1.295 or later. During a
+(local models, a gateway, Bedrock or Vertex). Claude Code 2.1.323 or later is recommended: an older one still writes minutes, and Echo shows what it lacks. During a
 call, Echo's window shows the transcript as it happens, and the Notes tab (or menu → **Add a
 note…**) takes your own notes.
 

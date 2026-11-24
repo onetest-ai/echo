@@ -23,7 +23,7 @@ cases:
   - tests/cases/privacy/TC-007_no-send-without-yes.md
   - tests/cases/claude/TC-024_a-claude-profile-signs-in-from-the-window-and-the-terminal-and-another-account-asks-use.md
   - tests/cases/claude/TC-025_admin-policy-that-could-route-claude-code-refuses-the-runs-it-would-affect.md
-  - tests/cases/claude/TC-026_a-run-is-refused-when-admin-policy-can-switch-hooks-off-or-claude-code-is-too-old.md
+  - tests/cases/claude/TC-026_a-run-is-refused-when-admin-policy-can-switch-hooks-off-and-an-older-claude-code-is-warned-about.md
   - tests/cases/claude/TC-027_the-claude-panel-runs-the-echo-folder-session-and-restart-and-new-conversation-ask-first.md
   - tests/cases/claude/TC-028_the-status-line-in-a-claude-code-session-shows-echo-recording-armed-next-and-toasts-failures.md
   - tests/cases/claude/TC-029_a-policy-file-echo-cant-read-asks-instead-of-only-refusing.md
@@ -90,7 +90,7 @@ Done once, before stage 1, timed as the stage `prelude`. Every Bash call starts 
 | 13 | `privacy/TC-007_no-send-without-yes.md` | — | **person** |
 | 14 | `claude/TC-024_a-claude-profile-signs-in-from-the-window-and-the-terminal-and-another-account-asks-use.md` | — | — |
 | 15 | `claude/TC-025_admin-policy-that-could-route-claude-code-refuses-the-runs-it-would-affect.md` | — | — |
-| 16 | `claude/TC-026_a-run-is-refused-when-admin-policy-can-switch-hooks-off-or-claude-code-is-too-old.md` | — | — |
+| 16 | `claude/TC-026_a-run-is-refused-when-admin-policy-can-switch-hooks-off-and-an-older-claude-code-is-warned-about.md` | — | — |
 | 17 | `claude/TC-027_the-claude-panel-runs-the-echo-folder-session-and-restart-and-new-conversation-ask-first.md` | — | — |
 | 18 | `claude/TC-028_the-status-line-in-a-claude-code-session-shows-echo-recording-armed-next-and-toasts-failures.md` | — | — |
 | 19 | `claude/TC-029_a-policy-file-echo-cant-read-asks-instead-of-only-refusing.md` | — | — |

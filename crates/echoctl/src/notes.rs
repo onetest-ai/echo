@@ -1026,7 +1026,7 @@ fn run_in_place(dir: &Path, place: &mut Option<crate::app::FileLock>, mut r: Run
     let _ = writeln!(log, "          hooks:  allowed by the Claude Code policy in {}", checked.iter().map(|f| f.display().to_string()).collect::<Vec<_>>().join(", "));
 
     let (intent, job_run) = (if r.auto { Intent::Auto } else { Intent::Explicit }, crate::jobs::begin("minutes"));
-    let mut child = match crate::ai::without_policy(&let_go, || crate::ai::guard_ready(profile, &cwd, "write minutes").and_then(|()| admit_child(|| {
+    let mut child = match crate::ai::without_policy(&let_go, || admit_child(|| {
         let a = args(dir, &plugin, model.as_deref(), intent, &run_id, previous.as_deref(), &settings.0);
         let mut c = crate::ai::prepare_claude(profile, &a, &cwd, false)?;
         c.env(calls::RUN_ID, &run_id).env(crate::guard::RUN_CALL, dir).env(crate::guard::RUN_CLIS, run_clis(&plugin).join("\n"));
@@ -1034,7 +1034,7 @@ fn run_in_place(dir: &Path, place: &mut Option<crate::app::FileLock>, mut r: Run
             c.env(crate::guard::RUN_PREVIOUS, p);
         }
         Ok(c.spawn()?)
-    }))) {
+    })) {
         Ok(c) => c,
         Err(e) => {
             let msg = format!("couldn't start Claude Code: {e:#}");
@@ -1079,7 +1079,6 @@ fn run_in_place(dir: &Path, place: &mut Option<crate::app::FileLock>, mut r: Run
     let mut result: Option<Value> = None;
     let mut answered = false;
     let mut seen = String::new(); // non-JSON output, for the sign-in check
-    let mut stopped: Option<String> = None; // stopped by Echo before it began: why
     if let Some(out) = child.stdout.take() {
         for line in BufReader::new(out).lines().map_while(Result::ok) {
             match serde_json::from_str::<Value>(&line) {
@@ -1087,16 +1086,11 @@ fn run_in_place(dir: &Path, place: &mut Option<crate::app::FileLock>, mut r: Run
                     if ev["type"] == "system" && ev["subtype"] == "init" {
                         r.session_id = ev["session_id"].as_str().map(str::to_owned);
                         save(dir, &r);
-                        // The guard must block when it fails (`onFailure`): an older Claude Code is
-                        // stopped before its model's first turn.
+                        // An older Claude Code runs; the user is told what it lacks (its log, Needs you).
                         let v = ev["claude_code_version"].as_str().unwrap_or("");
-                        if stopped.is_none() && !crate::guard::new_enough(v) {
-                            let [a, b, c] = crate::guard::MIN_CLAUDE;
-                            stopped = Some(format!(
-                                "Claude Code {} is too old to write minutes — update it (`claude update`) to {a}.{b}.{c} or later",
-                                if v.is_empty() { "(of unknown version)" } else { v }
-                            ));
-                            kill(pid);
+                        crate::guard::saw_claude(&profile.id, v);
+                        if let Some(w) = crate::guard::old_claude(v) {
+                            let _ = writeln!(log, "{}  {w}", stamp());
                         }
                     }
                     crate::run_log::write(&mut log, &ev);
@@ -1145,7 +1139,7 @@ fn run_in_place(dir: &Path, place: &mut Option<crate::app::FileLock>, mut r: Run
         job_run.done(None);
         return Ok(dir.to_path_buf());
     }
-    let applied = if stopped.is_none() && !is_error && wrote_notes { finish_actions(dir, &run_id, started_wall, &mut log) } else { Ok(false) };
+    let applied = if !is_error && wrote_notes { finish_actions(dir, &run_id, started_wall, &mut log) } else { Ok(false) };
     let wrote_actions = matches!(applied, Ok(true));
     let ended = Ended {
         wrote_notes,
@@ -1159,7 +1153,6 @@ fn run_in_place(dir: &Path, place: &mut Option<crate::app::FileLock>, mut r: Run
         refused: &refused,
         exit: status_code.and_then(|s| s.code()),
         actions_error: applied.as_ref().err().map(String::as_str),
-        stopped: stopped.as_deref(),
     };
     conclude(&mut r, profile, &ended, &label, &cfg.notes_model_label());
     job_run.minutes(result.as_ref(), model.as_deref(), &r.state);
@@ -1301,8 +1294,6 @@ struct Ended<'a> {
     exit: Option<i32>,
     /// Why the action list the run left couldn't be applied (`finish_actions`).
     actions_error: Option<&'a str>,
-    /// Echo stopped it before it began, and why (an old Claude Code).
-    stopped: Option<&'a str>,
 }
 
 /// The run's final state and message. A `claude` profile's sign-in is marked refused when a failed
@@ -1310,9 +1301,7 @@ struct Ended<'a> {
 fn conclude(r: &mut Run, profile: &crate::ai::Profile, e: &Ended, label: &str, notes_model_label: &str) {
     use crate::ai::Kind;
     let all = format!("{}\n{}\n{}", e.seen, e.err_text, e.result_text);
-    let (state, message) = if let Some(why) = e.stopped {
-        ("failed", Some(why.to_string()))
-    } else if e.wrote_notes && e.wrote_actions && !e.is_error {
+    let (state, message) = if e.wrote_notes && e.wrote_actions && !e.is_error {
         crate::ai::job_worked(&profile.id);
         ("done", None)
     } else if e.wrote_notes && !e.is_error {
@@ -1877,7 +1866,7 @@ mod tests {
         use crate::ai::Kind;
         let (_env, _root) = crate::paths::testenv::folders("notes-conclude");
         let profile = |kind| crate::ai::Profile { id: "judged".into(), name: "J".into(), kind, base_url: None, token: None, live_model: None, notes_model: None, account: None, email: None, sso: false, models: Default::default(), wrapper: None };
-        let ended = |wrote_notes, is_error, result_text| Ended { wrote_notes, wrote_actions: wrote_notes, is_error, answered: false, result_text, err_text: "", seen: "", timed_out: false, refused: &[], exit: Some(1), actions_error: None, stopped: None };
+        let ended = |wrote_notes, is_error, result_text| Ended { wrote_notes, wrote_actions: wrote_notes, is_error, answered: false, result_text, err_text: "", seen: "", timed_out: false, refused: &[], exit: Some(1), actions_error: None };
         let judge = |kind, e: &Ended| {
             let mut r = Run::default();
             conclude(&mut r, &profile(kind), e, "J · m", "sonnet");
@@ -1915,7 +1904,7 @@ mod tests {
         let warn = "[claude-code:unrecognized_model] {\"model\":\"test-model:8b\"}";
         let p = crate::ai::Profile { id: "l".into(), name: "L".into(), kind: Kind::Local, base_url: None, token: None, live_model: None, notes_model: None, account: None, email: None, sso: false, models: Default::default(), wrapper: None };
         let judge = |answered, result_text| {
-            let e = Ended { wrote_notes: false, wrote_actions: false, is_error: true, answered, result_text, err_text: warn, seen: "", timed_out: false, refused: &[], exit: Some(1), actions_error: None, stopped: None };
+            let e = Ended { wrote_notes: false, wrote_actions: false, is_error: true, answered, result_text, err_text: warn, seen: "", timed_out: false, refused: &[], exit: Some(1), actions_error: None };
             let mut r = Run::default();
             conclude(&mut r, &p, &e, "L · test-model:8b", "sonnet");
             (r.state, r.message.unwrap_or_default())
@@ -2278,29 +2267,6 @@ mod tests {
         let f = s.0.clone();
         drop(s);
         assert!(!f.exists(), "removed when the run ends");
-    }
-
-    #[test]
-    fn a_run_stopped_for_an_old_claude_code_says_why() {
-        let e = Ended {
-            wrote_notes: false,
-            wrote_actions: false,
-            is_error: true,
-            answered: false,
-            result_text: "",
-            err_text: "",
-            seen: "",
-            timed_out: false,
-            refused: &[],
-            exit: None,
-            actions_error: None,
-            stopped: Some("Claude Code 2.1.200 is too old for minutes runs"),
-        };
-        let mut r = Run::default();
-        let p = crate::ai::Profile { id: "c".into(), name: "C".into(), kind: crate::ai::Kind::Claude, base_url: None, token: None, live_model: None, notes_model: None, account: None, email: None, sso: false, models: Default::default(), wrapper: None };
-        conclude(&mut r, &p, &e, "C · sonnet", "sonnet");
-        assert_eq!(r.state, "failed");
-        assert!(r.message.unwrap().contains("too old"));
     }
 
     #[test]
