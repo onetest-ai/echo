@@ -94,6 +94,13 @@
    "priority": "low",
    "check": "agent",
    "axes": []
+  },
+  {
+   "id": "F-LIFE-13",
+   "feature": "Check for updates on macOS needs no GitHub sign-in or GitHub CLI: when GitHub's API refuses (its limit per address), macOS finds the newest release on github.com itself (Windows asks through a signed-in GitHub CLI, if there is one); a check that fails says why in words (no connection, GitHub's limit — tries again later)",
+   "priority": "high",
+   "check": "person",
+   "axes": []
   }
  ]
 }
