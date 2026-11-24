@@ -167,6 +167,7 @@
       "^config/window-view\\.json$",
       "^config/window-view-sent\\.json$",
       "^home/\\.echo/attention\\.json$",
+      "^home/\\.echo/claude-versions/[^/]+$",
       "^home/recall/",
       "^home/training-slots-mail\\.md$",
       "^mail-drafts\\.log$",
