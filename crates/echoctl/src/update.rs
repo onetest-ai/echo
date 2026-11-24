@@ -1,13 +1,14 @@
 //! Updates from GitHub Releases (onetest-ai/echo).
 //!
 //! The app checks at start and every 6 h; the tray offers "Update to x.y.z…". The release is
-//! read from the public API, or — while the repository is private — through the `gh` CLI when it
-//! is installed and signed in. Installing (macOS): download the .dmg, mount it, verify that the
+//! read from GitHub's public API, anonymously. When GitHub refuses it (its limit per address),
+//! macOS reads github.com's own pages instead (no checksum: the signature check below decides);
+//! Windows asks through the `gh` CLI when it is installed and signed in. Installing (macOS): download the .dmg, mount it, verify that the
 //! new Echo.app is signed by our Developer ID team, then a small detached script swaps the
 //! bundle once this process has exited and opens the new one. Windows (unsigned builds): the
 //! release's per-user MSI, checked against the SHA-256 digest GitHub publishes for it, installed
-//! silently by msiexec (the MSI quits Echo, replaces the files and starts it again). Every
-//! download is checked against that digest. Never while recording.
+//! silently by msiexec (the MSI quits Echo, replaces the files and starts it again). A download
+//! is checked against the digest wherever the release gave one. Never while recording.
 
 use crate::app::NoWindow;
 use std::path::{Path, PathBuf};
@@ -67,34 +68,85 @@ fn asset_suffix() -> &'static str {
     }
 }
 
-fn latest_json() -> Result<Value> {
-    let api = format!("https://api.github.com/repos/{REPO}/releases/latest");
-    if let Ok(out) = Command::new("curl").no_window().args(["-fsSL", "-H", "Accept: application/vnd.github+json", &api]).output() {
-        if out.status.success() {
-            return Ok(serde_json::from_slice(&out.stdout)?);
+/// Why GitHub's anonymous API didn't answer, in the user's words; `status` is curl's HTTP code ("000": none).
+fn api_refusal(status: &str, body: &str) -> String {
+    match status {
+        "000" => "Echo can't reach GitHub — check your internet connection".into(),
+        "403" | "429" if body.contains("rate limit") => {
+            "GitHub limits update checks from your network for now (too many from one address); Echo tries again later".into()
         }
+        _ => format!("GitHub answered {status}"),
     }
-    // Private repository: anonymous requests get 404; use the GitHub CLI's login.
+}
+
+/// `repos/<REPO>/<path>` from GitHub's API, anonymously; its error says why GitHub didn't answer, in the user's words.
+fn github_api(path: &str) -> Result<Value> {
+    let api = format!("https://api.github.com/repos/{REPO}/{path}");
+    let out = Command::new("curl").no_window().args(["-sSL", "--max-time", "20", "-H", "Accept: application/vnd.github+json", "-w", "\n%{http_code}", &api]).output().context("Echo couldn't run curl")?;
+    let text = String::from_utf8_lossy(&out.stdout).to_string();
+    let (body, status) = text.rsplit_once('\n').unwrap_or(("", "000"));
+    if status.trim() != "200" {
+        bail!("{}", api_refusal(status.trim(), body));
+    }
+    serde_json::from_str(body).context("GitHub's answer isn't the release list Echo expects")
+}
+
+/// The latest release as the API would give it, read from github.com's own pages (no API limit): its tag from where
+/// `releases/latest` leads, and this computer's package if the release has it. No checksum: only where the package's
+/// signature is checked after the download (macOS), never for Windows' MSI.
+fn web_latest() -> Result<Value> {
+    let page = format!("https://github.com/{REPO}/releases/latest");
+    let out = Command::new("curl").no_window().args(["-s", "--max-time", "20", "-o", "/dev/null", "-w", "%{redirect_url}", &page]).output()?;
+    let to = String::from_utf8_lossy(&out.stdout).to_string();
+    let tag = to.rsplit_once("/releases/tag/").map(|(_, t)| t.trim().to_string()).filter(|t| valid_version(t.trim_start_matches('v'))).ok_or_else(|| anyhow!("github.com didn't name its latest release"))?;
+    let version = tag.trim_start_matches('v');
+    let assets: Vec<Value> = ["Echo", "echo"]
+        .iter()
+        .map(|pre| format!("{pre}-{version}-{}", asset_suffix()))
+        .filter_map(|name| {
+            let url = format!("https://github.com/{REPO}/releases/download/{tag}/{name}");
+            let o = Command::new("curl").no_window().args(["-sIL", "--max-time", "20", "-o", "/dev/null", "-w", "%{http_code}", &url]).output().ok()?;
+            (String::from_utf8_lossy(&o.stdout).trim() == "200").then(|| serde_json::json!({"name": name, "browser_download_url": url}))
+        })
+        .take(1)
+        .collect();
+    Ok(serde_json::json!({"tag_name": tag, "assets": assets, "html_url": format!("https://github.com/{REPO}/releases/tag/{tag}")}))
+}
+
+/// `repos/<REPO>/<path>` through the GitHub CLI's login (its own limit, the assets' digests): Windows, when the
+/// anonymous API refused. None without a CLI installed.
+fn gh_api(path: &str) -> Option<Result<Value>> {
     let gh = crate::app::find_program("gh");
-    let out = Command::new(&gh).no_window()
-        .args(["api", &format!("repos/{REPO}/releases/latest")])
-        .output()
-        .context("no access to GitHub releases (install the GitHub CLI and run `gh auth login`)")?;
-    if !out.status.success() {
-        bail!("GitHub: {}", String::from_utf8_lossy(&out.stderr).trim());
+    if !Path::new(&gh).is_file() {
+        return None;
     }
-    Ok(serde_json::from_slice(&out.stdout)?)
+    let out = match Command::new(&gh).no_window().args(["api", &format!("repos/{REPO}/{path}")]).output() {
+        Ok(o) => o,
+        Err(e) => return Some(Err(anyhow!("the GitHub CLI ({gh}) didn't start: {e}"))),
+    };
+    if !out.status.success() {
+        let why = String::from_utf8_lossy(&out.stderr).trim().lines().last().unwrap_or("").to_string();
+        return Some(Err(anyhow!("the GitHub CLI couldn't ask GitHub either ({why}) — run `gh auth login`")));
+    }
+    Some(serde_json::from_slice(&out.stdout).context("GitHub's answer isn't the release list Echo expects"))
 }
 
 /// Look for a newer release. Pre-releases count (the beta ships as one).
 pub fn check() -> Result<Option<Release>> {
-    let v = latest_json().or_else(|_| -> Result<Value> {
-        // /latest skips pre-releases: fall back to the newest of all releases.
-        let gh = crate::app::find_program("gh");
-        let out = Command::new(&gh).no_window().args(["api", &format!("repos/{REPO}/releases?per_page=5")]).output()?;
-        let all: Value = serde_json::from_slice(&out.stdout)?;
-        all.as_array().and_then(|a| a.first().cloned()).ok_or_else(|| anyhow!("no releases"))
-    })?;
+    let v = match github_api("releases/latest") {
+        Ok(v) => v,
+        // GitHub refused the API (its limit per address, mostly): macOS reads github.com's pages instead, Windows asks
+        // through the GitHub CLI (the MSI needs the API's digest); else the newest of all releases (/latest skips
+        // pre-releases). The error, if all fail, is the first one's, with what Windows can do.
+        Err(first) => {
+            let other = if cfg!(windows) { gh_api("releases/latest").and_then(Result::ok) } else { web_latest().ok() };
+            match other.or_else(|| github_api("releases?per_page=5").ok().and_then(|all| all.as_array().and_then(|a| a.first().cloned()))) {
+                Some(v) => v,
+                None if cfg!(windows) => bail!("{first}. To check now, install the GitHub CLI (https://cli.github.com) and sign in with `gh auth login`."),
+                None => return Err(first),
+            }
+        }
+    };
     let tag = v["tag_name"].as_str().unwrap_or_default().to_string();
     let version = tag.trim_start_matches('v').to_string();
     if !valid_version(&version) {
@@ -342,6 +394,15 @@ mod tests {
     fn only_plain_versions_are_accepted() {
         assert!(valid_version("0.1.1") && valid_version("1.20.3-beta.2"));
         assert!(!valid_version("9.9.9$(touch x)") && !valid_version("1.2") && !valid_version("1.2.3-") && !valid_version("1.2.3 x"));
+    }
+
+    /// GitHub's anonymous refusals are told in the user's words, never as a bare system error.
+    #[test]
+    fn a_refused_check_says_why() {
+        let limit = r#"{"message":"API rate limit exceeded for 203.0.113.7."}"#;
+        assert!(api_refusal("403", limit).starts_with("GitHub limits update checks from your network for now"));
+        assert!(api_refusal("000", "").contains("can't reach GitHub"));
+        assert_eq!(api_refusal("404", "{}"), "GitHub answered 404");
     }
 
     #[test]
