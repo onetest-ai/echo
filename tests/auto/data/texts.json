@@ -969,6 +969,7 @@
     "makeDefault": "Make default",
     "chip": "AI profile",
     "chipButton": "Claude ({name})",
+    "chipManage": "Manage profiles…",
     "chipTitle": [
       "Claude Code (as configured)",
       "as Claude Code is set up"

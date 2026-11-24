@@ -1,15 +1,20 @@
 // ── Echo's menu for the page's selects: a <select> stays the page's state and its `change` handlers; a click or key on
 // it opens this menu in place of the system's list, and a pick sets its value and fires `change`. A select marked
-// `data-native`, a multiple one or one with a size keeps the system's. An option's `data-sub` is a line under its name.
+// `data-native`, a multiple one or one with a size keeps the system's. An option's `data-sub` is a line under its name;
+// one with `data-go` is an action at the menu's foot (picking it opens that place, the select keeps its value). A select
+// marked `data-drop` opens its menu below it (a chip in a bar), not on it.
 // As the system's list, the menu never takes the focus: it stays on the select (an area that closes when the focus or a
 // click leaves it stays open, the refresh holds while a select has the focus), and the menu's clicks reach nothing else.
 
 // ── select menu
-/** A select's options (plain data: {group} or {value, label, sub, selected, disabled}) as the menu's rows. */
+/** A select's options (plain data: {group} or {value, label, sub, selected, disabled, go}) as the menu's rows; an
+ *  option with `go` is an action (`kind: 'go'`), never the chosen one. */
 function selectItems(opts) {
-  return opts.map((o) => (o.group != null ? { kind: 'group', label: String(o.group) } : { kind: 'item', value: String(o.value), label: String(o.label || ''), sub: String(o.sub || ''), selected: !!o.selected, disabled: !!o.disabled }))
+  return opts.map((o) => (o.group != null ? { kind: 'group', label: String(o.group) }
+    : o.go ? { kind: 'go', value: String(o.value), label: String(o.label || ''), sub: '', selected: false, disabled: !!o.disabled, go: String(o.go) }
+      : { kind: 'item', value: String(o.value), label: String(o.label || ''), sub: String(o.sub || ''), selected: !!o.selected, disabled: !!o.disabled }))
 }
-const selectable = (r) => r && r.kind === 'item' && !r.disabled
+const selectable = (r) => r && (r.kind === 'item' || r.kind === 'go') && !r.disabled
 /** The row to move to from `at` by `step` (+1 / −1), past groups and disabled rows, wrapping; -1 when none can be. */
 function selectStep(rows, at, step) {
   const n = rows.length
@@ -50,6 +55,18 @@ function selectPlace(a, menu, view) {
   const left = Math.max(edge, Math.min(a.left - (menu.inset || 0), view.width - width - edge))
   return { left: Math.round(left), top: Math.round(top), maxHeight, minWidth: Math.round(a.width + (menu.inset || 0)), scroll: Math.round(scroll) }
 }
+/** Where a `data-drop` menu goes: under its field (4 px gap), its right edge on the field's when it would pass the
+ *  view's right edge, else its left on the field's; never past the view's edges (8 px); to the view's bottom at most,
+ *  scrolling. Same shape as `selectPlace`'s answer. */
+function selectDrop(a, menu, view) {
+  const edge = 8
+  const width = Math.max(menu.width, a.width)
+  const top = a.top + a.height + 4
+  const fits = a.left + width <= view.width - edge
+  const left = Math.max(edge, Math.min(fits ? a.left : a.left + a.width - width, view.width - width - edge))
+  const maxHeight = Math.max(80, view.height - edge - top)
+  return { left: Math.round(left), top: Math.round(top), maxHeight, minWidth: Math.round(a.width), scroll: 0 }
+}
 // end of the select menu block
 
 let SM = null // the open menu: {sel, rows, at, el, typed, typedAt}
@@ -59,8 +76,8 @@ function smRead(sel) {
   for (const c of sel.children) {
     if (c.tagName === 'OPTGROUP') {
       opts.push({ group: c.label })
-      for (const o of c.children) opts.push({ value: o.value, label: o.textContent, sub: o.dataset.sub, selected: o.selected, disabled: o.disabled || c.disabled })
-    } else if (c.tagName === 'OPTION') opts.push({ value: c.value, label: c.textContent, sub: c.dataset.sub, selected: c.selected, disabled: c.disabled })
+      for (const o of c.children) opts.push({ value: o.value, label: o.textContent, sub: o.dataset.sub, selected: o.selected, disabled: o.disabled || c.disabled, go: o.dataset.go })
+    } else if (c.tagName === 'OPTION') opts.push({ value: c.value, label: c.textContent, sub: c.dataset.sub, selected: c.selected, disabled: c.disabled, go: c.dataset.go })
   }
   return selectItems(opts)
 }
@@ -85,6 +102,8 @@ function smOpen(sel) {
   if (name) el.setAttribute('aria-label', name)
   el.innerHTML = rows.map((r, i) => (r.kind === 'group'
     ? `<div class="menu-label" role="presentation">${esc(r.label)}</div>`
+    : r.kind === 'go'
+    ? `${rows[i - 1] && rows[i - 1].kind !== 'go' ? '<div class="sm-sep" role="separator"></div>' : ''}<div class="menu-item sm-item sm-go" role="option" id="sm-opt-${i}" data-sm="${i}" aria-selected="false"${r.disabled ? ' aria-disabled="true"' : ''}><span class="sm-check"></span><span class="sm-text"><span class="sm-label">${esc(r.label)}</span></span></div>`
     : `<div class="menu-item sm-item" role="option" id="sm-opt-${i}" data-sm="${i}" aria-selected="${r.selected}"${r.disabled ? ' aria-disabled="true"' : ''}><span class="sm-check">${r.selected ? SM_CHECK : ''}</span><span class="sm-text"><span class="sm-label">${esc(r.label)}</span>${r.sub ? `<span class="sm-sub">${esc(r.sub)}</span>` : ''}</span></div>`)).join('')
   document.body.appendChild(el)
   const at = rows.findIndex((r) => r.selected && selectable(r))
@@ -108,7 +127,9 @@ function smPlace() {
   const row = SM.el.querySelector(`[data-sm="${SM.at0}"]`) || SM.el.querySelector('[data-sm]')
   const box = SM.el.getBoundingClientRect(), name = row.querySelector('.sm-label').getBoundingClientRect()
   const pad = parseFloat(getComputedStyle(smAnchor(sel)).paddingLeft) || 0
-  const p = selectPlace(a, { width: SM.el.offsetWidth, height: SM.h, rowTop: name.top - box.top + SM.el.scrollTop, rowHeight: name.height, inset: name.left - box.left - pad }, { width: innerWidth, height: innerHeight })
+  const p = sel.hasAttribute('data-drop')
+    ? selectDrop(a, { width: SM.el.offsetWidth, height: SM.h }, { width: innerWidth, height: innerHeight })
+    : selectPlace(a, { width: SM.el.offsetWidth, height: SM.h, rowTop: name.top - box.top + SM.el.scrollTop, rowHeight: name.height, inset: name.left - box.left - pad }, { width: innerWidth, height: innerHeight })
   Object.assign(SM.el.style, { left: `${p.left}px`, top: `${p.top}px`, maxHeight: `${p.maxHeight}px`, minWidth: `${p.minWidth}px` })
   if (!SM.placed) { SM.el.scrollTop = p.scroll; SM.placed = true }
 }
@@ -130,7 +151,9 @@ function smClose() {
 function smPick(i) {
   if (!SM || !selectable(SM.rows[i])) return
   const { sel } = SM, { value } = SM.rows[i]
+  const to = SM.rows[i].go
   smClose()
+  if (to) return go(to)
   if (!sel.isConnected || sel.value === value) return
   sel.value = value
   sel.dispatchEvent(new Event('input', { bubbles: true }))

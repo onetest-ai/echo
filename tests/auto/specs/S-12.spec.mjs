@@ -206,9 +206,11 @@ scenario(test, 'S-12', 'Skills and AI: skills on and off, AI profiles and the de
       await expect(settings.text(sh.yourDay)).toBeVisible()
       const chip = settings.topSelect(a.chip)
       await expect(settings.chipReads(system.name)).toBeVisible()
-      await expect(settings.topOptions(a.chip)).toHaveCount(2)
+      // The two profiles, and the menu's foot: Manage profiles… (Settings → AI & minutes).
+      await expect(settings.topOptions(a.chip)).toHaveCount(3)
       await expect(settings.topOption(a.chip, system.name, true)).toHaveCount(1)
       await expect(settings.topOption(a.chip, local.name, false)).toHaveCount(1)
+      await expect(settings.topOption(a.chip, a.chipManage, false)).toHaveCount(1)
       // The Record pill holds Record, the call's language and Memo: one select, no profile segment.
       await expect(settings.record).toBeVisible()
       await expect(settings.memo).toBeVisible()
@@ -246,9 +248,10 @@ scenario(test, 'S-12', 'Skills and AI: skills on and off, AI profiles and the de
     await expect(settings.rowSays(row, a.default)).toHaveCount(0)
     await expect(settings.topSelects).toHaveCount(2)
     await expect(settings.topSelect(a.language)).toBeVisible()
-    await expect(settings.topOptions(a.chip)).toHaveCount(2)
+    await expect(settings.topOptions(a.chip)).toHaveCount(3)
     await expect(settings.topOption(a.chip, system.name, true)).toHaveCount(1)
     await expect(settings.topOption(a.chip, local.name, false)).toHaveCount(1)
+    await expect(settings.topOption(a.chip, a.chipManage, false)).toHaveCount(1)
     const r = data.cli('ai', 'status')
     expect(r.code).toBe(0)
     const listed = r.json().profiles

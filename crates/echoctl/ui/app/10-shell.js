@@ -34,6 +34,17 @@ function profileSub(p, note) {
   const kind = p.kind === 'local' || p.kind === 'wrapper' ? profileWhere(p) : p.kind === 'claude' ? 'its own Claude sign-in' : 'as Claude Code is set up'
   return [p.notes_model_label || p.model || '', kind, note].filter(Boolean).join(' · ')
 }
+/** The account chip's menu: each profile by its name, the line under it the same for all — its model, then whom it
+ *  signs in as (a Claude one: the account's address alone, without the organisation and plan) or where it runs. */
+function profileChipSub(p) {
+  const s = p.signin || {}
+  const addr = (a) => String(a || '').split(' · ')[0].replace(/ \(.*\)$/, '')
+  const who = p.kind !== 'claude' ? (p.kind === 'local' || p.kind === 'wrapper' ? profileWhere(p) : 'as Claude Code is set up')
+    : s.state === 'signed_out' ? 'not signed in'
+      : (s.state === 'signed_in' || s.state === 'other_account') && s.account ? addr(s.account)
+        : addr(p.email || p.account) || 'its own Claude sign-in'
+  return [p.notes_model_label || p.model || '', who].filter(Boolean).join(' · ')
+}
 function profileOptions(cur, note = () => '') {
   return ai().profiles.map((p) => `<option value="${esc(p.id)}" data-sub="${esc(profileSub(p, note(p)))}"${p.id === cur ? ' selected' : ''}>${esc(profileLabel(p))}</option>`).join('')
 }
@@ -211,7 +222,8 @@ function accountChip() {
   if (!p) return ''
   const title = `AI: ${profileLabel(p)} — ${profileWhere(p)}`
   if (a.profiles.length < 2) return `<button class="acct" data-cmd="claude-open" title="${esc(`${title} — open Claude`)}" aria-label="Claude (${esc(p.name)})"><span>${esc(p.name)}</span></button>`
-  return `<label class="acct" title="${esc(title)}"><span>${esc(p.name)}</span>${CARET}<select data-ai-default aria-label="AI profile">${profileOptions(p.id)}</select></label>`
+  const opts = a.profiles.map((x) => `<option value="${esc(x.id)}" data-sub="${esc(profileChipSub(x))}"${x.id === p.id ? ' selected' : ''}>${esc(x.name)}</option>`).join('')
+  return `<label class="acct" title="${esc(title)}"><span>${esc(p.name)}</span>${CARET}<select data-ai-default data-drop aria-label="AI profile">${opts}<option value="" data-go="settings/ai">Manage profiles…</option></select></label>`
 }
 
 function statusbar() {

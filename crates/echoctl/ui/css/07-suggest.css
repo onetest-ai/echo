@@ -4,7 +4,9 @@
 .sg-item { align-items: center; gap: 9px; }
 .sg-item .bd-av { width: 20px; height: 20px; font-size: 9px; }
 .sg-item .bd-av.none { color: var(--text-3); box-shadow: inset 0 0 0 1.5px var(--line-strong); }
-.sg-sub { margin-left: auto; padding-left: 16px; font-size: 11.5px; color: var(--text-3); white-space: nowrap; }
+/* The name is read first: it never gives way; the line beside it does, cut short (its whole text in the row's tooltip). */
+.sg-item .sm-text { flex: none; max-width: 65%; }
+.sg-sub { flex: 1 1 auto; min-width: 0; margin-left: auto; padding-left: 16px; font-size: 11.5px; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: right; }
 /* A person in a work item's facts: a face and the name. */
 .wp-val.person { display: inline-flex; align-items: center; gap: 7px; }
 .wp-val.person .bd-av { width: 20px; height: 20px; font-size: 9px; }
