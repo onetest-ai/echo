@@ -67,6 +67,14 @@ PR. The rules are in `.ai-run/guides/development/threads-and-ledger.md`.
 `ledger::human_event` records the user's own edit: it pins the field, and an agent's later evidence lands in history
 without changing it; each such edit can be undone.
 
+- From the CLI: `echoctl project ledger <id> edit <json>` (or `edit-file <file>`, the JSON from a file, refused inside a run Echo started),
+  and `echoctl project ledger <id> set <node> --title/--state/--internal-owner/--client-owner/--due/--description/
+  --description-file`, which builds `{"op":"edit","node","set"}` (`none` → null; a file's text is literal, one
+  trailing newline dropped) and answers in one line with the edit's `mid` (`cli::project::set_json`, `set_line`).
+  Inside a run Echo started no file is read (`edit-file`, `--description-file` refused). Both go through the same run
+  checks: Yolo's own task's state only (`own_task_edit`); its refusal names the prompt-free `project work` form
+  (`run_refusal`).
+
 ## A plugin's writes
 
 - `ledger::plugin_upsert` / `ledger::plugin_close` write a plugin's own tasks (events `by: plugin`, its id and key):

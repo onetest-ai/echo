@@ -969,11 +969,20 @@ mod tests {
 
     #[test]
     fn echoctl_brain_is_a_hidden_alias_of_echoctl_intake() {
-        for name in ["intake", "brain"] {
-            let cli = Cli::try_parse_from(["echoctl", name, "search", "cap", "--limit", "3"]).unwrap();
-            assert!(matches!(cli.cmd, Cmd::Intake { cmd: cli::intake::BrainCmd::Search { limit: 3, .. } }), "{name}");
-        }
-        let help = Cli::command().render_help().to_string();
-        assert!(help.contains("\n  intake ") && !help.contains("\n  brain "), "{help}");
+        // On the stack the binary's main thread has (8 MB, `build.rs` on Windows), not a test thread's 2 MB: clap's
+        // debug build of the whole command tree needs more.
+        std::thread::Builder::new()
+            .stack_size(8 << 20)
+            .spawn(|| {
+                for name in ["intake", "brain"] {
+                    let cli = Cli::try_parse_from(["echoctl", name, "search", "cap", "--limit", "3"]).unwrap();
+                    assert!(matches!(cli.cmd, Cmd::Intake { cmd: cli::intake::BrainCmd::Search { limit: 3, .. } }), "{name}");
+                }
+                let help = Cli::command().render_help().to_string();
+                assert!(help.contains("\n  intake ") && !help.contains("\n  brain "), "{help}");
+            })
+            .unwrap()
+            .join()
+            .unwrap();
     }
 }
