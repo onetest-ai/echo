@@ -14,7 +14,7 @@
   },
   {
    "id": "F-CC-02",
-   "feature": "A run is refused when admin policy can switch hooks off, or Claude Code is older than Echo needs",
+   "feature": "A run is refused when admin policy can switch hooks off; on a Claude Code older than Echo asks for it runs, and its log, a wrapper's Check and the Inbox say what that version lacks and what to update to",
    "priority": "high",
    "check": "person",
    "axes": [

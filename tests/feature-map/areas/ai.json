@@ -129,7 +129,7 @@
   },
   {
    "id": "F-AI-14",
-   "feature": "AI & minutes adds a wrapper typed in (Add a wrapper…): Check shows where the login shell finds it and its version, or why it can't be one, before Add profile; a wrapper profile's row says what it starts and that it sees and can change everything Echo sends to Claude, call transcripts included",
+   "feature": "AI & minutes adds a wrapper typed in (Add a wrapper…): Check shows where the login shell finds it and its version (what an older Claude Code lacks too), or why it can't be one, before Add profile; a wrapper profile's row says what it starts and that it sees and can change everything Echo sends to Claude, call transcripts included",
    "priority": "high",
    "check": "agent",
    "axes": [

@@ -312,6 +312,18 @@ pub fn collect() -> Collected {
             out.push(item(format!("permission:{}", k.id), "health", "echo", format!("{} isn't granted", k.name), k.why.to_string(), false, vec![act("Ask for it", true, json!({"cmd": "settings_action", "action": "ask_permissions", "arg": ""}))], Some("settings/health".into())));
         }
     }
+    // A profile whose last run started a Claude Code older than Echo asks for: it ran, this says what it lacks.
+    // It leaves quietly: a newer version seen, or its profile gone, is nothing the user decided.
+    c.quiet_kinds.insert("claude-old");
+    let profiles = crate::ai::Settings::load().map(|s| s.all());
+    if profiles.is_err() {
+        c.keep_kinds.insert("claude-old");
+    }
+    for p in profiles.unwrap_or_default() {
+        if let Some(why) = crate::guard::claude_seen(&p.id).as_deref().and_then(crate::guard::old_claude) {
+            out.push(item(format!("claude-old:{}", p.id), "claude-old", "echo", format!("Update Claude Code for {}", p.name).chars().take(120).collect(), why, false, vec![], Some("settings/ai".into())));
+        }
+    }
     // An older Echo plugin in Claude Code: its terminal pane still claims calls for minutes itself.
     let stale = crate::app::stale_plugins();
     if !stale.is_empty() {

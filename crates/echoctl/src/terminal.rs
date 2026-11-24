@@ -647,7 +647,6 @@ pub fn start_call(key: &str, dir: &Path, pick: Option<&str>, cols: u16, rows: u1
     let dir = dunce::canonicalize(dir)?;
     let ready = ai::for_call(&dir)?;
     let p = ready.profile().clone();
-    claude_new_enough(&p)?;
     let plugin = crate::notes::plugin_dir().ok_or_else(|| anyhow!("Echo's Claude Code plugin can't be found"))?;
     let clis = crate::notes::run_clis(&plugin);
     let previous = calls::previous_subject(&dir).and_then(|s| calls::previous_with_notes(&s, Some(&dir))).map(|d| d.join("notes.md")).filter(|f| f.is_file());
@@ -813,23 +812,6 @@ pub(crate) fn brain_mcp_config(exe: &Path, access: &[String]) -> Option<String> 
     let v = serde_json::json!({"mcpServers": {"echo": {"command": exe.display().to_string(), "args": args}}});
     std::fs::write(&f, serde_json::to_vec_pretty(&v).ok()?).ok()?;
     Some(f.display().to_string())
-}
-
-/// The guard blocks a call only on a Claude Code whose hooks block when they fail.
-fn claude_new_enough(p: &ai::Profile) -> Result<()> {
-    let v = if p.kind == ai::Kind::Wrapper {
-        ai::wrapper::claude_version(&ai::wrapper::command_of(p)?)?.split_whitespace().next().unwrap_or("").to_string()
-    } else {
-        let Some(claude) = crate::app::claude_bin() else { anyhow::bail!("Claude Code is not installed — get it at https://claude.com/claude-code") };
-        let out = std::process::Command::new(claude).arg("--version").output()?;
-        String::from_utf8_lossy(&out.stdout).split_whitespace().next().unwrap_or("").to_string()
-    };
-    if guard::new_enough(&v) {
-        Ok(())
-    } else {
-        let [a, b, c] = guard::MIN_CLAUDE;
-        anyhow::bail!("this call's Claude session needs Claude Code {a}.{b}.{c} or later (found {v:?}) — update Claude Code")
-    }
 }
 
 #[cfg(test)]

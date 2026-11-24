@@ -873,7 +873,7 @@ fn run_job(spec: &Spec, mut on_text: Option<&mut dyn FnMut(&str)>) -> Result<(St
     }
     // The permission mode it asks Claude Code for: checked against the one it starts in.
     let asked = (acts.is_some() || spec.folder.is_some()).then(|| asked_mode(&a));
-    let child = crate::ai::guard_ready(profile, &cwd, "run a plugin's job").and_then(|()| notes::admit_child(|| {
+    let child = notes::admit_child(|| {
         if spec.key.as_deref().is_some_and(key_stopped) {
             bail!("stopped");
         }
@@ -891,7 +891,7 @@ fn run_job(spec: &Spec, mut on_text: Option<&mut dyn FnMut(&str)>) -> Result<(St
             c.env(k, v);
         }
         Ok(c.spawn()?)
-    }));
+    });
     if let (Ok(c), Some(k)) = (&child, &spec.key) {
         key_started(k, c.id());
     }
@@ -904,7 +904,7 @@ fn run_job(spec: &Spec, mut on_text: Option<&mut dyn FnMut(&str)>) -> Result<(St
         }
         c
     });
-    let out = child.and_then(|c| finish(c, &mut log, &spec.run_dir, spec.timeout, asked, &mut |t| if let Some(f) = on_text.as_mut() { f(t) }));
+    let out = child.and_then(|c| finish(c, &profile.id, &mut log, &spec.run_dir, spec.timeout, asked, &mut |t| if let Some(f) = on_text.as_mut() { f(t) }));
     if let Some(w) = writer {
         let _ = w.join();
     }
@@ -985,7 +985,7 @@ fn mode_differs(asked: &str, init: &Value) -> Option<String> {
 /// The run to its end (`projectsync::finish_run_watched`), its start checked against the permission mode Echo asked
 /// for (`asked`; None: a run with no tools): when it started in another, its log and its record (`permissions.json`,
 /// `mode`) say so. Each piece of Claude's answer streamed goes to `on_text`.
-fn finish(child: std::process::Child, log: &mut fs::File, run_dir: &Path, timeout: Duration, asked: Option<&str>, on_text: &mut dyn FnMut(&str)) -> Result<(String, Value)> {
+fn finish(child: std::process::Child, profile: &str, log: &mut fs::File, run_dir: &Path, timeout: Duration, asked: Option<&str>, on_text: &mut dyn FnMut(&str)) -> Result<(String, Value)> {
     let mut on_event = |ev: &Value, log: &mut fs::File| {
         if let Some(t) = text_delta(ev) {
             on_text(t);
@@ -1004,7 +1004,7 @@ fn finish(child: std::process::Child, log: &mut fs::File, run_dir: &Path, timeou
         r["mode"] = Value::String(why);
         let _ = fs::write(&record, r.to_string());
     };
-    crate::projectsync::finish_run_watched(child, log, timeout, "run a plugin's job", "Echo quit during the run", &mut on_event)
+    crate::projectsync::finish_run_watched(child, profile, log, timeout, "Echo quit during the run", &mut on_event)
 }
 
 #[cfg(test)]
@@ -1194,7 +1194,7 @@ mod tests {
             fs::write(crate::ai::fake::file(&p, "p.reply"), format!("{init}\n{result}\n")).unwrap();
             let child = crate::ai::prepare_claude(&p, &["-p".into(), "x".into()], &root, false).unwrap().spawn().unwrap();
             let mut log = fs::File::create(dir.join("log.txt")).unwrap();
-            let (answer, _) = finish(child, &mut log, &dir, Duration::from_secs(30), asked, &mut |_| {}).unwrap();
+            let (answer, _) = finish(child, "p", &mut log, &dir, Duration::from_secs(30), asked, &mut |_| {}).unwrap();
             let record: Value = serde_json::from_str(&fs::read_to_string(dir.join("permissions.json")).unwrap()).unwrap();
             (answer, fs::read_to_string(dir.join("log.txt")).unwrap(), record)
         };

@@ -81,8 +81,11 @@ and Edit): Echo gives it its text, each item in an evidence block whose tag is r
 
 - A `PreToolUse` hook with `onFailure: block`; it refuses whatever it can't judge, a panic too.
 - `ai::hooks_conflict` refuses the run when any settings source could switch hooks off.
-- `guard::MIN_CLAUDE` (2.1.295 on main) is the oldest Claude Code whose hooks block when they fail; `guard::new_enough`
-  stops an older one.
+- `guard::MIN_CLAUDE` (2.1.295 on main) is the oldest Claude Code whose hooks block when they fail;
+  `guard::AUTO_SAFE_CLAUDE` (2.1.323) the oldest that starts in Manual mode when auto mode isn't available. An older
+  one runs: `guard::old_claude` names what it lacks and the version to update to, in the run's log, in a wrapper's
+  Check, and in Needs you ("Update Claude Code for <profile>", opening Settings → AI) from the version the profile's
+  last run started (`guard::saw_claude`, `<state>/claude-versions/<profile>`).
 - A run reads saved `tool-results` only of its own session: the hook's `transcript_path` + `session_id`
   (`guard::own_results`).
 - Hooks the user installed, directly or through a wrapper, are the user's code and can change what a tool call runs

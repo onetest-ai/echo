@@ -993,12 +993,10 @@ fn claude(profile: &crate::ai::Profile, model: Option<&str>, plugin: &Path, cwd:
     let system = settings.with_extension(format!("{}.md", pass.name));
     fs::write(&system, &pass.system)?;
     let a = args(model, plugin, settings, &system);
-    let run = crate::ai::guard_ready(profile, cwd, "sync a thread").and_then(|()| {
-        notes::admit_child(|| {
-            let mut c = crate::ai::prepare_claude(profile, &a, cwd, true)?;
-            c.env(guard::RUN_MODE, "project").env(guard::RUN_LEDGER, &ledger).env(guard::RUN_DIR, run_dir).env(guard::RUN_PROJECT, id).env(guard::RUN_CLIS, clis.join("\n"));
-            Ok(c.spawn()?)
-        })
+    let run = notes::admit_child(|| {
+        let mut c = crate::ai::prepare_claude(profile, &a, cwd, true)?;
+        c.env(guard::RUN_MODE, "project").env(guard::RUN_LEDGER, &ledger).env(guard::RUN_DIR, run_dir).env(guard::RUN_PROJECT, id).env(guard::RUN_CLIS, clis.join("\n"));
+        Ok(c.spawn()?)
     });
     let mut child = match run {
         Ok(c) => c,
@@ -1017,7 +1015,7 @@ fn claude(profile: &crate::ai::Profile, model: Option<&str>, plugin: &Path, cwd:
             let _ = i.write_all(line.as_bytes());
         }
     });
-    let out = finish_run_result(child, log, TIMEOUT, "sync a thread", "Echo quit during the sync: it goes on next time");
+    let out = finish_run_result(child, &profile.id, log, TIMEOUT, "Echo quit during the sync: it goes on next time");
     let _ = writer.join();
     let _ = fs::remove_file(&system);
     // Started: what it used counts from here, a failure too (`pass`); an error before this never started a run.
@@ -1148,17 +1146,17 @@ impl std::fmt::Display for RunFailed {
 
 impl std::error::Error for RunFailed {}
 
-/// Follow a headless Claude Code run started with `--output-format stream-json`: its steps into `log`,
-/// stopped after `timeout` or when it is too old for the guard (`what` it was for), and its final
+/// Follow a headless Claude Code run on `profile` started with `--output-format stream-json`: its steps into `log`
+/// (and what an older Claude Code lacks, `guard::old_claude`), stopped after `timeout`, and its final
 /// answer with Claude Code's result event (its usage, cost, turns) — or why there is none. Shared by the project sync
 /// and routines.
-pub fn finish_run_result(child: std::process::Child, log: &mut fs::File, timeout: Duration, what: &str, quit: &str) -> Result<(String, Value)> {
-    finish_run_watched(child, log, timeout, what, quit, &mut |_, _| {})
+pub fn finish_run_result(child: std::process::Child, profile: &str, log: &mut fs::File, timeout: Duration, quit: &str) -> Result<(String, Value)> {
+    finish_run_watched(child, profile, log, timeout, quit, &mut |_, _| {})
 }
 
 /// `finish_run_result`, each of its events (its start, `system/init`, among them) also handed to `on_event` with the
 /// log, once its line is there.
-pub fn finish_run_watched(mut child: std::process::Child, log: &mut fs::File, timeout: Duration, what: &str, quit: &str, on_event: &mut dyn FnMut(&Value, &mut fs::File)) -> Result<(String, Value)> {
+pub fn finish_run_watched(mut child: std::process::Child, profile: &str, log: &mut fs::File, timeout: Duration, quit: &str, on_event: &mut dyn FnMut(&Value, &mut fs::File)) -> Result<(String, Value)> {
     let pid = child.id();
     let err = child.stderr.take().map(|e| std::thread::spawn(move || BufReader::new(e).lines().map_while(Result::ok).collect::<Vec<_>>().join("\n")));
     let done = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -1178,7 +1176,7 @@ pub fn finish_run_watched(mut child: std::process::Child, log: &mut fs::File, ti
             crate::ai::stop_group(pid);
         });
     }
-    let (mut result, mut stopped) = (None::<Value>, None::<String>);
+    let mut result = None::<Value>;
     if let Some(out) = child.stdout.take() {
         for line in BufReader::new(out).lines().map_while(Result::ok) {
             let Ok(ev) = serde_json::from_str::<Value>(&line) else {
@@ -1187,10 +1185,13 @@ pub fn finish_run_watched(mut child: std::process::Child, log: &mut fs::File, ti
                 }
                 continue;
             };
-            if ev["type"] == "system" && ev["subtype"] == "init" && !guard::new_enough(ev["claude_code_version"].as_str().unwrap_or("")) {
-                let [x, y, z] = guard::MIN_CLAUDE;
-                stopped = Some(format!("Claude Code is too old to {what} — update it to {x}.{y}.{z} or later"));
-                crate::ai::stop_group(pid);
+            // An older Claude Code runs; the user is told what it lacks (its log, Needs you).
+            if ev["type"] == "system" && ev["subtype"] == "init" {
+                let v = ev["claude_code_version"].as_str().unwrap_or("");
+                guard::saw_claude(profile, v);
+                if let Some(w) = guard::old_claude(v) {
+                    let _ = writeln!(log, "{}  {w}", Local::now().format("%H:%M:%S"));
+                }
             }
             crate::run_log::write(log, &ev);
             on_event(&ev, log);
@@ -1205,9 +1206,6 @@ pub fn finish_run_watched(mut child: std::process::Child, log: &mut fs::File, ti
     let err = err.and_then(|h| h.join().ok()).unwrap_or_default();
     for l in err.lines().filter(|l| !l.trim().is_empty()) {
         let _ = writeln!(log, "{}  stderr: {l}", Local::now().format("%H:%M:%S"));
-    }
-    if let Some(why) = stopped {
-        bail!(why);
     }
     if notes::quitting() {
         bail!("{quit}");
@@ -1387,7 +1385,7 @@ mod tests {
         fs::write(crate::ai::fake::file(&p, "p.reply"), format!("{init}\n{result}\n")).unwrap();
         let child = crate::ai::prepare_claude(&p, &["-p".into(), "x".into()], &root, false).unwrap().spawn().unwrap();
         let mut log = fs::File::create(root.join("log.txt")).unwrap();
-        let r = finish_run_result(child, &mut log, Duration::from_secs(30), "sync a thread", "quit").map(|(t, r)| (t, usage_of(&r)));
+        let r = finish_run_result(child, &p.id, &mut log, Duration::from_secs(30), "quit").map(|(t, r)| (t, usage_of(&r)));
         let mut used = serde_json::Map::new();
         let e = pass(&id, "run-1", "extract", r, &mut log, &mut used).unwrap_err().to_string();
         assert_eq!(e, "Claude Code failed: turns used up", "the failure goes on as before");
@@ -1953,16 +1951,16 @@ mod tests {
     fn a_sync_stopped_before_claude_code_starts_counts_no_run() {
         let (_env, root) = crate::paths::testenv::folders("sync-not-started");
         let _fake = crate::ai::fake::install(&root);
-        // The default profile's Claude Code is too old for the guard: refused before it is started.
-        fs::write(root.join("user/.claude/version"), "2.1.200 (Claude Code)\n").unwrap();
+        // Claude Code can't be started (its program gone): the run fails before it began.
+        fs::remove_file(root.join("fake-claude")).unwrap();
         let id = projects::create("Acme pilot", None, None).unwrap().id;
         let ev = ledger_dir(&id).join("evidence");
         fs::create_dir_all(&ev).unwrap();
         let at = Local::now() - chrono::Duration::days(1);
         fs::write(ev.join("mail-a.json"), json!({"id": "mail-a", "at": at.to_rfc3339(), "date": at.date_naive().to_string(), "title": "Acme pilot status"}).to_string()).unwrap();
         fs::write(ev.join("mail-a.md"), "Test mail, nothing real.").unwrap();
-        let e = run(&id).unwrap_err().to_string();
-        assert!(e.contains("too old to sync a thread"), "{e}");
+        let e = format!("{:#}", run(&id).unwrap_err());
+        assert!(e.contains("No such file") || e.contains("cannot find"), "it failed to start Claude Code: {e}");
         assert!(!ledger_dir(&id).join(USAGE).exists(), "no run started: none counted");
         assert_eq!(state(&id)["usage"], json!({}));
         assert!(!root.join("user/.claude/p.args").exists(), "never asked");
@@ -1980,7 +1978,7 @@ mod tests {
         fs::write(crate::ai::fake::file(&p, "p.reply"), format!("{init}\n{result}\n")).unwrap();
         let child = crate::ai::prepare_claude(&p, &["-p".into(), "x".into()], &root, false).unwrap().spawn().unwrap();
         let mut log = fs::File::create(root.join("log.txt")).unwrap();
-        let (_, r) = finish_run_result(child, &mut log, Duration::from_secs(30), "sync a thread", "quit").unwrap();
+        let (_, r) = finish_run_result(child, &p.id, &mut log, Duration::from_secs(30), "quit").unwrap();
         let u = usage_of(&r);
         assert_eq!((u["input"].as_u64(), u["output"].as_u64(), u["cache_read"].as_u64(), u["cache_write"].as_u64(), u["turns"].as_u64()), (Some(12), Some(34), Some(5600), Some(780), Some(3)));
         assert_eq!(tokens(&u), 12 + 34 + 5600 + 780);
@@ -1999,17 +1997,17 @@ mod tests {
         // limit to get there (#732).
         crate::paths::testenv::eventually("the fake printed its warning", || crate::ai::fake::file(&p, "p.hung").exists());
         let mut log = fs::File::create(root.join("log.txt")).unwrap();
-        let e = finish_run_result(child, &mut log, Duration::from_secs(1), "sync a thread", "quit").unwrap_err().to_string();
+        let e = finish_run_result(child, &p.id, &mut log, Duration::from_secs(1), "quit").unwrap_err().to_string();
         assert!(e.contains("stopped after 1 s without finishing"), "{e}");
         assert!(!e.contains("unrecognized_model"), "the warning stays in the log: {e}");
         assert!(fs::read_to_string(root.join("log.txt")).unwrap().contains("unrecognized_model"));
     }
 
-    /// #215: routines' and plugins' runs (`claudejob::run`) finish here, so a Claude Code older than
-    /// `guard::MIN_CLAUDE` is stopped for them too — even when it goes on to answer.
+    /// Routines', plugins' and sync runs finish here: a Claude Code older than Echo asks for runs and answers, its log
+    /// says what it lacks, and the version is kept for Needs you (`guard::claude_seen`).
     #[cfg(unix)]
     #[test]
-    fn a_run_finished_here_on_a_claude_code_too_old_for_the_guard_is_stopped() {
+    fn a_run_on_an_older_claude_code_answers_and_its_log_says_what_it_lacks() {
         let (_env, root) = crate::paths::testenv::folders("run-too-old");
         let _fake = crate::ai::fake::install(&root);
         let p = crate::ai::fake::profile("old", None, &crate::ai::fake::signed_in("pat@example.com"));
@@ -2019,12 +2017,16 @@ mod tests {
             fs::write(crate::ai::fake::file(&p, "p.reply"), format!("{init}\n{result}\n")).unwrap();
             let child = crate::ai::prepare_claude(&p, &["-p".into(), "x".into()], &root, false).unwrap().spawn().unwrap();
             let mut log = fs::File::create(root.join("log.txt")).unwrap();
-            finish_run_result(child, &mut log, Duration::from_secs(30), "run a plugin's job", "quit").map(|(text, _)| text)
+            let text = finish_run_result(child, &p.id, &mut log, Duration::from_secs(30), "quit").map(|(text, _)| text).unwrap();
+            (text, fs::read_to_string(root.join("log.txt")).unwrap())
         };
-        let e = run("2.1.200").unwrap_err().to_string();
-        assert!(e.contains("too old to run a plugin's job"), "{e}");
-        let [x, y, z] = guard::MIN_CLAUDE;
-        assert_eq!(run(&format!("{x}.{y}.{z}")).unwrap(), "the answer");
-        assert!(run("").unwrap_err().to_string().contains("too old"), "an unknown version is stopped too");
+        let (text, log) = run("2.1.200");
+        assert_eq!(text, "the answer");
+        assert!(log.contains("Claude Code 2.1.200 is older than Echo asks for") && log.contains("update it to 2.1.323 or later"), "{log}");
+        assert_eq!(guard::claude_seen(&p.id).as_deref(), Some("2.1.200"));
+        let (text, log) = run("2.1.331");
+        assert_eq!(text, "the answer");
+        assert!(!log.contains("older than Echo asks for"), "{log}");
+        assert_eq!(guard::claude_seen(&p.id).as_deref(), Some("2.1.331"), "the newer run replaces it");
     }
 }

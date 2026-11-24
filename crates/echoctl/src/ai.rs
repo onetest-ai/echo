@@ -696,22 +696,6 @@ fn program_for(p: &Profile, args: &[String], fake: Option<PathBuf>) -> Result<Pa
     fake.or_else(crate::app::claude_bin).ok_or_else(|| anyhow!("Claude Code is not installed — get it at https://claude.com/claude-code"))
 }
 
-/// Before a guarded run (minutes, a thread's sync, a routine's or plugin's job): is the Claude Code `p` would start new
-/// enough for the guard (`guard::MIN_CLAUDE`)? Asked with `--version`, before it is started or given anything (#400).
-pub fn guard_ready(p: &Profile, cwd: &Path, what: &str) -> Result<()> {
-    let mut child = claude_command(p, &["--version".into()], cwd, false)?;
-    let (out, ..) = wait_output(&mut child, Duration::from_secs(20), &|| false).context("asking Claude Code its version")?;
-    // Its line "2.1.310 (Claude Code)", wherever a login shell's own output put it, or a wrapper's bare "2.1.310"
-    // (only those: another program's version must not pass for it).
-    let v = wrapper::version_line(&out).and_then(|l| l.split_whitespace().next().map(str::to_owned)).unwrap_or_default();
-    if crate::guard::new_enough(&v) {
-        return Ok(());
-    }
-    let [a, b, c] = crate::guard::MIN_CLAUDE;
-    let found = if v.is_empty() { "(of unknown version)".to_string() } else { v };
-    bail!("Claude Code {found} is too old to {what} — update it (`claude update`) to {a}.{b}.{c} or later")
-}
-
 /// Claude Code for `p` in a terminal (the Echo window's Claude sessions): the command and
 /// environment `claude_command` would use — the login shell, the profile's routing, Echo's CLI on
 /// PATH — for a pseudo-terminal. `headless`: as in a minutes run (Echo's mod idle, the CLI only on
@@ -1185,37 +1169,6 @@ mod tests {
         drop(s);
         assert_eq!(lease(&p).unwrap().token, token, "the new token is what jobs read");
         assert_eq!(token_now(&p).unwrap(), token);
-    }
-
-    /// #400: a guarded run asks Claude Code's version first; one too old (or of no version) is refused before it is
-    /// started or given anything, and says how to update — no window's button named.
-    #[cfg(unix)]
-    #[test]
-    fn a_claude_code_too_old_for_the_guard_is_refused_before_it_gets_anything() {
-        let (_env, root) = crate::paths::testenv::folders("ai-guard-ready");
-        let _fake = fake::install(&root);
-        let p = fake::profile("old", None, &fake::signed_in("pat@example.com"));
-        assert!(guard_ready(&p, &root, "write minutes").is_ok(), "the fake's own version is new enough");
-        fs::write(fake::file(&p, "version"), "2.1.200 (Claude Code)\n").unwrap();
-        let e = guard_ready(&p, &root, "write minutes").unwrap_err().to_string();
-        let [a, b, c] = crate::guard::MIN_CLAUDE;
-        assert!(e.contains("Claude Code 2.1.200 is too old to write minutes") && e.contains(&format!("{a}.{b}.{c} or later")), "{e}");
-        assert!(e.contains("claude update") && !e.contains("Try again"), "{e}");
-        // Another program's version from the login shell doesn't pass for Claude Code's.
-        fs::write(fake::file(&p, "version"), "Python 3.12.1\n2.1.200 (Claude Code)\n").unwrap();
-        assert!(guard_ready(&p, &root, "write minutes").unwrap_err().to_string().contains("Claude Code 2.1.200 is too old"));
-        fs::write(fake::file(&p, "version"), "").unwrap();
-        assert!(guard_ready(&p, &root, "write minutes").unwrap_err().to_string().contains("(of unknown version)"));
-        // A wrapper's bare version, alone, is Claude Code's; another program's bare version isn't.
-        fs::write(fake::file(&p, "version"), "2.1.400\n").unwrap();
-        assert!(guard_ready(&p, &root, "write minutes").is_ok(), "a wrapper's bare version");
-        fs::write(fake::file(&p, "version"), "10.9.2\n").unwrap();
-        assert!(guard_ready(&p, &root, "write minutes").unwrap_err().to_string().contains("(of unknown version)"));
-        fs::write(fake::file(&p, "version"), format!("{a}.{b}.{c} (Claude Code)\n")).unwrap();
-        assert!(guard_ready(&p, &root, "write minutes").is_ok());
-        for f in ["p.stdin", "p.turns"] {
-            assert!(!fake::file(&p, f).exists(), "nothing was given to Claude Code: {f}");
-        }
     }
 
     #[cfg(unix)]
