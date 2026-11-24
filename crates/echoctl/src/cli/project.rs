@@ -732,7 +732,7 @@ fn run_refusal(run_task: &str, edit: bool) -> String {
     match run_task.split_once('/') {
         Some((project, node)) => {
             let may = format!(
-                "`echoctl project ledger {project} set {node} --state done` \
+                "`echoctl project work {project} '{{\"op\":\"edit\",\"node\":\"{node}\",\"set\":{{\"state\":\"done\"}}}}'` \
                  (or in_progress, blocked, cancelled)"
             );
             if edit {
@@ -758,13 +758,18 @@ fn run_refusal(run_task: &str, edit: bool) -> String {
 /// `set`'s flags as `edit`'s `{"op":"edit","node",set}` (`none`: null for an owner, due or description).
 #[allow(clippy::too_many_arguments)]
 fn set_json(node: &str, title: Option<String>, state: Option<String>, internal_owner: Option<String>, client_owner: Option<String>, due: Option<String>, description: Option<String>, description_file: Option<&std::path::Path>) -> Result<String> {
-    let description = match description_file {
-        Some(f) => Some(std::fs::read_to_string(f).map_err(|e| anyhow::anyhow!("can't read {}: {e}", f.display()))?.trim_end_matches(['\n', '\r']).to_string()),
-        None => description,
-    };
     let clear = |v: String| if v == "none" { serde_json::Value::Null } else { serde_json::Value::String(v) };
+    // A file's text as it is (`none` in it is text), but for its one trailing newline.
+    let description = match description_file {
+        Some(f) => {
+            let t = std::fs::read_to_string(f).map_err(|e| anyhow::anyhow!("can't read {}: {e}", f.display()))?;
+            let t = t.strip_suffix('\n').map(|t| t.strip_suffix('\r').unwrap_or(t)).unwrap_or(&t);
+            Some(serde_json::Value::String(t.to_string()))
+        }
+        None => description.map(clear),
+    };
     let mut set = serde_json::Map::new();
-    for (k, v) in [("title", title.map(serde_json::Value::String)), ("state", state.map(serde_json::Value::String)), ("internal_owner", internal_owner.map(clear)), ("client_owner", client_owner.map(clear)), ("due", due.map(clear)), ("description", description.map(clear))] {
+    for (k, v) in [("title", title.map(serde_json::Value::String)), ("state", state.map(serde_json::Value::String)), ("internal_owner", internal_owner.map(clear)), ("client_owner", client_owner.map(clear)), ("due", due.map(clear)), ("description", description)] {
         if let Some(v) = v {
             set.insert(k.into(), v);
         }
@@ -775,8 +780,8 @@ fn set_json(node: &str, title: Option<String>, state: Option<String>, internal_o
     Ok(serde_json::json!({"op": "edit", "node": node, "set": set}).to_string())
 }
 
-/// `set`'s answer: one line, the item and what it now holds (a long text by its length).
-fn set_line(json: &str) -> String {
+/// `set`'s answer: one line, the item and what it now holds (a long text by its length), and the edit's `mid` (to undo it).
+fn set_line(json: &str, mid: &str) -> String {
     let b: serde_json::Value = serde_json::from_str(json).unwrap_or_default();
     let fields = b["set"].as_object().map(|m| m.iter().map(|(k, v)| match v {
         serde_json::Value::Null => format!("{k} none"),
@@ -784,7 +789,7 @@ fn set_line(json: &str) -> String {
         serde_json::Value::String(s) => format!("{k} {s}"),
         v => format!("{k} {v}"),
     }).collect::<Vec<_>>().join(" · ")).unwrap_or_default();
-    format!("{}: {fields}", b["node"].as_str().unwrap_or(""))
+    format!("{}: {fields} (mid {mid})", b["node"].as_str().unwrap_or(""))
 }
 
 fn ledger_command(id: &str, cmd: LedgerCmd) -> Result<()> {
@@ -794,6 +799,9 @@ fn ledger_command(id: &str, cmd: LedgerCmd) -> Result<()> {
     let cmd = match cmd {
         LedgerCmd::Set(a) => {
             let SetArgs { node, title, state, internal_owner, client_owner, due, description, description_file } = *a;
+            if description_file.is_some() && notes::headless() {
+                anyhow::bail!("inside a run Echo started, give the description itself (--description), not a file");
+            }
             short = true;
             LedgerCmd::Edit { json: set_json(&node, title, state, internal_owner, client_owner, due, description, description_file.as_deref())? }
         }
@@ -918,7 +926,7 @@ fn ledger_command(id: &str, cmd: LedgerCmd) -> Result<()> {
             let body: serde_json::Value = serde_json::from_str(&json).map_err(|e| anyhow::anyhow!("not JSON: {e}"))?;
             let event = ledger::human_event(id, &body)?;
             if short {
-                println!("{}", set_line(&json));
+                println!("{}", set_line(&json, event["mid"].as_str().unwrap_or("")));
             } else {
                 print_json(&event)
             }
@@ -946,11 +954,14 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("echo-ledger-set-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let f = dir.join("d.txt");
-        std::fs::write(&f, "Rita's dry run \"passed\"\n").unwrap();
+        std::fs::write(&f, "Rita's dry run \"passed\"\n\n").unwrap();
         let j = super::set_json("T8", None, Some("done".into()), Some("none".into()), None, Some("2026-11-30".into()), None, Some(&f)).unwrap();
         let b: serde_json::Value = serde_json::from_str(&j).unwrap();
-        assert_eq!(b, serde_json::json!({"op": "edit", "node": "T8", "set": {"state": "done", "internal_owner": null, "due": "2026-11-30", "description": "Rita's dry run \"passed\""}}));
-        assert_eq!(super::set_line(&j), "T8: description (23 characters) · due 2026-11-30 · internal_owner none · state done");
+        assert_eq!(b, serde_json::json!({"op": "edit", "node": "T8", "set": {"state": "done", "internal_owner": null, "due": "2026-11-30", "description": "Rita's dry run \"passed\"\n"}}), "one trailing newline dropped");
+        assert_eq!(super::set_line(&j, "ab12"), "T8: description (24 characters) · due 2026-11-30 · internal_owner none · state done (mid ab12)");
+        std::fs::write(&f, "none").unwrap();
+        let literal: serde_json::Value = serde_json::from_str(&super::set_json("T8", None, None, None, None, None, None, Some(&f)).unwrap()).unwrap();
+        assert_eq!(literal["set"]["description"], "none", "a file's text is never the clearing word");
         assert!(super::set_json("T8", None, None, None, None, None, None, None).unwrap_err().to_string().starts_with("nothing to set"));
         assert!(super::set_json("T8", None, None, None, None, None, None, Some(&dir.join("no.txt"))).is_err(), "a file that isn't there");
         let _ = std::fs::remove_dir_all(&dir);
@@ -959,10 +970,12 @@ mod tests {
     #[test]
     fn a_refused_yolo_edit_says_what_yolo_may_change() {
         let why = super::run_refusal("acme/T5", true);
-        assert!(why.contains("only its own task's state") && why.contains("`echoctl project ledger acme set T5 --state done`"), "{why}");
+        assert!(why.contains("only its own task's state") && why.contains(r#"`echoctl project work acme '{"op":"edit","node":"T5","set":{"state":"done"}}'`"#), "{why}");
         assert!(why.contains("not its description"), "{why}");
-        let edit = super::set_json("T5", None, Some("done".into()), None, None, None, None, None).unwrap();
-        assert!(super::own_task_edit("acme", &edit, "acme/T5"), "the edit it names is one Yolo may make");
+        let edit = r#"{"op":"edit","node":"T5","set":{"state":"done"}}"#;
+        assert!(super::own_task_edit("acme", edit, "acme/T5"), "the edit it names is one Yolo may make");
+        let set = super::set_json("T5", None, Some("done".into()), None, None, None, None, None).unwrap();
+        assert!(super::own_task_edit("acme", &set, "acme/T5"), "and so is set --state");
         let owner = super::set_json("T5", None, None, Some("Me".into()), None, None, None, None).unwrap();
         assert!(!super::own_task_edit("acme", &owner, "acme/T5"), "its owner is not Yolo's to change");
         assert_eq!(super::run_refusal("", true), "a run Echo started works only on its own project's ledger, with the agent's steps", "a sync run's");

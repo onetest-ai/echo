@@ -84,7 +84,7 @@ echoctl project people <id> [--refresh]              # its people: calls, talk s
 ```
 
 Changes are the user's edits — they pin the field, and the sync never overwrites them. An item's fields: `set`, a flag
-each (`none` clears an owner, due or description); it answers in one line, so read that line as it is:
+each (`none` clears an owner, due or description); it answers in one line (with the edit's `mid`, to undo it), so read that line as it is:
 
 ```sh
 echoctl project ledger <id> set <node id> --state done
