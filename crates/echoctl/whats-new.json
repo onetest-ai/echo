@@ -1,5 +1,11 @@
 [
   {
+    "version": "0.10.10",
+    "items": [
+      { "icon": "fix", "title": "Updates found on busy networks", "text": "Check for updates finds new versions even when GitHub limits your network, and says in plain words why a check couldn't be done.", "open": "settings" }
+    ]
+  },
+  {
     "version": "0.10.9",
     "items": [
       { "icon": "fix", "title": "Minutes on an older Claude Code", "text": "Minutes and other Claude runs work on an older Claude Code too, and Echo says what it lacks and which version to update to.", "open": "settings/ai" },
