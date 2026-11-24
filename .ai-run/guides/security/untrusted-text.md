@@ -20,7 +20,7 @@ these rules rely on (`ref: <section>`). It changes with the code; these rules ch
 - R10. Rename a run's call folder only at the run's end, and never use a run-given title to find previous minutes. Evidence: `calls::rename_to_title`, `calls::previous_subject` (ref: A minutes run's own call)
 - R11. Mermaid on a minutes page runs only at its strict security level. Evidence: `minutes::MERMAID_INIT` (ref: Rendering and content security)
 - R12. A minutes run changes nothing outside its call except learned vocabulary for its meeting and pruned frames moved to the trash; the app, not the run, clears old trash. Evidence: `calls::purge_trash` (ref: A minutes run's own call)
-- R13. A run on a Claude Code too old for blocking hooks is stopped before it does anything. Evidence: `guard::new_enough` (ref: The run guard)
+- R13. A run on a Claude Code older than its guard and permission modes need still runs: the user is told what that version lacks and which to update to; a version floor only for a change Echo can't work without. Evidence: `guard::old_claude` (ref: The run guard)
 - R14. Inside a minutes run, the CLI reaches only the run's own call. Evidence: `guard::own_call`
 - R15. The minutes render in a sandboxed frame; the window and the minutes page are each served with their own content security policy. Evidence: `minutes::render`, `window::page_reply` (ref: Rendering and content security)
 - R16. The served window answers only on localhost, and its IPC only with that run's strict cookie and its own origin. Evidence: `window::serve` (ref: Served window)
