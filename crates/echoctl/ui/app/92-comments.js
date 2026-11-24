@@ -143,7 +143,11 @@ document.addEventListener('change', (e) => {
   }
   // The account chip: makes the chosen profile the default, as Settings' Make default does (a
   // signed-out one then shows its sign-in under the Record pill, nothing starts by itself).
-  if (e.target.matches('[data-ai-default]')) setSetting('default_profile', e.target.value)
+  if (e.target.matches('[data-ai-default]')) {
+    // '' is the menu's Manage profiles… (a typed letter may pick it natively): the default stays, the select shows it.
+    if (e.target.value) setSetting('default_profile', e.target.value)
+    else e.target.value = ai().default || ''
+  }
   // A profile chosen for these notes: a sign-in starts if it is plainly signed out (any choice,
   // of any kind, supersedes an earlier one's check).
   if (e.target.matches('[data-notesprofile]')) { S.notesProfile = { call: S.selected, id: e.target.value }; send({ cmd: 'sign_in_if_needed', profile: e.target.value, purpose: `notes:${S.selected}` }); render() }
