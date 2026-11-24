@@ -50,7 +50,7 @@
   },
   {
    "id": "F-CLI-06",
-   "feature": "`project ledger <id> tree` and `edit` (edit, ac_set, link, merge, delete, accept, reject, undo, create) read and change the work as the user; an unknown node or event is refused and nothing is written",
+   "feature": "`project ledger <id> tree` and `edit` (edit, ac_set, link, merge, delete, accept, reject, undo, create) read and change the work as the user; `edit-file <file>` takes the JSON from a file (not inside a run Echo started); `set <node>` changes an item's title, state, owners, due and description by flags (`none` clears) and answers in one line, and inside Yolo's run only its own task's state; an unknown node, event, state or flag is refused and nothing is written",
    "priority": "high",
    "check": "agent",
    "axes": [

@@ -534,6 +534,7 @@ mod tests {
         assert!(ok("Bash", json!({"command": "echoctl project people aurora"})).is_err(), "not the people tab's own command");
         assert!(ok("Bash", json!({"command": "echoctl project ledger helix context"})).is_err(), "another project");
         assert!(ok("Bash", json!({"command": "echoctl project ledger aurora edit '{}'"})).is_err(), "the user's edits");
+        assert!(ok("Bash", json!({"command": "echoctl project ledger aurora set T001 --state done"})).is_err(), "the user's edits, by flags too");
         assert!(ok("Bash", json!({"command": "echoctl project ledger aurora done --evidence x; rm -rf /"})).is_err());
         // It reads nothing (Echo gives it its text), not even its own ledger or its session's saved output.
         let claude = std::env::temp_dir().join(format!("echo-guard-sync-claude-{}", std::process::id()));

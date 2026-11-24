@@ -278,6 +278,33 @@ pub enum LedgerCmd {
     Status,
     /// An edit of yours (JSON: {op: edit|ac_add|ac_set|link|unlink|merge|delete|accept|reject|undo|create, …})
     Edit { json: String },
+    /// `edit` with its JSON in a file (text with quotes in it needs no shell quoting); not inside a run Echo started
+    EditFile { file: std::path::PathBuf },
+    /// Change an item's fields as yours, a flag each — `edit`'s {"op":"edit"}; `none` clears an owner, due or description
+    Set(Box<SetArgs>),
+}
+
+#[derive(clap::Args)]
+pub struct SetArgs {
+    /// The item (T004, S002, …)
+    node: String,
+    #[arg(long)]
+    title: Option<String>,
+    /// open, in_progress, blocked, done, cancelled
+    #[arg(long)]
+    state: Option<String>,
+    #[arg(long)]
+    internal_owner: Option<String>,
+    #[arg(long)]
+    client_owner: Option<String>,
+    /// YYYY-MM-DD
+    #[arg(long)]
+    due: Option<String>,
+    #[arg(long, conflicts_with = "description_file")]
+    description: Option<String>,
+    /// The description from this file (its trailing newline dropped)
+    #[arg(long)]
+    description_file: Option<std::path::PathBuf>,
 }
 
 #[derive(Subcommand)]
@@ -705,7 +732,7 @@ fn run_refusal(run_task: &str, edit: bool) -> String {
     match run_task.split_once('/') {
         Some((project, node)) => {
             let may = format!(
-                "`echoctl project ledger {project} edit '{{\"op\":\"edit\",\"node\":\"{node}\",\"set\":{{\"state\":\"done\"}}}}'` \
+                "`echoctl project ledger {project} set {node} --state done` \
                  (or in_progress, blocked, cancelled)"
             );
             if edit {
@@ -728,7 +755,56 @@ fn run_refusal(run_task: &str, edit: bool) -> String {
     }
 }
 
+/// `set`'s flags as `edit`'s `{"op":"edit","node",set}` (`none`: null for an owner, due or description).
+#[allow(clippy::too_many_arguments)]
+fn set_json(node: &str, title: Option<String>, state: Option<String>, internal_owner: Option<String>, client_owner: Option<String>, due: Option<String>, description: Option<String>, description_file: Option<&std::path::Path>) -> Result<String> {
+    let description = match description_file {
+        Some(f) => Some(std::fs::read_to_string(f).map_err(|e| anyhow::anyhow!("can't read {}: {e}", f.display()))?.trim_end_matches(['\n', '\r']).to_string()),
+        None => description,
+    };
+    let clear = |v: String| if v == "none" { serde_json::Value::Null } else { serde_json::Value::String(v) };
+    let mut set = serde_json::Map::new();
+    for (k, v) in [("title", title.map(serde_json::Value::String)), ("state", state.map(serde_json::Value::String)), ("internal_owner", internal_owner.map(clear)), ("client_owner", client_owner.map(clear)), ("due", due.map(clear)), ("description", description.map(clear))] {
+        if let Some(v) = v {
+            set.insert(k.into(), v);
+        }
+    }
+    if set.is_empty() {
+        anyhow::bail!("nothing to set: give at least one of --title, --state, --internal-owner, --client-owner, --due, --description");
+    }
+    Ok(serde_json::json!({"op": "edit", "node": node, "set": set}).to_string())
+}
+
+/// `set`'s answer: one line, the item and what it now holds (a long text by its length).
+fn set_line(json: &str) -> String {
+    let b: serde_json::Value = serde_json::from_str(json).unwrap_or_default();
+    let fields = b["set"].as_object().map(|m| m.iter().map(|(k, v)| match v {
+        serde_json::Value::Null => format!("{k} none"),
+        serde_json::Value::String(s) if k == "description" => format!("{k} ({} characters)", s.chars().count()),
+        serde_json::Value::String(s) => format!("{k} {s}"),
+        v => format!("{k} {v}"),
+    }).collect::<Vec<_>>().join(" · ")).unwrap_or_default();
+    format!("{}: {fields}", b["node"].as_str().unwrap_or(""))
+}
+
 fn ledger_command(id: &str, cmd: LedgerCmd) -> Result<()> {
+    // `set` is `edit`'s {"op":"edit"}, and `edit-file` its JSON from a file: both go on as that edit, through the same
+    // checks; `set` answers in one line.
+    let mut short = false;
+    let cmd = match cmd {
+        LedgerCmd::Set(a) => {
+            let SetArgs { node, title, state, internal_owner, client_owner, due, description, description_file } = *a;
+            short = true;
+            LedgerCmd::Edit { json: set_json(&node, title, state, internal_owner, client_owner, due, description, description_file.as_deref())? }
+        }
+        LedgerCmd::EditFile { file: f } => {
+            if notes::headless() {
+                anyhow::bail!("inside a run Echo started, give the edit's JSON itself, not a file");
+            }
+            LedgerCmd::Edit { json: std::fs::read_to_string(&f).map_err(|e| anyhow::anyhow!("can't read {}: {e}", f.display()))? }
+        }
+        c => c,
+    };
     // Inside a run Echo started: the agent's steps, on that run's project only.
     // Yolo's run: an edit of its own task (`guard::RUN_TASK`), nothing else of the ledger's.
     let own_task = match &cmd {
@@ -840,8 +916,14 @@ fn ledger_command(id: &str, cmd: LedgerCmd) -> Result<()> {
         LedgerCmd::Status => print_json(&projectsync::state(id)),
         LedgerCmd::Edit { json } => {
             let body: serde_json::Value = serde_json::from_str(&json).map_err(|e| anyhow::anyhow!("not JSON: {e}"))?;
-            print_json(&ledger::human_event(id, &body)?)
+            let event = ledger::human_event(id, &body)?;
+            if short {
+                println!("{}", set_line(&json));
+            } else {
+                print_json(&event)
+            }
         }
+        LedgerCmd::Set(_) | LedgerCmd::EditFile { .. } => unreachable!("an edit by now"),
     }
     Ok(())
 }
@@ -860,12 +942,29 @@ mod tests {
     }
 
     #[test]
+    fn set_is_an_edit_of_the_fields_given_and_answers_in_one_line() {
+        let dir = std::env::temp_dir().join(format!("echo-ledger-set-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let f = dir.join("d.txt");
+        std::fs::write(&f, "Rita's dry run \"passed\"\n").unwrap();
+        let j = super::set_json("T8", None, Some("done".into()), Some("none".into()), None, Some("2026-11-30".into()), None, Some(&f)).unwrap();
+        let b: serde_json::Value = serde_json::from_str(&j).unwrap();
+        assert_eq!(b, serde_json::json!({"op": "edit", "node": "T8", "set": {"state": "done", "internal_owner": null, "due": "2026-11-30", "description": "Rita's dry run \"passed\""}}));
+        assert_eq!(super::set_line(&j), "T8: description (23 characters) · due 2026-11-30 · internal_owner none · state done");
+        assert!(super::set_json("T8", None, None, None, None, None, None, None).unwrap_err().to_string().starts_with("nothing to set"));
+        assert!(super::set_json("T8", None, None, None, None, None, None, Some(&dir.join("no.txt"))).is_err(), "a file that isn't there");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn a_refused_yolo_edit_says_what_yolo_may_change() {
         let why = super::run_refusal("acme/T5", true);
-        assert!(why.contains("only its own task's state") && why.contains(r#"{"op":"edit","node":"T5","set":{"state":"done"}}"#), "{why}");
-        assert!(why.contains("ledger acme edit") && why.contains("not its description"), "{why}");
-        let edit = r#"{"op":"edit","node":"T5","set":{"state":"done"}}"#;
-        assert!(super::own_task_edit("acme", edit, "acme/T5"), "the edit it names is one Yolo may make");
+        assert!(why.contains("only its own task's state") && why.contains("`echoctl project ledger acme set T5 --state done`"), "{why}");
+        assert!(why.contains("not its description"), "{why}");
+        let edit = super::set_json("T5", None, Some("done".into()), None, None, None, None, None).unwrap();
+        assert!(super::own_task_edit("acme", &edit, "acme/T5"), "the edit it names is one Yolo may make");
+        let owner = super::set_json("T5", None, None, Some("Me".into()), None, None, None, None).unwrap();
+        assert!(!super::own_task_edit("acme", &owner, "acme/T5"), "its owner is not Yolo's to change");
         assert_eq!(super::run_refusal("", true), "a run Echo started works only on its own project's ledger, with the agent's steps", "a sync run's");
     }
 

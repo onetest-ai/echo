@@ -83,11 +83,23 @@ echoctl project tasks                                # open tasks across threads
 echoctl project people <id> [--refresh]              # its people: calls, talk share, tasks, roles
 ```
 
-Changes are the user's edits — they pin the field, and the sync never overwrites them:
+Changes are the user's edits — they pin the field, and the sync never overwrites them. An item's fields: `set`, a flag
+each (`none` clears an owner, due or description); it answers in one line, so read that line as it is:
 
 ```sh
-echoctl project ledger <id> edit '{"op":"edit","node":"<node id>","set":{"state":"done"}}'
-echoctl project ledger <id> edit '{"op":"edit","node":"<id>","set":{"internal_owner":"Jane Doe","due":"2026-11-14"}}'
+echoctl project ledger <id> set <node id> --state done
+echoctl project ledger <id> set <node id> --internal-owner "Jane Doe" --due 2026-11-14
+echoctl project ledger <id> set <node id> --state done --internal-owner none --description "Closed: Jane's checklist went out"
+echoctl project ledger <id> set <node id> --description-file <file>
+```
+
+A long description: write it to a file first and pass `--description-file`.
+
+Everything else is `edit` with a JSON. Its text may hold quotes or apostrophes: then write the JSON to a file and pass
+`edit-file <file>` (inside a run Echo started, give the JSON itself):
+
+```sh
+echoctl project ledger <id> edit-file <file>
 echoctl project ledger <id> edit '{"op":"create","kind":"task","parent":"<story id>","title":"Send the SOW draft","internal_owner":"Me","due":"2026-11-10"}'
 echoctl project ledger <id> edit '{"op":"create","kind":"decision","title":"Pilot in one region first","description":"Why, and the options weighed"}'
 echoctl project ledger <id> edit '{"op":"merge","node":"<id>","into":"<id>"}'
@@ -95,7 +107,7 @@ echoctl project ledger <id> edit '{"op":"undo","target":"<mid of the edit>"}'
 ```
 
 - `kind`: epic, story, task, risk, decision, question. A task's `parent` is a story; a story's, an epic.
-- `set` fields: title, state (open, in_progress, blocked, done, cancelled), internal_owner, client_owner, due
+- `edit`'s `set` fields (`set` has a flag for the first six that matter most: title, state, owners, due, description): title, state (open, in_progress, blocked, done, cancelled), internal_owner, client_owner, due
   (YYYY-MM-DD), parent, type (action, session, dependency), client_owed, waiting_for, links (`[{title, url}]`,
   https), description, delegated_by, decided_by, likelihood / impact (low, med, high); who does a task — mode
   (claude, manual), how (≤ 200 characters, by hand), prompt (≤ 600, what Claude hands back), skill (a skill's id).
