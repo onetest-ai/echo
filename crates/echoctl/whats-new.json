@@ -1,5 +1,14 @@
 [
   {
+    "version": "0.10.9",
+    "items": [
+      { "icon": "fix", "title": "Minutes on an older Claude Code", "text": "Minutes and other Claude runs work on an older Claude Code too, and Echo says what it lacks and which version to update to.", "open": "settings/ai" },
+      { "icon": "layout", "title": "Profiles in a menu below the chip", "text": "The profile chip opens a menu below it with each profile's model and account, and Manage profiles at the end.", "open": "today" },
+      { "icon": "sparkle", "title": "Claude changes tasks more reliably", "text": "Claude in Echo sets a task's state, owner, due date or description in one simple step, so its changes no longer fail on quotes.", "open": "tasks" },
+      { "icon": "shield", "title": "Plugin settings stay their own", "text": "Only you can change a plugin's settings in its page: another plugin's page can't change them for you.", "open": "settings/plugins" }
+    ]
+  },
+  {
     "version": "0.10.8",
     "items": [
       { "icon": "layout", "title": "Plugin pages read in order", "text": "A plugin's own page in Settings shows its settings where they belong, under its title.", "open": "settings/plugins" }
