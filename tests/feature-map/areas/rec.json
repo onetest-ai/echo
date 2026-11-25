@@ -190,6 +190,15 @@
    "axes": [
     "app.record"
    ]
+  },
+  {
+   "id": "F-REC-24",
+   "feature": "Join and record for me (on a Mac, a Teams meeting with its link: its card and menu in Calendar; echoctl join --for-me): for a meeting the user takes elsewhere (their phone), Echo opens it in Teams on this computer at its start — once an occurrence, not before, and never while the user is on a call at this computer (it waits until that call ends) — and records as that meeting only a call begun after it opened it, Teams kept silent on the speakers while it records; the card says so and offers Don't record; a meeting file never carries it (arm, agenda set)",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "app.record"
+   ]
   }
  ]
 }

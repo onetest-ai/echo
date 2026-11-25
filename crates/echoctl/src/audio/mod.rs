@@ -543,16 +543,20 @@ pub fn downmix(interleaved: &[f32], channels: usize) -> Vec<f32> {
         .collect()
 }
 
-/// Source for the target app's audio output (the remote participants).
-pub fn app_source(app: TargetApp) -> Box<dyn Source> {
+/// Source for the target app's audio output (the remote participants). `silent`: kept off the speakers while it is
+/// recorded (a meeting Echo joined for the user, #900) — on macOS; Windows' loopback can't, it still plays.
+pub fn app_source(app: TargetApp, silent: bool) -> Box<dyn Source> {
     #[cfg(debug_assertions)]
     if let Some(s) = testfeed::remote() {
         return s;
     }
     #[cfg(target_os = "macos")]
-    return Box::new(macos::AppTapSource::new(app));
+    return Box::new(macos::AppTapSource::new(app, silent));
     #[cfg(windows)]
-    return Box::new(windows::LoopbackSource::new(app));
+    return {
+        let _ = silent;
+        Box::new(windows::LoopbackSource::new(app))
+    };
     #[cfg(not(any(target_os = "macos", windows)))]
     unimplemented!("app capture is only supported on macOS and Windows ({app:?})")
 }

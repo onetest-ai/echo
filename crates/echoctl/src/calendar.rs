@@ -175,6 +175,7 @@ pub fn to_meeting(ev: &Value) -> Option<MeetingContext> {
         organizer: ev.get("organizer").and_then(person),
         attendees: attendees.into_iter().filter_map(person).collect(),
         declined: declined.into_iter().filter_map(person).collect(),
+        join_for_me: false,
         answers,
         invited_as,
         join_url: join_link(ev),
