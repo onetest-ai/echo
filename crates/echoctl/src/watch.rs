@@ -567,8 +567,8 @@ pub fn run_loop(mut app: TargetApp, stop: Arc<AtomicBool>, on_state: impl Fn(UiS
         // recording (the next meeting's) is never the one removed.
         // An arm waiting for its meeting's call while the user is on another one stays until the meeting ends (#483).
         // A meeting's arm starts only on a call of its app (a Meet meeting's in Chrome, a Teams one's in Teams).
-        // A meeting joined for the user starts only on the call Echo opened: one begun after it opened that meeting — never
-        // a call the user was on at this computer, which its silent tap would mute for them.
+        // A meeting joined for the user starts only on the call Echo opened (one begun soon after it opened that meeting),
+        // or on it with the user here — never on another call the user was on at this computer.
         let for_me_ready = |m: &MeetingContext| opened_for_me.as_ref().is_some_and(|(k, at)| *k == occurrence(m) && call_began.is_some_and(|b| b >= *at && b <= *at + FOR_ME_JOIN_WITHIN));
         // The user on that very meeting at this computer (its window names it): recorded as any meeting, not silent.
         let mut for_me_here = false;
