@@ -133,7 +133,16 @@ document.addEventListener('click', (e) => {
     return was && refocus(`[data-td-keep="${CSS.escape(was.event)}"][data-key="${CSS.escape(was.key)}"]`)
   }
   const all = e.target.closest('[data-td-keep-all]')
-  if (all) { e.stopPropagation(); return send({ cmd: 'overlap_keep', events: all.dataset.tdKeepAll.split('|') }) }
+  if (all) {
+    e.stopPropagation()
+    // The line's buttons stay off until Today is read again (as after an answer): no Keep one right after Keep both.
+    const evs = all.dataset.tdKeepAll.split('|'), was = S.today
+    S.tdResp = { ...(S.tdResp || {}), ...Object.fromEntries(evs.map((ev) => [ev, 'keep'])) }
+    render()
+    send({ cmd: 'overlap_keep', events: evs })
+    const back = () => { if (S.today === was) return setTimeout(back, 500); evs.forEach((ev) => delete S.tdResp[ev]); render() }
+    return setTimeout(back, 500)
+  }
   const y = e.target.closest('[data-td-keep-yes]')
   if (y) {
     e.stopPropagation()
