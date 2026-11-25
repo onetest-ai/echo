@@ -307,7 +307,7 @@ pub fn run_loop(mut app: TargetApp, stop: Arc<AtomicBool>, on_state: impl Fn(UiS
     let mut last_arm_look: Option<Instant> = None;
     // An arm for no meeting on a call the agenda has a meeting for: when the look at the call window that decides
     // whether that meeting is attached was asked for (#896).
-    let mut guess_look: Option<Instant> = None;
+    let mut guess_look: Option<(String, Instant)> = None;
     // Keep today's agenda fresh from the calendar (if one is configured), off the main loop.
     let mut last_sync: Option<Instant> = None;
     // Sleep shows up as wall-clock time passing faster than the monotonic clock.
@@ -586,17 +586,23 @@ pub fn run_loop(mut app: TargetApp, stop: Arc<AtomicBool>, on_state: impl Fn(UiS
         // No meeting given: the agenda meeting this call overlaps is attached, unless a look at the call window says
         // the call is another one — it names something else (an ad-hoc call, another meeting), or it began before the
         // meeting could (#896). A window that can't be read, or a look that doesn't answer in `GUESS_WAIT`: attached.
-        let guess = match startable.filter(|a| a.meeting.is_none() && rec.is_none() && call_active && on_its_call) {
+        // The look is this arm's only: one asked for an arm cancelled or replaced since is dropped with what it read.
+        let guessing = startable.filter(|a| a.meeting.is_none() && rec.is_none() && call_active && on_its_call);
+        if guess_look.as_ref().is_some_and(|(id, _)| guessing.is_none_or(|a| &a.id != id)) {
+            guess_look = None;
+            let _ = looker.take();
+        }
+        let guess = match guessing {
             None => None,
-            Some(_) => match crate::calendar::meeting_now(Utc::now(), app) {
+            Some(a) => match crate::calendar::meeting_now(Utc::now(), app) {
                 Some(m) if detected.is_some() && app == TargetApp::Teams && call_window_readable() => match looker.take() {
                     Some(seen) if guess_look.is_some() => Some(guess_holds(&m, &seen).then_some(m)),
-                    _ if guess_look.is_some_and(|t| t.elapsed() >= GUESS_WAIT) => Some(Some(m)),
+                    _ if guess_look.as_ref().is_some_and(|(_, t)| t.elapsed() >= GUESS_WAIT) => Some(Some(m)),
                     _ => {
-                        guess_look.get_or_insert_with(|| {
+                        if guess_look.is_none() {
+                            guess_look = Some((a.id.clone(), Instant::now()));
                             looker.start();
-                            Instant::now()
-                        });
+                        }
                         None
                     }
                 },
@@ -1389,6 +1395,8 @@ mod tests {
         // Recording asked for with no meeting, the agenda's meeting going on: attached only when the window doesn't say
         // it's another call (#896).
         assert!(!guess_holds(&m, &seen(Some("2026-11-12T17:31:00Z"), Some("Dana Lee, Sam Roe"))), "an ad-hoc call meanwhile");
+        let fw = MeetingContext { subject: at("FW: Acme design review"), ..m.clone() };
+        assert!(guess_holds(&fw, &seen(Some("2026-11-12T17:31:00Z"), Some("Acme design review"))), "its name within the subject (a forwarded invite)");
         assert!(!guess_holds(&m, &seen(None, Some("Storybook review"))), "another meeting, its timer not read");
         assert!(!guess_holds(&m, &seen(Some("2026-11-12T16:30:00Z"), None)), "a call begun an hour before");
         assert!(guess_holds(&m, &seen(Some("2026-11-12T17:31:00Z"), Some("Acme design review | Microsoft Teams"))));

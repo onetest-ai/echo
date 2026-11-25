@@ -41,9 +41,11 @@ is armed (`stopped_in_call`) until the call ends. A memo never takes this path.
   (`arm_waits_other_call`).
 - A call window that can't be read at all starts the arm on the call going on; Record on a call already going on arms no
   meeting.
-- An arm with no meeting attaches the agenda meeting going on (`calendar::meeting_now`) only when `watch::call_window::guess_holds`
-  says it is that meeting's call: not when the window names something else or the call began before the meeting could.
-  The arm starts after that one look, or after `GUESS_WAIT` (3 s, `watch.rs`) without an answer, with the meeting.
+- An arm with no meeting attaches the agenda meeting going on (`calendar::meeting_now`). On a detected Teams call whose
+  window can be read, only when `watch::call_window::guess_holds` says it is that meeting's call: not when the window
+  names something else (its name neither the subject nor within it) or the call began more than `MATCH_EARLY_MIN` before
+  the meeting. The arm starts after that one look, or after `GUESS_WAIT` (3 s, `watch.rs`) without an answer, with the
+  meeting. Elsewhere (Meet, no call detection, the window not read) the meeting is attached by time.
 
 ## Finishing a recording
 

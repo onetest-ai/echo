@@ -111,9 +111,15 @@ fn same_name(meeting: &MeetingContext, seen: &CallSeen) -> Option<bool> {
 
 /// Whether the agenda meeting a call overlaps — the user asked to record the call, not that meeting — is that call's,
 /// from one look at its window (#896): not when the window names something else (an ad-hoc call, another meeting
-/// joined meanwhile) or the call began before the meeting could. A window that tells nothing: it is.
+/// joined meanwhile) or the call began before the meeting could. A window that tells nothing, or a name within the
+/// meeting's subject ("Acme design review" of "FW: Acme design review"): it is.
 pub(super) fn guess_holds(meeting: &MeetingContext, seen: &CallSeen) -> bool {
-    same_name(meeting, seen) != Some(false) && meetings_call(meeting, seen) != Some(false)
+    let within = |m: &MeetingContext| {
+        let swapped = MeetingContext { subject: seen.name.clone(), ..Default::default() };
+        let as_seen = CallSeen { name: m.subject.clone(), ..seen.clone() };
+        same_name(&swapped, &as_seen) == Some(true)
+    };
+    (same_name(meeting, seen) != Some(false) || within(meeting)) && meetings_call(meeting, seen) != Some(false)
 }
 
 /// A reading that says "another call", waiting for a later one to confirm it.
