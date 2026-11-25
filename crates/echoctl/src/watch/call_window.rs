@@ -100,7 +100,7 @@ pub(super) fn meetings_call(meeting: &MeetingContext, seen: &CallSeen) -> Option
 
 /// Whether the call window names the meeting: `None` when it names nothing to tell (no name, a channel's) or the
 /// meeting has no subject.
-fn same_name(meeting: &MeetingContext, seen: &CallSeen) -> Option<bool> {
+pub(super) fn same_name(meeting: &MeetingContext, seen: &CallSeen) -> Option<bool> {
     let norm = |s: &str| s.to_lowercase().chars().map(|c| if c.is_alphanumeric() { c } else { ' ' }).collect::<String>().split_whitespace().collect::<Vec<_>>().join(" ");
     let named = seen.name.as_deref().filter(|_| !seen.channel).map(norm).filter(|n| !n.is_empty())?;
     let subject = meeting.subject.as_deref().map(norm).filter(|s| !s.is_empty())?;

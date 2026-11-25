@@ -17,7 +17,7 @@ tags: [recording, schedule, arm, watcher, join]
 
 ## Preconditions
 - Test data: `tests/fixtures/serve.sh up <dir> <port> --set small --ai fake`; calls fed from files (app_profile.md → "Recording with file-fed calls"); no speech model needed. `<dir>/env` sets `ECHOCTL_TEST_OPEN_LOG_ONLY`: a link Echo opens is appended to `<dir>/open.log`, nothing opens
-- Every Bash call starts with the prelude: `. <dir>/env; D="$(dirname "$ECHOCTL_HOME")"; C=tests/fixtures/call.py; W=tests/fixtures/wait.py; export D`
+- Every Bash call starts with the prelude: `. <dir>/env; D="$(dirname "$ECHOCTL_HOME")"; C=tests/fixtures/call.py; W=tests/fixtures/wait.py; export D; export ECHOCTL_TEST_CALL_WINDOW="$D/window.json"` — a development build reads the call window from that file (`{"began_s_ago": …, "title": …}`; none: nothing read), as it reads Teams' timer and title
 - **Needs a second app instance** (as recording/TC-002): BLOCKED, not failed, if `$D/app.out` says "already running"
 
 ## Steps
@@ -33,8 +33,11 @@ tags: [recording, schedule, arm, watcher, join]
 | 6a | Prelude; Teams joins its call (as it would on "Add this device"): `$C start acme-sync --hold`; `$W 20 recording acme-weekly-sync`; wait 10 s; `grep -c acme-tc039 "$D/open.log"` | Recording "Acme weekly sync"; still `1`: opened once only, not again while armed or recording |
 | 7 | Prelude; `$C end`; `$W 30 event recording_stopped`; `N=$(ls -td "$ECHOCTL_HOME"/calls/*-acme-weekly-sync/ \| head -1)`; `python3 -c "import json,sys; print(json.load(open(sys.argv[1]+'/meeting.json')).get('join_for_me'))" "$N"` | `True`: the newest call (this one; the small set has an older "Acme weekly sync") is the meeting's, marked joined for the user |
 
+| 8 | Prelude; the user takes a meeting set to join for them **at this computer**: `python3 -c "import json,datetime as d,os; n=d.datetime.now(d.timezone.utc); f=lambda t: t.isoformat(); json.dump({'id':'ev-tc039b','subject':'Globex review','start':f(n-d.timedelta(minutes=1)),'end':f(n+d.timedelta(minutes=30)),'join_url':'https://teams.microsoft.com/l/meetup-join/globex-tc039'}, open(os.environ['D']+'/globex.json','w'))"`; `echo '{"began_s_ago": 5, "title": "Globex review \| Microsoft Teams"}' > "$D/window.json"`; wait 12 s (the last call's grace after a hang-up); `$C start acme-sync --hold`; `$W 15 in-call`; `target/debug/echoctl join --for-me "$D/globex.json"`; `$W 40 recording globex-review` | "Echo joins “Globex review” in Teams at its start and records it"; then recording "Globex review": its window names it, the user is on it here |
+| 9 | Prelude; `$C end`; `$W 30 event recording_stopped 2`; `N=$(ls -td "$ECHOCTL_HOME"/calls/*-globex-review/ \| head -1)`; `python3 -c "import json,sys; print(json.load(open(sys.argv[1]+'/meeting.json')).get('join_for_me'))" "$N"`; `grep -c globex-tc039 "$D/open.log" 2>/dev/null \|\| echo 0` | `None`: recorded as any meeting, heard on the speakers (not silent); `0`: Echo never opened it — the user was on it |
+
 ## Expected Final State
-One call "Acme weekly sync", its meeting opened by Echo once at its start.
+A call "Acme weekly sync", its meeting opened by Echo once at its start and recorded silent; a call "Globex review" the user took here, recorded as any meeting and never opened by Echo.
 
 ## Teardown
 - `kill $(cat "$D/app.pid")`; close the tab; `tests/fixtures/serve.sh down <dir>`; remove `$(dirname <dir>)` when the run is over

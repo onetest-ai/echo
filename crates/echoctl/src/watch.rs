@@ -46,6 +46,8 @@ const REJOIN_GRACE: Duration = Duration::from_secs(10);
 /// How often a recording looks at which call Teams is in (`call_seen`): calls back to back — the next one joined
 /// before the last one's end was seen, or within `REJOIN_GRACE` — must not run into one recording.
 const CALL_LOOK_EVERY: Duration = Duration::from_secs(5);
+/// A call that begins this long after Echo opened a meeting for the user is no longer the one it opened.
+const FOR_ME_JOIN_WITHIN: Duration = Duration::from_secs(10 * 60);
 /// How long an arm for no meeting waits for the look that decides whether the agenda's meeting is its call's (#896).
 const GUESS_WAIT: Duration = Duration::from_secs(3);
 /// Two readings of Teams' call timer that disagree on when the call began by more than this are two calls.
@@ -377,22 +379,6 @@ pub fn run_loop(mut app: TargetApp, stop: Arc<AtomicBool>, on_state: impl Fn(UiS
             }
         }
 
-        // A meeting set to "Join and record for me" (#900): at its start Echo opens it in the call app — the user may be
-        // on their phone — once for that occurrence, never while a call goes on here (the user at this computer: it
-        // waits until that call ends). Its arm then records only a call begun after that (`for_me_ready`).
-        if let Some(a) = armed.as_ref().filter(|_| rec.is_none() && !in_call) {
-            if let Some(m) = a.meeting.as_ref().filter(|m| m.join_for_me && parse_time(&m.start).is_some_and(|s| now >= s) && opened_for_me.as_ref().is_none_or(|(k, _)| *k != occurrence(m))) {
-                opened_for_me = Some((occurrence(m), Instant::now()));
-                match open_join(m) {
-                    Ok(()) => emit("joined_for_me", json!({ "subject": m.subject })),
-                    Err(e) => {
-                        emit("error", json!({ "message": format!("could not join the meeting: {e:#}") }));
-                        crate::app::notify("Could not join the meeting", &format!("{e:#}"));
-                    }
-                }
-            }
-        }
-
         // 1. Agenda → offer "join & record" once per meeting, from T−58 s to T+4 min.
         let agenda: Vec<MeetingContext> = read_json("agenda.json").unwrap_or_default();
         for m in &agenda {
@@ -478,6 +464,25 @@ pub fn run_loop(mut app: TargetApp, stop: Arc<AtomicBool>, on_state: impl Fn(UiS
         // Platforms that can't detect calls start on arm and stop on `echoctl stop`.
         let call_active = detected.map(|_| in_call).unwrap_or(true);
 
+        // A meeting set to "Join and record for me" (#900): at its start, while it lasts, Echo opens it in the call app —
+        // the user may be on their phone — once for that occurrence, and only when this tick's look found no call here
+        // (the user at this computer: it waits until that call ends). Its arm then records only a call begun soon after
+        // (`for_me_ready`).
+        if let Some(a) = armed.as_ref().filter(|_| rec.is_none() && !in_call && detected.is_some()) {
+            let on = |m: &MeetingContext| parse_time(&m.start).is_some_and(|s| now >= s) && parse_time(&m.end).is_none_or(|e| now < e);
+            if let Some(m) = a.meeting.as_ref().filter(|m| m.join_for_me && on(m) && opened_for_me.as_ref().is_none_or(|(k, _)| *k != occurrence(m))) {
+                opened_for_me = Some((occurrence(m), Instant::now()));
+                match open_join(m) {
+                    Ok(()) => emit("joined_for_me", json!({ "subject": m.subject })),
+                    Err(e) => {
+                        emit("error", json!({ "message": format!("could not join the meeting: {e:#}") }));
+                        crate::app::notify("Could not join the meeting", &format!("{e:#}"));
+                    }
+                }
+            }
+        }
+
+
         // Calls back to back: the call going on now isn't the one being recorded (Teams' timer says it began at
         // another time, steadily; or its window names another call right after the mic came back) — the recording
         // ends here, and this call is a new one: recorded when an arm (or a scheduled meeting) waits for it, else
@@ -561,15 +566,33 @@ pub fn run_loop(mut app: TargetApp, stop: Arc<AtomicBool>, on_state: impl Fn(UiS
         // A meeting's arm starts only on a call of its app (a Meet meeting's in Chrome, a Teams one's in Teams).
         // A meeting joined for the user starts only on the call Echo opened: one begun after it opened that meeting — never
         // a call the user was on at this computer, which its silent tap would mute for them.
-        let for_me_ready = |m: &MeetingContext| opened_for_me.as_ref().is_some_and(|(k, at)| *k == occurrence(m) && call_began.is_some_and(|b| b >= *at));
+        let for_me_ready = |m: &MeetingContext| opened_for_me.as_ref().is_some_and(|(k, at)| *k == occurrence(m) && call_began.is_some_and(|b| b >= *at && b <= *at + FOR_ME_JOIN_WITHIN));
+        // The user on that very meeting at this computer (its window names it): recorded as any meeting, not silent.
+        let mut for_me_here = false;
         let startable = armed.as_ref().filter(|a| {
-            a.meeting.as_ref().is_none_or(|m| m.is_in(app) && (!m.join_for_me || for_me_ready(m))) && held_arm.as_deref() != Some(a.id.as_str()) && ((now - a.armed_at).to_std().unwrap_or_default() <= ARM_EXPIRES || waiting_for(waits_other.as_deref(), a, now))
+            a.meeting.as_ref().is_none_or(|m| m.is_in(app)) && held_arm.as_deref() != Some(a.id.as_str()) && ((now - a.armed_at).to_std().unwrap_or_default() <= ARM_EXPIRES || waiting_for(waits_other.as_deref(), a, now))
         });
         // A meeting's arm starts only on that meeting's call: while the user is still on another call (one that began
         // before this meeting could, or whose window names another), it waits — looked at again every few seconds —
         // and starts once they are on this one (#483). A call window that can't be read changes nothing.
         let on_its_call = match startable.filter(|_| rec.is_none() && call_active && detected.is_some() && app == TargetApp::Teams && call_window_readable()).and_then(|a| a.meeting.as_ref().map(|m| (a.id.clone(), m))) {
             None => true,
+            // Joined for the user: its window names the meeting (the user on it here), or the call Echo opened names
+            // nothing else; looked at again every few seconds.
+            Some((_, m)) if m.join_for_me => match looker.take() {
+                Some(seen) if last_arm_look.is_some() => {
+                    last_arm_look = Some(Instant::now());
+                    for_me_here = same_name(m, &seen) == Some(true);
+                    for_me_here || guess_holds(m, &seen)
+                }
+                _ => {
+                    if last_arm_look.is_none_or(|t| t.elapsed() >= CALL_LOOK_EVERY) {
+                        last_arm_look = Some(Instant::now());
+                        looker.start();
+                    }
+                    false
+                }
+            },
             Some((id, m)) => match looker.take() {
                 Some(seen) if last_arm_look.is_some() => match meetings_call(m, &seen) {
                     // Waiting already, and this look reads nothing: one such look isn't enough to start (a window
@@ -634,12 +657,15 @@ pub fn run_loop(mut app: TargetApp, stop: Arc<AtomicBool>, on_state: impl Fn(UiS
             },
         };
         let guessed = startable.is_some_and(|a| a.meeting.is_some()) || guess.is_some();
-        if let Some(a) = startable.filter(|a| rec.is_none() && call_active && on_its_call && guessed && take_arm(&a.id)) {
+        // A meeting joined for the user starts only on the call Echo opened for it, or on it with the user here.
+        let for_me_ok = startable.is_some_and(|a| a.meeting.as_ref().is_none_or(|m| !m.join_for_me || for_me_here || for_me_ready(m)));
+        if let Some(a) = startable.filter(|a| rec.is_none() && call_active && on_its_call && guessed && for_me_ok && take_arm(&a.id)) {
             waits_other = None;
             unread_once = false;
             last_arm_look = None;
             guess_look = None;
-            let meeting = a.meeting.clone().or_else(|| guess.flatten());
+            // The user on it here: heard on the speakers as any call.
+            let meeting = a.meeting.clone().map(|m| MeetingContext { join_for_me: m.join_for_me && !for_me_here, ..m }).or_else(|| guess.flatten());
             // The AI profile is pinned now: changing the default later never changes this call.
             let ai_profile = Some(pinned_profile(a, meeting.as_ref()));
             match Recording::start(app, a.title.as_deref(), meeting.as_ref(), a.languages.clone(), ai_profile) {
@@ -1316,11 +1342,14 @@ fn open_meeting(url: &str, app: Option<&str>) -> Result<()> {
 /// recording for it.
 pub fn join(meeting: MeetingContext) -> Result<()> {
     if meeting.join_for_me {
+        // Joined for the user: scheduled, so the watcher arms it, keeps it armed while it lasts and opens it at its start.
         for_me_allowed(&meeting)?;
-    } else {
-        // Joined for the user, the watcher opens it at its start (`open_join`), once.
-        open_join(&meeting)?;
+        let subject = meeting.subject.clone().unwrap_or_else(|| "the meeting".into());
+        crate::schedule::add(meeting)?;
+        println!("Echo joins “{subject}” in Teams at its start and records it");
+        return Ok(());
     }
+    open_join(&meeting)?;
     let title = meeting.subject.clone();
     arm(title, Some(meeting), None, None)
 }
@@ -1333,6 +1362,9 @@ pub fn for_me_allowed(m: &MeetingContext) -> Result<()> {
     }
     if m.teams_join_url().is_none() {
         bail!("Join and record for me needs a Teams meeting with its join link");
+    }
+    if m.id.is_none() || m.start.is_none() {
+        bail!("Join and record for me needs the meeting's event id and start (as the calendar gives them)");
     }
     Ok(())
 }

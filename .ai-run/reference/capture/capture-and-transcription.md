@@ -13,9 +13,12 @@ on. It changes with the code, in the same PR. The rules are in `.ai-run/guides/c
 - A scheduled meeting leaves the schedule once its recording starts; stopping never re-arms it.
 - A meeting with `join_for_me` ("Join and record for me", `meeting::MeetingContext`; a Teams meeting with its link, on
   a Mac: `watch::for_me_allowed`) is opened in its app by the watcher at its start (`watch::open_join`), once an
-  occurrence (`watch::occurrence`, event `joined_for_me`), and not while a call goes on here. Its arm starts only on a
-  call begun after that opening, and that recording's app tap is silent on the speakers (`audio::app_source`,
-  `CATapMuteBehavior::Muted`). `echoctl arm --meeting` and `agenda set` clear the flag from a file.
+  occurrence (`watch::occurrence`, event `joined_for_me`), while it lasts and only when that tick's detection found no
+  call here. Its arm starts only on a call begun within `FOR_ME_JOIN_WITHIN` (10 min, `watch.rs`) after that opening
+  whose window names nothing else (`call_window::guess_holds`), and that recording's app tap is silent on the speakers
+  (`audio::app_source`, `CATapMuteBehavior::Muted`). A call whose window names the meeting (the user on it here) starts
+  it as any meeting, not silent. `echoctl join --for-me` schedules it; `echoctl arm --meeting` and `agenda set` clear
+  the flag from a file.
 
 ## Opt-in
 
