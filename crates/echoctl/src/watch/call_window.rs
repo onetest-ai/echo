@@ -85,16 +85,7 @@ pub(super) fn waiting_for(waits: Option<&str>, a: &Armed, now: DateTime<Utc>) ->
 /// its window names something else too — never on a name alone (a renamed occurrence, a translated or channel title
 /// read differently). `None` when the look can't tell.
 pub(super) fn meetings_call(meeting: &MeetingContext, seen: &CallSeen) -> Option<bool> {
-    let norm = |s: &str| s.to_lowercase().chars().map(|c| if c.is_alphanumeric() { c } else { ' ' }).collect::<String>().split_whitespace().collect::<Vec<_>>().join(" ");
-    let named = seen.name.as_deref().filter(|_| !seen.channel).map(norm).filter(|n| !n.is_empty());
-    let subject = meeting.subject.as_deref().map(norm).filter(|s| !s.is_empty());
-    // The meeting's name in the window's, as whole words (a chat "Acme" isn't "Acme design review"); or the window's a
-    // cut form of it (three words or more, the start of the meeting's name).
-    let same_name = match (&named, &subject) {
-        (Some(n), Some(s)) => Some(format!(" {n} ").contains(&format!(" {s} ")) || (n.split(' ').count() >= 3 && s.starts_with(n.as_str()))),
-        _ => None,
-    };
-    if same_name == Some(true) {
+    if same_name(meeting, seen) == Some(true) {
         return Some(true);
     }
     let start = parse_time(&meeting.start)?;
@@ -105,6 +96,24 @@ pub(super) fn meetings_call(meeting: &MeetingContext, seen: &CallSeen) -> Option
     // Began before the meeting could, and its window doesn't name the meeting: another call (#483) — named otherwise,
     // or with no name to tell (a channel's, none).
     Some(false)
+}
+
+/// Whether the call window names the meeting: `None` when it names nothing to tell (no name, a channel's) or the
+/// meeting has no subject.
+fn same_name(meeting: &MeetingContext, seen: &CallSeen) -> Option<bool> {
+    let norm = |s: &str| s.to_lowercase().chars().map(|c| if c.is_alphanumeric() { c } else { ' ' }).collect::<String>().split_whitespace().collect::<Vec<_>>().join(" ");
+    let named = seen.name.as_deref().filter(|_| !seen.channel).map(norm).filter(|n| !n.is_empty())?;
+    let subject = meeting.subject.as_deref().map(norm).filter(|s| !s.is_empty())?;
+    // The meeting's name in the window's, as whole words (a chat "Acme" isn't "Acme design review"); or the window's a
+    // cut form of it (three words or more, the start of the meeting's name).
+    Some(format!(" {named} ").contains(&format!(" {subject} ")) || (named.split(' ').count() >= 3 && subject.starts_with(named.as_str())))
+}
+
+/// Whether the agenda meeting a call overlaps — the user asked to record the call, not that meeting — is that call's,
+/// from one look at its window (#896): not when the window names something else (an ad-hoc call, another meeting
+/// joined meanwhile) or the call began before the meeting could. A window that tells nothing: it is.
+pub(super) fn guess_holds(meeting: &MeetingContext, seen: &CallSeen) -> bool {
+    same_name(meeting, seen) != Some(false) && meetings_call(meeting, seen) != Some(false)
 }
 
 /// A reading that says "another call", waiting for a later one to confirm it.

@@ -46,6 +46,8 @@ const REJOIN_GRACE: Duration = Duration::from_secs(10);
 /// How often a recording looks at which call Teams is in (`call_seen`): calls back to back — the next one joined
 /// before the last one's end was seen, or within `REJOIN_GRACE` — must not run into one recording.
 const CALL_LOOK_EVERY: Duration = Duration::from_secs(5);
+/// How long an arm for no meeting waits for the look that decides whether the agenda's meeting is its call's (#896).
+const GUESS_WAIT: Duration = Duration::from_secs(3);
 /// Two readings of Teams' call timer that disagree on when the call began by more than this are two calls.
 const OTHER_CALL_BEGAN_S: i64 = 90;
 /// "Another call" must read the same on looks at least this far apart before the recording is split: a real timer's start
@@ -303,6 +305,9 @@ pub fn run_loop(mut app: TargetApp, stop: Arc<AtomicBool>, on_state: impl Fn(UiS
     let mut unread_once = false;
     let mut waits_on: Option<String> = None;
     let mut last_arm_look: Option<Instant> = None;
+    // An arm for no meeting on a call the agenda has a meeting for: when the look at the call window that decides
+    // whether that meeting is attached was asked for (#896).
+    let mut guess_look: Option<Instant> = None;
     // Keep today's agenda fresh from the calendar (if one is configured), off the main loop.
     let mut last_sync: Option<Instant> = None;
     // Sleep shows up as wall-clock time passing faster than the monotonic clock.
@@ -442,6 +447,7 @@ pub fn run_loop(mut app: TargetApp, stop: Arc<AtomicBool>, on_state: impl Fn(UiS
                     held_arm = None;
                     stopped_in_call = false;
                     last_arm_look = None;
+                    guess_look = None;
                     unread_once = false;
                     emit("call_ended", json!({ "app": app, "recording": rec.is_some() }));
                 }
@@ -577,12 +583,33 @@ pub fn run_loop(mut app: TargetApp, stop: Arc<AtomicBool>, on_state: impl Fn(UiS
                 }
             },
         };
-        if let Some(a) = startable.filter(|a| rec.is_none() && call_active && on_its_call && take_arm(&a.id)) {
+        // No meeting given: the agenda meeting this call overlaps is attached, unless a look at the call window says
+        // the call is another one — it names something else (an ad-hoc call, another meeting), or it began before the
+        // meeting could (#896). A window that can't be read, or a look that doesn't answer in `GUESS_WAIT`: attached.
+        let guess = match startable.filter(|a| a.meeting.is_none() && rec.is_none() && call_active && on_its_call) {
+            None => None,
+            Some(_) => match crate::calendar::meeting_now(Utc::now(), app) {
+                Some(m) if detected.is_some() && app == TargetApp::Teams && call_window_readable() => match looker.take() {
+                    Some(seen) if guess_look.is_some() => Some(guess_holds(&m, &seen).then_some(m)),
+                    _ if guess_look.is_some_and(|t| t.elapsed() >= GUESS_WAIT) => Some(Some(m)),
+                    _ => {
+                        guess_look.get_or_insert_with(|| {
+                            looker.start();
+                            Instant::now()
+                        });
+                        None
+                    }
+                },
+                m => Some(m),
+            },
+        };
+        let guessed = startable.is_some_and(|a| a.meeting.is_some()) || guess.is_some();
+        if let Some(a) = startable.filter(|a| rec.is_none() && call_active && on_its_call && guessed && take_arm(&a.id)) {
             waits_other = None;
             unread_once = false;
             last_arm_look = None;
-            // No meeting given: attach the agenda meeting this call overlaps, if any.
-            let meeting = a.meeting.clone().or_else(|| crate::calendar::meeting_now(Utc::now(), app));
+            guess_look = None;
+            let meeting = a.meeting.clone().or_else(|| guess.flatten());
             // The AI profile is pinned now: changing the default later never changes this call.
             let ai_profile = Some(pinned_profile(a, meeting.as_ref()));
             match Recording::start(app, a.title.as_deref(), meeting.as_ref(), a.languages.clone(), ai_profile) {
@@ -1359,6 +1386,15 @@ mod tests {
         assert_eq!(meetings_call(&m, &early_channel), Some(false), "another channel's call begun an hour before");
         assert!(seen_of(Some(5), Some("Meeting in “General” | Microsoft Teams")).channel && !seen_of(Some(5), Some("Acme design review | Microsoft Teams")).channel);
         assert_eq!(meetings_call(&m, &seen(None, None)), None, "nothing read");
+        // Recording asked for with no meeting, the agenda's meeting going on: attached only when the window doesn't say
+        // it's another call (#896).
+        assert!(!guess_holds(&m, &seen(Some("2026-11-12T17:31:00Z"), Some("Dana Lee, Sam Roe"))), "an ad-hoc call meanwhile");
+        assert!(!guess_holds(&m, &seen(None, Some("Storybook review"))), "another meeting, its timer not read");
+        assert!(!guess_holds(&m, &seen(Some("2026-11-12T16:30:00Z"), None)), "a call begun an hour before");
+        assert!(guess_holds(&m, &seen(Some("2026-11-12T17:31:00Z"), Some("Acme design review | Microsoft Teams"))));
+        assert!(guess_holds(&m, &seen(Some("2026-11-12T17:31:00Z"), None)), "a window naming nothing");
+        assert!(guess_holds(&m, &CallSeen { began: Some(t("2026-11-12T17:31:00Z")), name: Some("General".into()), channel: true }), "a channel meeting begun for it");
+        assert!(guess_holds(&m, &seen(None, None)), "nothing read");
         // The arm waiting for its call is kept until the meeting ends, not past it; another arm isn't.
         let a = Armed { id: "a1".into(), armed_at: t("2026-11-12T17:29:00Z"), title: None, meeting: Some(m.clone()), languages: None, ai_profile: None };
         assert!(waiting_for(Some("a1"), &a, t("2026-11-12T17:50:00Z")), "past the 15 min an arm has, the meeting still on");
