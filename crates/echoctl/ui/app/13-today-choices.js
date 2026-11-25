@@ -28,6 +28,8 @@ function dayChoices(day, now, ctx = {}) {
   if (cur.length) clusters.push(cur)
   for (const members of clusters) {
     if (members.length < 2) continue
+    // All kept together (Keep both, #897): you go to each — no choice.
+    if (members[0].kept && members.every((x) => x.kept === members[0].kept)) continue
     // Echo suggests one only for a reason the design names, met by exactly one of them (the user's decision,
     // 2026-11-11): you organise it, else you're a required attendee (#402), else a promise of yours in its thread is
     // due, else it is a client's. No reason: no suggestion — your call.
@@ -96,6 +98,8 @@ function dayChoicesView(d, now) {
     const acts = confirm
       ? `<span class="set-sub">${others(confirm).length ? `Decline ${esc(others(confirm).map(name).join(', '))}? The organiser${others(confirm).length === 1 ? ' is' : 's are'} told.` : 'Nothing to decline.'}${yours(confirm).length ? ` Yours — ${esc(yours(confirm).map(name).join(', '))} — stays: cancel it in Outlook.` : ''}</span>${others(confirm).length ? '<button' : '<span hidden'} class="btn sm primary" data-td-keep-yes="1" data-keep="${esc(confirm.event)}" data-decline="${esc(others(confirm).map((x) => x.event).join('|'))}">Decline ${others(confirm).length === 1 ? 'it' : 'them'}${others(confirm).length ? '</button>' : '</span>'}<button class="btn sm ghost" data-td-keep-no="1">Cancel</button>`
       : c.members.map((x) => `<button class="btn sm${x === c.pick ? ' primary' : ''}" data-td-keep="${esc(x.event)}" data-key="${esc(key)}" ${c.members.some((m) => busy[m.event]) ? 'disabled' : ''}>Keep ${esc(name(x))}</button>`).join('')
+        // Keep both (all): you go to each, part of one and part of another — nothing declined, nothing sent.
+        + `<button class="btn sm" data-td-keep-all="${esc(key)}" ${c.members.some((m) => busy[m.event]) ? 'disabled' : ''}>Keep ${c.members.length === 2 ? 'both' : `all ${c.members.length}`}</button>`
     return `<div class="ch-row" role="listitem" aria-label="${esc(`At once: ${c.members.map(name).join(' or ')}`)}"><span class="ag-t mono choice">${esc(hm(c.at))}</span><div class="ch-b"><div>${c.members.map((x) => `<b class="ch-m" data-td-ev="${esc(x.event || '')}">${esc(name(x))}</b>`).join(' <span class="set-sub">or</span> ')}</div><div class="set-sub">You accepted ${c.members.length} at once. ${c.pick ? `Echo suggests <b>${esc(name(c.pick))}</b> — ${esc(c.why)}` : 'Echo has no reason to pick one — your call.'}</div><div class="ch-acts">${acts}</div></div></div>`
   }).join('')
   return `<section class="td-sec ch-sec" aria-label="The day's choices"><h2>The day's choices <span class="set-sub">${cs.length}</span></h2><div class="ch-list" role="list">${lines}</div></section>`
@@ -128,6 +132,8 @@ document.addEventListener('click', (e) => {
     render()
     return was && refocus(`[data-td-keep="${CSS.escape(was.event)}"][data-key="${CSS.escape(was.key)}"]`)
   }
+  const all = e.target.closest('[data-td-keep-all]')
+  if (all) { e.stopPropagation(); return send({ cmd: 'overlap_keep', events: all.dataset.tdKeepAll.split('|') }) }
   const y = e.target.closest('[data-td-keep-yes]')
   if (y) {
     e.stopPropagation()

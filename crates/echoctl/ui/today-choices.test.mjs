@@ -78,6 +78,12 @@ test("an invite at the time of a choice not made says you accepted others then, 
   assert.equal(show(cs), 'Long one or Short one → your call | Intro? decline (you accepted 2 others then)')
 })
 
+test('meetings at once kept together (Keep both) are no choice; a third at once with them still is', () => {
+  const k = { kept: '2026-11-12 a|b' }
+  assert.equal(show(dayChoices([mt('Acme sync', 13, 0, 13, 45, 'accepted', k), mt('Globex review', 13, 30, 14, 30, 'accepted', k)], day(9, 0))), '')
+  assert.equal(show(dayChoices([mt('Acme sync', 13, 0, 13, 45, 'accepted', k), mt('Globex review', 13, 30, 14, 30, 'accepted', k), mt('Ops', 13, 40, 14, 0)], day(9, 0))), 'Acme sync or Globex review or Ops → your call')
+})
+
 let failed = 0
 for (const [name, f] of tests) {
   try { f(); console.log(`ok - ${name}`) } catch (e) { failed++; console.log(`not ok - ${name}\n  ${e.message}`) }

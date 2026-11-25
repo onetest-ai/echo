@@ -189,6 +189,11 @@ pub(super) fn handle(v: &Value) -> Option<Handled> {
             Ok(()) => true.into(),
             Err(e) => notice(&format!("{e:#}")),
         },
+        // The day's choices: Keep both (all) of meetings at once — nothing sent, the choice made.
+        "overlap_keep" => match crate::today::keep_overlap(&v["events"].as_array().map(|a| a.iter().filter_map(Value::as_str).collect::<Vec<_>>()).unwrap_or_default()) {
+            Ok(()) => true.into(),
+            Err(e) => notice(&format!("{e:#}")),
+        },
         // The day's choices: Accept, Maybe or Decline an invite, sent to its organiser by the user's click.
         "event_respond" => match crate::m365::event_respond(v["event"].as_str().unwrap_or(""), v["how"].as_str().unwrap_or(""), true) {
             Ok(r) => notice(&format!("{} — {}", r["meeting"].as_str().unwrap_or("the meeting"), match r["answer"].as_str() { Some("accepted") => "accepted", Some("declined") => "declined", _ => "maybe" })),

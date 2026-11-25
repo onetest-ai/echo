@@ -637,8 +637,10 @@ function agendaRows(day, now, tasks) {
   // choice); a meeting you aren't sure of joins the first group it overlaps, else opens its own. No chains: two
   // meetings that don't overlap each other never share a line.
   const groups = []
+  // Ones kept together (Keep both, #897) are each a line of their own.
+  const together = (a, b) => !!a.x.kept && a.x.kept === b.x.kept
   for (const m of items.filter((m) => m.g === 'yes')) {
-    const g = groups.find((g) => meets(g[0], m))
+    const g = groups.find((g) => meets(g[0], m) && !together(g[0], m))
     if (g) g.push(m); else groups.push([m])
   }
   for (const m of items.filter((m) => m.g !== 'yes')) {

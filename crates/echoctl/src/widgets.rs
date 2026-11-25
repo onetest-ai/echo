@@ -309,8 +309,10 @@ fn has_choices(day: &[Value], now: chrono::DateTime<chrono::Utc>) -> bool {
     if open.iter().any(|(x, _)| x["response"] == "notResponded") {
         return true;
     }
-    let yes: Vec<_> = open.iter().filter(|(x, _)| !matches!(x["response"].as_str(), Some("tentativelyAccepted" | "declined"))).map(|(_, s)| *s).collect();
-    yes.iter().enumerate().any(|(i, a)| yes[i + 1..].iter().any(|b| a.0 < b.1 && b.0 < a.1))
+    let yes: Vec<_> = open.iter().filter(|(x, _)| !matches!(x["response"].as_str(), Some("tentativelyAccepted" | "declined"))).map(|(x, s)| (*s, x["kept"].as_str())).collect();
+    // Two the user keeps both of (Keep both, `today::keep_overlap`) are no choice.
+    let kept_together = |a: Option<&str>, b: Option<&str>| a.is_some() && a == b;
+    yes.iter().enumerate().any(|(i, (a, ka))| yes[i + 1..].iter().any(|(b, kb)| a.0 < b.1 && b.0 < a.1 && !kept_together(*ka, *kb)))
 }
 
 /// A widget on Today set to a thread or a client (`params`): its data cut from the day Today already read — Your
@@ -525,6 +527,9 @@ mod tests {
         assert!(has_choices(&[m(1, 3, "accepted"), m(2, 4, "organizer")], now), "two accepted at once");
         assert!(!has_choices(&[m(1, 3, "accepted"), m(2, 4, "tentativelyAccepted")], now), "a maybe isn't a choice");
         assert!(has_choices(&[m(5, 6, "notResponded")], now), "an invite to answer");
+        let kept = |s: i64, e: i64, k: &str| json!({"kind": "meeting", "start": t(s), "end": t(e), "response": "accepted", "kept": k});
+        assert!(!has_choices(&[kept(1, 3, "a|b"), kept(2, 4, "a|b")], now), "both kept");
+        assert!(has_choices(&[kept(1, 3, "a|b"), kept(2, 4, "a|b"), m(2, 3, "accepted")], now), "a third at once still is one");
         assert!(!has_choices(&[m(-3, -2, "notResponded"), m(-3, -1, "accepted"), m(-3, -1, "accepted")], now), "what is over");
     }
 
