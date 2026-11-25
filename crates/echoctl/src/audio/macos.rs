@@ -371,11 +371,13 @@ const PROCESS_CHECK_EVERY: Duration = Duration::from_secs(1);
 /// (Teams spawns helper processes as calls start, screens are shared, etc.).
 pub struct AppTapSource {
     app: TargetApp,
+    /// The app plays only into the tap, not on the speakers (a meeting joined for the user, #900).
+    silent: bool,
 }
 
 impl AppTapSource {
-    pub fn new(app: TargetApp) -> Self {
-        Self { app }
+    pub fn new(app: TargetApp, silent: bool) -> Self {
+        Self { app, silent }
     }
 }
 
@@ -389,7 +391,7 @@ impl Source for AppTapSource {
         let nums: Vec<Retained<NSNumber>> = ids.iter().map(|id| NSNumber::new_u32(*id)).collect();
         let list = NSArray::from_retained_slice(&nums);
         let desc = unsafe { CATapDescription::initMonoMixdownOfProcesses(CATapDescription::alloc(), &list) };
-        let mut tap = TapStream::start(desc, epoch, tx)?;
+        let mut tap = TapStream::start(desc, self.silent, epoch, tx)?;
         tap.app = Some(self.app);
         tap.label = format!(
             "{:?} tap on {} @ {} Hz",
@@ -409,7 +411,7 @@ pub fn probe_system_audio() -> Result<f32> {
     let none: Retained<NSArray<NSNumber>> = NSArray::new();
     let desc = unsafe { CATapDescription::initMonoGlobalTapButExcludeProcesses(CATapDescription::alloc(), &none) };
     let (tx, rx) = mpsc::channel();
-    let tap = TapStream::start(desc, 1, tx)?;
+    let tap = TapStream::start(desc, false, 1, tx)?;
     std::thread::sleep(Duration::from_millis(1500));
     drop(tap);
     let (mut frames, mut peak) = (0usize, 0f32);
@@ -437,12 +439,13 @@ pub struct TapStream {
 }
 
 impl TapStream {
-    fn start(desc: Retained<CATapDescription>, epoch: u32, tx: Sender<Chunk>) -> Result<Self> {
+    fn start(desc: Retained<CATapDescription>, muted: bool, epoch: u32, tx: Sender<Chunk>) -> Result<Self> {
         unsafe {
-            // 1. Private tap; the tapped audio keeps playing for the user.
+            // 1. Private tap; the tapped audio keeps playing for the user, unless `muted`: then it plays only into
+            // the tap, never out loud.
             desc.setName(&NSString::from_str("echo"));
             desc.setPrivate(true);
-            desc.setMuteBehavior(CATapMuteBehavior::Unmuted);
+            desc.setMuteBehavior(if muted { CATapMuteBehavior::Muted } else { CATapMuteBehavior::Unmuted });
             let mut tap_id: AudioObjectID = 0;
             check(AudioHardwareCreateProcessTap(Some(&desc), &mut tap_id), "AudioHardwareCreateProcessTap")?;
             let tap_uid = desc.UUID().UUIDString();
@@ -594,6 +597,37 @@ impl Drop for TapStream {
 
 #[cfg(test)]
 mod tests {
+    /// #900 spike: a muted tap of a process still delivers its audio (run by hand, unsandboxed: plays a tone).
+    #[test]
+    #[ignore]
+    fn a_muted_tap_still_hears_the_process() {
+        let wav = std::env::temp_dir().join("echo-tap-tone.wav");
+        let rate = 16000u32;
+        let samples: Vec<i16> = (0..rate * 6).map(|i| ((i as f32 * 440.0 * std::f32::consts::TAU / rate as f32).sin() * 8000.0) as i16).collect();
+        let mut b = Vec::new();
+        b.extend(b"RIFF"); b.extend(&(36 + samples.len() as u32 * 2).to_le_bytes()); b.extend(b"WAVEfmt ");
+        b.extend(&16u32.to_le_bytes()); b.extend(&1u16.to_le_bytes()); b.extend(&1u16.to_le_bytes()); b.extend(&rate.to_le_bytes());
+        b.extend(&(rate * 2).to_le_bytes()); b.extend(&2u16.to_le_bytes()); b.extend(&16u16.to_le_bytes()); b.extend(b"data");
+        b.extend(&(samples.len() as u32 * 2).to_le_bytes()); for s in &samples { b.extend(&s.to_le_bytes()); }
+        std::fs::write(&wav, b).unwrap();
+        let mut child = std::process::Command::new("afplay").arg(&wav).spawn().unwrap();
+        std::thread::sleep(Duration::from_millis(800));
+        let procs: Vec<_> = super::audio_processes().unwrap().into_iter().filter(|p| p.pid == child.id() as i32).collect();
+        assert!(!procs.is_empty(), "afplay not among audio processes");
+        for muted in [true, false] {
+            let nums: Vec<Retained<NSNumber>> = procs.iter().map(|p| NSNumber::new_u32(p.object_id)).collect();
+            let desc = unsafe { CATapDescription::initMonoMixdownOfProcesses(CATapDescription::alloc(), &NSArray::from_retained_slice(&nums)) };
+            let (tx, rx) = mpsc::channel();
+            let tap = super::TapStream::start(desc, muted, 1, tx).unwrap();
+            std::thread::sleep(Duration::from_millis(1500));
+            drop(tap);
+            let peak = rx.try_iter().flat_map(|c| c.samples).fold(0f32, |m, s| m.max(s.abs()));
+            eprintln!("muted={muted} peak={peak}");
+            assert!(peak > 0.05, "muted={muted}: the tap heard nothing (peak {peak})");
+        }
+        let _ = child.kill();
+    }
+
     use super::*;
     use std::sync::atomic::AtomicUsize;
 

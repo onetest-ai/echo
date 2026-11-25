@@ -308,6 +308,8 @@ pub fn run_loop(mut app: TargetApp, stop: Arc<AtomicBool>, on_state: impl Fn(UiS
     // An arm for no meeting on a call the agenda has a meeting for: when the look at the call window that decides
     // whether that meeting is attached was asked for (#896).
     let mut guess_look: Option<(String, Instant)> = None;
+    // The arm whose meeting Echo opened for the user ("Join and record for me", #900): once each.
+    let mut joined_for: Option<String> = None;
     // Keep today's agenda fresh from the calendar (if one is configured), off the main loop.
     let mut last_sync: Option<Instant> = None;
     // Sleep shows up as wall-clock time passing faster than the monotonic clock.
@@ -369,6 +371,21 @@ pub fn run_loop(mut app: TargetApp, stop: Arc<AtomicBool>, on_state: impl Fn(UiS
                 if arm(subject.clone(), Some(m), None, None).is_ok() {
                     emit("scheduled_armed", json!({ "subject": subject }));
                     armed = read_json("armed.json");
+                }
+            }
+        }
+
+        // A meeting set to "Join and record for me" (#900): at its start Echo opens it in the call app — the user may be
+        // on their phone — once for its arm; the arm then records it as any call.
+        if let Some(a) = armed.as_ref().filter(|a| rec.is_none() && joined_for.as_deref() != Some(a.id.as_str())) {
+            if let Some(m) = a.meeting.as_ref().filter(|m| m.join_for_me && parse_time(&m.start).is_some_and(|s| now >= s)) {
+                joined_for = Some(a.id.clone());
+                match open_join(m) {
+                    Ok(()) => emit("joined_for_me", json!({ "subject": m.subject })),
+                    Err(e) => {
+                        emit("error", json!({ "message": format!("could not join the meeting: {e:#}") }));
+                        crate::app::notify("Could not join the meeting", &format!("{e:#}"));
+                    }
                 }
             }
         }
@@ -1291,6 +1308,13 @@ fn open_meeting(url: &str, app: Option<&str>) -> Result<()> {
 /// `echoctl join`: open the meeting in the desktop app (a Google Meet one in Chrome, where Echo records it) and arm
 /// recording for it.
 pub fn join(meeting: MeetingContext) -> Result<()> {
+    open_join(&meeting)?;
+    let title = meeting.subject.clone();
+    arm(title, Some(meeting), None, None)
+}
+
+/// Opens a meeting's join link in its desktop app (a Google Meet one in Chrome).
+fn open_join(meeting: &MeetingContext) -> Result<()> {
     let Some(url) = meeting.recordable()?.join_url.clone() else { bail!("meeting has no join_url") };
     let url = crate::apps::desktop_join_url(&url);
     if !crate::app::open_log_only(&url) {
@@ -1300,8 +1324,7 @@ pub fn join(meeting: MeetingContext) -> Result<()> {
         // Not `cmd /C start`: cmd would split the URL at `&`.
         std::process::Command::new("rundll32").args(["url.dll,FileProtocolHandler", &url]).status()?;
     }
-    let title = meeting.subject.clone();
-    arm(title, Some(meeting), None, None)
+    Ok(())
 }
 
 pub fn write_agenda(meetings: &[MeetingContext]) -> Result<()> {

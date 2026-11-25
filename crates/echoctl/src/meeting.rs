@@ -65,6 +65,10 @@ pub struct MeetingContext {
     /// Those who declined: not among `attendees`, shown last in the call's header.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub declined: Vec<Person>,
+    /// "Join and record for me" (#900): at its start Echo opens it in the call app on this computer — the user may be on
+    /// their phone — and records it with the app kept silent on the speakers.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub join_for_me: bool,
 }
 
 pub const FILE: &str = "meeting.json";
@@ -327,6 +331,16 @@ pub fn attach(call: &str, file: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn join_for_me_is_written_only_when_set_and_read_back() {
+        let plain = MeetingContext { subject: Some("Acme weekly sync".into()), ..Default::default() };
+        assert!(!serde_json::to_string(&plain).unwrap().contains("join_for_me"), "a meeting.json as before");
+        let mine = MeetingContext { join_for_me: true, ..plain };
+        let back: MeetingContext = serde_json::from_str(&serde_json::to_string(&mine).unwrap()).unwrap();
+        assert!(back.join_for_me);
+        assert!(!serde_json::from_str::<MeetingContext>(r#"{"subject": "Old"}"#).unwrap().join_for_me);
+    }
 
     fn p(name: &str, email: &str) -> Person {
         Person { name: name.into(), email: Some(email.into()) }

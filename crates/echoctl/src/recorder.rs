@@ -156,7 +156,7 @@ impl Recording {
         }
         // Both tracks share t0, so their timelines line up sample-for-sample.
         let t0 = Instant::now();
-        let remote = Some(Track::start("remote", &dir.join("remote.wav"), audio::app_source(app), t0)?);
+        let remote = Some(Track::start("remote", &dir.join("remote.wav"), audio::app_source(app, meeting.is_some_and(|m| m.join_for_me)), t0)?);
         let mic = Track::start("mic", &dir.join("mic.wav"), audio::mic_source(Some(app)), t0)?;
         // Transcribes the tracks as they are written (reads the WAVs, so it starts after them).
         #[cfg(feature = "transcribe")]

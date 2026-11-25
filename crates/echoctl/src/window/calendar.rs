@@ -139,7 +139,7 @@ pub(super) fn calendar(q: &str) -> Value {
         .collect();
     let recording = watch::running_watcher().and_then(|w| w.recording);
     let mut used = vec![false; calls.len()];
-    let scheduled: Vec<(String, Vec<String>)> = crate::schedule::load().into_iter().filter_map(|m| Some((m.id?, m.languages))).collect();
+    let scheduled: Vec<(String, Vec<String>, bool)> = crate::schedule::load().into_iter().filter_map(|m| Some((m.id?, m.languages, m.join_for_me))).collect();
     let raw_events = RAW_EVENTS.lock().unwrap_or_else(|e| e.into_inner()).clone();
     let offers = crate::teams_transcript::offers();
     let tbook = crate::calls::type_book();
@@ -196,8 +196,11 @@ pub(super) fn calendar(q: &str) -> Value {
         }
         let sched = e["id"].as_str().and_then(|id| scheduled.iter().find(|s| s.0 == id));
         e["scheduled"] = json!(sched.is_some());
-        if let Some((_, l)) = sched.filter(|s| !s.1.is_empty()) {
+        if let Some((_, l, _)) = sched.filter(|s| !s.1.is_empty()) {
             e["scheduled_languages"] = json!(l);
+        }
+        if sched.is_some_and(|s| s.2) {
+            e["scheduled_for_me"] = json!(true);
         }
         // Ended, not recorded: does Teams have its transcript? Known → `transcript`; else asked in the background.
         if let Some(raw) = e["recorded"].is_null().then(|| raw_events.iter().find(|r| r["id"] == e["id"])).flatten() {

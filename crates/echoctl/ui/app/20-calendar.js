@@ -150,7 +150,7 @@ function eventDetail(e, now) {
     'other-app': () => '',
     scheduled: () => `<button class="btn" data-unschedule="${esc(e.id)}">Don't record</button>`,
     join: () => `${recordButton(`data-join="${esc(e.id)}"`, 'Join & record')}<button class="btn" data-schedule="${esc(e.id)}" title="Record without joining — you're in it already">Record</button>`,
-    record: () => recordButton(`data-schedule="${esc(e.id)}"`, st.live ? 'Record it' : 'Record when it starts'),
+    record: () => recordButton(`data-schedule="${esc(e.id)}"`, st.live ? 'Record it' : 'Record when it starts') + (notTeams(e) ? '' : `<button class="btn" data-schedule="${esc(e.id)}" data-for-me="1" title="You'll be on your phone: Echo joins it in Teams on this computer and records it, silent on the speakers">Join and record for me</button>`),
     import: () => e.import && e.import.busy ? '<button class="btn" disabled>Importing the Teams transcript…</button>'
       : `<button class="btn primary" data-cal-import="${esc(e.id)}">Import Teams transcript</button>`,
   }
@@ -163,6 +163,7 @@ function eventDetail(e, now) {
     : e.import && e.import.error ? esc(e.import.error)
     : kind === 'import' ? `${e.transcript ? 'Not recorded, but Teams transcribed it' : e.transcript === false ? 'Not recorded, and Teams has no transcript of it (yet)' : 'Not recorded. If Teams transcribed it'}: Echo makes a call of its transcript and chat; minutes, threads and Recall follow.`
     : kind === 'other-app' ? notYet(e)
+    : kind === 'scheduled' && e.scheduled_for_me ? `At its start Echo joins it in Teams on this computer and records it, silent on the speakers — you can be on your phone${e.scheduled_languages ? `; transcribed as ${esc(e.scheduled_languages.map(langName).join(', '))}` : ''}.`
     : kind === 'scheduled' ? `Echo starts recording a minute before it begins${e.scheduled_languages ? `, transcribed as ${esc(e.scheduled_languages.map(langName).join(', '))}` : ''}.`
     : kind === 'join' ? 'Joins it in Teams and records both sides.'
     : kind === 'record' ? (st.live ? 'Records it now, both sides.' : 'Echo starts recording a minute before it begins.')
@@ -247,7 +248,7 @@ function eventMenu(d, now) {
     'other-app': () => '',
     scheduled: () => item(`data-unschedule="${esc(e.id)}"`, "Don't record"),
     join: () => item(`data-join="${esc(e.id)}"`, 'Join & record') + item(`data-schedule="${esc(e.id)}"`, 'Record (without joining)'),
-    record: () => item(`data-schedule="${esc(e.id)}"`, st.live ? 'Record it' : 'Record when it starts'),
+    record: () => item(`data-schedule="${esc(e.id)}"`, st.live ? 'Record it' : 'Record when it starts') + (notTeams(e) ? '' : item(`data-schedule="${esc(e.id)}" data-for-me="1"`, 'Join and record for me')),
     import: () => item(`data-cal-import="${esc(e.id)}"`, 'Import Teams transcript', e.import && e.import.busy ? ' disabled' : ''),
   }
   const p = e.prep
@@ -309,9 +310,11 @@ document.addEventListener('keydown', (ev) => {
 for (const t of ['wheel', 'resize']) window.addEventListener(t, () => { if (S.cal.ctx) closeEventMenu(false) }, { passive: true })
 // ── schedule mark: what the card shows right after Record, before the server answers ──────
 // What `calendar` returns for a scheduled meeting: `scheduled` and, with it, the language(s) it will be transcribed as.
-function markScheduled(e, on, lang) {
+function markScheduled(e, on, lang, forMe) {
   e.scheduled = on
   if (on) e.scheduled_languages = [lang]
   else delete e.scheduled_languages
+  if (on && forMe) e.scheduled_for_me = true
+  else delete e.scheduled_for_me
 }
 // end of the schedule mark block

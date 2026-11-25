@@ -604,6 +604,10 @@ enum Cmd {
     Join {
         /// Meeting context JSON with join_url
         meeting: std::path::PathBuf,
+        /// You're in it elsewhere (your phone): Echo joins as another device of yours and keeps it silent on the
+        /// speakers while it records
+        #[arg(long)]
+        for_me: bool,
     },
     /// Stop the current recording (or, when nothing records, cancel the pending arm)
     Stop,
@@ -941,7 +945,7 @@ fn main() -> Result<()> {
         Cmd::Claude { cmd } => cli::app::claude(cmd),
         Cmd::Events { follow } => cli::capture::events(follow),
         Cmd::Arm { title, languages, meeting, ai_profile } => cli::capture::arm(title, languages, meeting, ai_profile),
-        Cmd::Join { meeting } => watch::join(meeting::MeetingContext::read_file(&meeting)?),
+        Cmd::Join { meeting, for_me } => watch::join(meeting::MeetingContext { join_for_me: for_me, ..meeting::MeetingContext::read_file(&meeting)? }),
         Cmd::Stop => watch::stop(),
         Cmd::Memo { cmd } => cli::capture::memo(cmd),
         Cmd::Status => watch::status(),

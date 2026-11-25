@@ -24,6 +24,14 @@ test('not recording drops the language again', () => {
   assert.deepEqual(e, { id: 'evt-1', scheduled: false })
 })
 
+test("Join and record for me marks the card so, and Don't record clears it", () => {
+  const e = { id: 'evt-1', scheduled: false }
+  markScheduled(e, true, 'en', true)
+  assert.deepEqual(e, { id: 'evt-1', scheduled: true, scheduled_languages: ['en'], scheduled_for_me: true })
+  markScheduled(e, false)
+  assert.deepEqual(e, { id: 'evt-1', scheduled: false })
+})
+
 let failed = 0
 for (const [name, f] of tests) {
   try { f(); console.log(`ok - ${name}`) } catch (e) { failed++; console.log(`not ok - ${name}\n  ${e.message}`) }
