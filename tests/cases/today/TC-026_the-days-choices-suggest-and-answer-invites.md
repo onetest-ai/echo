@@ -1,6 +1,6 @@
 ---
 id: TC-026
-title: The day's choices — meetings you accepted at once with the one Echo suggests and why, invites still to answer with Accept / Maybe / Decline and Echo's suggestion; Keep one declines the others after a second click naming them; an answer goes to Microsoft 365 only on a click, and a failure says why
+title: The day's choices — meetings you accepted at once with the one Echo suggests and why, invites still to answer with Accept / Maybe / Decline and Echo's suggestion; Keep one declines the others after a second click naming them, Keep both sends nothing and settles the line; an answer goes to Microsoft 365 only on a click, and a failure says why
 priority: high
 type: functional
 requirements: [F-TODAY-16]
@@ -30,6 +30,7 @@ auto: [tests/auto/specs/S-24.spec.mjs]
 | 3 | Read the invites' lines | Each "<subject> not answered" with Accept, Maybe, Decline, the suggested one filled. One overlaps where you go: "Acme training dry run not answered", "Echo suggests: Decline — you go to Initech architecture board then", Decline filled. One is at a free time: "Design system walkthrough not answered", "Echo suggests: Accept — your day is free then", Accept filled, its time between the two lines of meetings at once |
 | 4 | Click (or Tab to and press Enter on) a "Keep …" button that isn't the suggested one; two of the same name at once are numbered ("Vendor demo (1)", "(2)") | Nothing sent yet: "Decline <the others>? The organisers are told." with "Decline them" and Cancel; one you organise among the others is not declined: "Yours — <subject> — stays: cancel it in Outlook." |
 | 5 | Click Cancel | The Keep buttons are back; the keyboard stays in the line (after Keep on "Decline them", after Cancel on that Keep) |
+| 5a | On a line of two meetings at once with no suggestion, click "Keep both" (on a line of more: "Keep all N"); then `target/debug/echoctl today` | Nothing sent, no notice of a decline: the line leaves The day's choices (its count one less) and Your day shows both meetings as lines of their own (no "1 other at once" on that line); `$ECHOCTL_HOME/.echo/overlaps-kept.json` maps each meeting's event to the same key |
 | 6 | On an invite click Accept | Its buttons disabled, the clicked one "Sending…"; a notice says it couldn't be sent and why ("not signed in to Microsoft 365 — echoctl calendar login", the command as code, no backticks); the buttons come back; the invite still not answered (`echoctl today` unchanged, agenda unchanged) |
 | 7 | Click a meeting's name on a line of meetings at once, then (after × on it) an invite's line (not its buttons) | Each time Calendar's card for that meeting as a popover beside what was clicked — the name, or the invite's line — to its right inside Today (or its left when there's no room; with room on neither side, over the right part of it, as in Calendar), its top level with it, as from Your day; the right panel doesn't open; × closes it |
 | 8 | `target/debug/echoctl today remove core:calendar.choices`; reload; then `today reset`; reload | Gone after the remove; back after the reset (it is in the default) |

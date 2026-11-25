@@ -41,6 +41,13 @@ test('two you said yes to at once: a choice still to make, the first shown, the 
   assert.equal(r.skipped.length, 2)
 })
 
+test('two you said yes to and kept together (Keep both): each a line of its own, no choice, nothing skipped', () => {
+  const k = { kept: '2026-11-12 a|b' }
+  const r = agendaRows([mt('Acme sync', 13, 0, 13, 45, 'accepted', k), mt('Globex review', 13, 30, 14, 30, 'accepted', k)], day(9, 0), [])
+  assert.equal(show(r), 'Acme sync yes next | Globex review yes')
+  assert.equal(r.skipped.length, 0)
+})
+
 test('your work goes into the first free gap of 45 minutes or more after now, the late first, up to 2', () => {
   const tasks = [{ title: 'Budget split', late: true, id: 'T1', project: 'globex' }, { title: 'Room booking', id: 'T2', project: 'acme' }, { title: 'Third', id: 'T3', project: 'acme' }]
   const r = agendaRows([mt('Standup', 9, 0, 9, 15), mt('Review', 12, 30, 13, 0), mt('Sync', 13, 15, 14, 0), mt('Demo', 15, 30, 16, 0)], day(10, 50), tasks)

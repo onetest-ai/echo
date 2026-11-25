@@ -103,6 +103,35 @@ pub(crate) fn card_sources() -> Vec<(String, String)> {
     out
 }
 
+fn kept_file() -> PathBuf {
+    paths::state_dir().join("overlaps-kept.json")
+}
+
+/// Meetings at once the user goes to all of (Keep both, #897): each one's event → the overlap's key (its day, then
+/// its events), only this month's.
+fn kept_map() -> serde_json::Map<String, Value> {
+    fs::read(kept_file()).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
+}
+
+/// Keep both (all) of meetings at once: no choice to make there, nothing sent to anyone.
+pub fn keep_overlap(events: &[&str]) -> Result<()> {
+    let mut ev: Vec<&str> = events.iter().copied().filter(|e| !e.is_empty()).collect();
+    ev.sort_unstable();
+    ev.dedup();
+    anyhow::ensure!(ev.len() >= 2, "two meetings at once are kept, not one");
+    fs::create_dir_all(paths::state_dir())?;
+    let _lock = crate::plugins::wait_lock_for(&paths::state_dir().join("overlaps-kept.lock"), "the kept meetings", std::time::Duration::from_secs(5))?;
+    let mut m = kept_map();
+    let key = format!("{} {}", Local::now().format("%Y-%m-%d"), ev.join("|"));
+    for e in &ev {
+        m.insert(e.to_string(), json!(key));
+    }
+    let keep = (Local::now() - chrono::Duration::days(31)).format("%Y-%m-%d").to_string();
+    m.retain(|_, v| v.as_str().is_some_and(|k| k >= keep.as_str()));
+    paths::write_atomic(&kept_file(), &serde_json::to_vec(&m)?)?;
+    Ok(())
+}
+
 fn seen_file() -> PathBuf {
     paths::state_dir().join("minutes-seen.json")
 }
@@ -209,6 +238,7 @@ pub(crate) fn day() -> Vec<Value> {
     // The user's address, for how they are invited to each meeting (required or optional).
     let me = crate::config::Config::load().ok().and_then(|c| c.me).and_then(|p| p.email).map(|e| e.to_lowercase());
     let mut used = vec![false; calls_today.len()];
+    let kept = kept_map();
     // The call recording now says so, not "transcribing" (its minutes wait for its end).
     let recording = crate::watch::running_watcher().and_then(|w| w.recording).map(PathBuf::from);
     let minutes = |d: &std::path::Path| if recording.as_deref() == Some(d) { json!({"state": "recording"}) } else { minutes(d) };
@@ -250,6 +280,7 @@ pub(crate) fn day() -> Vec<Value> {
             "threads": crate::projects::for_event(&m),
             "call": hit.map(|i| calls_today[i].0.file_name().unwrap_or_default().to_string_lossy().into_owned()),
             "scheduled": scheduled.contains(&event),
+            "kept": kept.get(&event),
             "prep": {"id": pid, "ready": crate::prep::load(&pid).is_some(), "writing": crate::prep::writing(&pid)},
         }));
     }
@@ -734,6 +765,19 @@ mod tests {
         let needs: Vec<_> = v["needs"].as_object().unwrap().keys().map(String::as_str).collect();
         assert_eq!(needs, ["checked_at", "errors", "items", "signed_in"]);
         assert!(v["day"].is_array() && v["cards"].is_array() && v["work"]["mine"]["items"].is_array(), "{v}");
+    }
+
+    #[test]
+    fn keep_both_marks_each_meeting_with_the_overlaps_key_and_needs_two() {
+        let (_env, _) = paths::testenv::folders("today-keep-both");
+        assert!(keep_overlap(&["a"]).is_err(), "one isn't an overlap");
+        keep_overlap(&["b", "a", "a", ""]).unwrap();
+        let m = kept_map();
+        let key = m["a"].as_str().unwrap();
+        assert!(key.ends_with(" a|b") && m["b"] == m["a"], "{m:?}");
+        keep_overlap(&["b", "c"]).unwrap();
+        let m = kept_map();
+        assert_ne!(m["b"], m["a"], "b's latest overlap is b|c: a alone has nothing kept with it");
     }
 
     #[test]
