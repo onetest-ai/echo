@@ -150,7 +150,7 @@ function eventDetail(e, now) {
     'other-app': () => '',
     scheduled: () => `<button class="btn" data-unschedule="${esc(e.id)}">Don't record</button>`,
     join: () => `${recordButton(`data-join="${esc(e.id)}"`, 'Join & record')}<button class="btn" data-schedule="${esc(e.id)}" title="Record without joining — you're in it already">Record</button>`,
-    record: () => recordButton(`data-schedule="${esc(e.id)}"`, st.live ? 'Record it' : 'Record when it starts') + (notTeams(e) ? '' : `<button class="btn" data-schedule="${esc(e.id)}" data-for-me="1" title="You'll be on your phone: Echo joins it in Teams on this computer and records it, silent on the speakers">Join and record for me</button>`),
+    record: () => recordButton(`data-schedule="${esc(e.id)}"`, st.live ? 'Record it' : 'Record when it starts') + (!forMeOk(e) ? '' : `<button class="btn" data-schedule="${esc(e.id)}" data-for-me="1" title="You'll be on your phone: Echo joins it in Teams on this computer and records it, silent on the speakers">Join and record for me</button>`),
     import: () => e.import && e.import.busy ? '<button class="btn" disabled>Importing the Teams transcript…</button>'
       : `<button class="btn primary" data-cal-import="${esc(e.id)}">Import Teams transcript</button>`,
   }
@@ -196,6 +196,9 @@ function appTag(e) {
   return notTeams(e) ? `<span class="tag app">${esc(meetingApp(e).name)}</span>` : ''
 }
 const notTeams = (e) => !!meetingApp(e) && e.app !== 'teams'
+// Join and record for me: a meeting with its link that is no other app's (as `teams_join_url`), on a Mac (Echo keeps
+// Teams silent there while it records).
+const forMeOk = (e) => MAC && !!e.join_url && !notTeams(e)
 /** Why a meeting Echo can't record yet has no Record (#228). */
 function notYet(e) {
   return `Recording isn't available for ${esc(meetingApp(e).name)} meetings yet.`
@@ -248,7 +251,7 @@ function eventMenu(d, now) {
     'other-app': () => '',
     scheduled: () => item(`data-unschedule="${esc(e.id)}"`, "Don't record"),
     join: () => item(`data-join="${esc(e.id)}"`, 'Join & record') + item(`data-schedule="${esc(e.id)}"`, 'Record (without joining)'),
-    record: () => item(`data-schedule="${esc(e.id)}"`, st.live ? 'Record it' : 'Record when it starts') + (notTeams(e) ? '' : item(`data-schedule="${esc(e.id)}" data-for-me="1"`, 'Join and record for me')),
+    record: () => item(`data-schedule="${esc(e.id)}"`, st.live ? 'Record it' : 'Record when it starts') + (!forMeOk(e) ? '' : item(`data-schedule="${esc(e.id)}" data-for-me="1"`, 'Join and record for me')),
     import: () => item(`data-cal-import="${esc(e.id)}"`, 'Import Teams transcript', e.import && e.import.busy ? ' disabled' : ''),
   }
   const p = e.prep

@@ -90,7 +90,8 @@ pub fn arm(title: Option<String>, languages: Option<Vec<String>>, meeting: Optio
     if let Some(id) = &ai_profile {
         ai::Settings::load()?.get(id)?;
     }
-    let ctx = meeting.as_deref().map(meeting::MeetingContext::read_file).transpose()?;
+    // Joining for the user is `echoctl join --for-me` only: a meeting file (a recorded call's meeting.json) never carries it.
+    let ctx = meeting.as_deref().map(meeting::MeetingContext::read_file).transpose()?.map(|m| meeting::MeetingContext { join_for_me: false, ..m });
     // A run Echo started never pins the next recording to a wrapper profile, by name or through a meeting file's.
     wrapper_pin_in_run(ai_profile.as_deref().or(ctx.as_ref().and_then(|m| m.ai_profile.as_deref())), crate::notes::headless())?;
     watch::arm(title, ctx, languages, ai_profile)

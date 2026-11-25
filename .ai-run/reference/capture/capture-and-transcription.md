@@ -11,9 +11,11 @@ on. It changes with the code, in the same PR. The rules are in `.ai-run/guides/c
 - An arm expires after `ARM_EXPIRES` (15 minutes, `watch.rs`); an arm waiting for its meeting's call (Meeting matching)
   does not expire before the meeting ends.
 - A scheduled meeting leaves the schedule once its recording starts; stopping never re-arms it.
-- A meeting with `join_for_me` ("Join and record for me", `meeting::MeetingContext`) is opened in its app by the
-  watcher at its start (`watch::open_join`), once per arm (event `joined_for_me`); its recording's app tap is silent on the
-  speakers (`audio::app_source`, `CATapMuteBehavior::Muted` on macOS; Windows' loopback still plays).
+- A meeting with `join_for_me` ("Join and record for me", `meeting::MeetingContext`; a Teams meeting with its link, on
+  a Mac: `watch::for_me_allowed`) is opened in its app by the watcher at its start (`watch::open_join`), once an
+  occurrence (`watch::occurrence`, event `joined_for_me`), and not while a call goes on here. Its arm starts only on a
+  call begun after that opening, and that recording's app tap is silent on the speakers (`audio::app_source`,
+  `CATapMuteBehavior::Muted`). `echoctl arm --meeting` and `agenda set` clear the flag from a file.
 
 ## Opt-in
 

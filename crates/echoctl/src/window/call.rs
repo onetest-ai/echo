@@ -506,7 +506,7 @@ pub(super) fn act(v: &Value) -> bool {
             meeting.is_some_and(|mut m| {
                 m.languages = languages(v).unwrap_or_default();
                 m.join_for_me = v["for_me"] == true;
-                crate::schedule::add(m).is_ok()
+                (!m.join_for_me || watch::for_me_allowed(&m).is_ok()) && crate::schedule::add(m).is_ok()
             })
         }
         "copy" => {
