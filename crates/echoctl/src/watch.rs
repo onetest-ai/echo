@@ -342,6 +342,9 @@ pub fn run_loop(mut app: TargetApp, stop: Arc<AtomicBool>, on_state: impl Fn(UiS
             mic_released_at = None;
             held_arm = None;
             stopped_in_call = false;
+            // A look asked for before the sleep reads a window that is gone.
+            last_arm_look = None;
+            guess_look = None;
             emit("woke", json!({}));
         }
         if let Some(r) = rec.as_mut() {
@@ -577,13 +580,13 @@ pub fn run_loop(mut app: TargetApp, stop: Arc<AtomicBool>, on_state: impl Fn(UiS
         // and starts once they are on this one (#483). A call window that can't be read changes nothing.
         let on_its_call = match startable.filter(|_| rec.is_none() && call_active && detected.is_some() && app == TargetApp::Teams && call_window_readable()).and_then(|a| a.meeting.as_ref().map(|m| (a.id.clone(), m))) {
             None => true,
-            // Joined for the user: its window names the meeting (the user on it here), or the call Echo opened names
-            // nothing else; looked at again every few seconds.
+            // Joined for the user: its window names the meeting (the user on it here), or it is the call Echo opened
+            // (`for_me_ok` below); looked at again every few seconds.
             Some((_, m)) if m.join_for_me => match looker.take() {
                 Some(seen) if last_arm_look.is_some() => {
                     last_arm_look = Some(Instant::now());
                     for_me_here = same_name(m, &seen) == Some(true);
-                    for_me_here || guess_holds(m, &seen)
+                    true
                 }
                 _ => {
                     if last_arm_look.is_none_or(|t| t.elapsed() >= CALL_LOOK_EVERY) {
@@ -664,8 +667,9 @@ pub fn run_loop(mut app: TargetApp, stop: Arc<AtomicBool>, on_state: impl Fn(UiS
             unread_once = false;
             last_arm_look = None;
             guess_look = None;
-            // The user on it here: heard on the speakers as any call.
-            let meeting = a.meeting.clone().map(|m| MeetingContext { join_for_me: m.join_for_me && !for_me_here, ..m }).or_else(|| guess.flatten());
+            // Silent on the speakers only once Echo joins it itself (#900, next step): until then nothing here tells the
+            // call Echo opened from one the user took at this computer, so it is recorded as any meeting, heard as usual.
+            let meeting = a.meeting.clone().map(|m| MeetingContext { join_for_me: false, ..m }).or_else(|| guess.flatten());
             // The AI profile is pinned now: changing the default later never changes this call.
             let ai_profile = Some(pinned_profile(a, meeting.as_ref()));
             match Recording::start(app, a.title.as_deref(), meeting.as_ref(), a.languages.clone(), ai_profile) {
