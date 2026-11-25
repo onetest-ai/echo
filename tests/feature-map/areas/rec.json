@@ -181,6 +181,15 @@
    "axes": [
     "app.record"
    ]
+  },
+  {
+   "id": "F-REC-23",
+   "feature": "A call recorded with no meeting chosen (Record next call, Record) takes the calendar meeting going on at its start — its title, attendees and chat — only when it is that meeting's call: a call window naming something else (an ad-hoc call, another meeting joined meanwhile), or a call begun before the meeting could, is recorded as a call of its own, without that meeting; a window that names nothing or can't be read attaches the meeting as before",
+   "priority": "critical",
+   "check": "agent",
+   "axes": [
+    "app.record"
+   ]
   }
  ]
 }
