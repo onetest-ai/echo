@@ -2290,7 +2290,7 @@
       "or": " or ",
       "invite": "Invite: {subject}",
       "accepted": "You accepted {n} at once. Echo suggests {pick} — {why}",
-      "keep": "Keep {name}",
+      "keep": "Keep {name}", "keepAll": "Keep all {n}",
       "notAnswered": "{subject} not answered",
       "suggests": "Echo suggests: {how} — {why}",
       "answers": [

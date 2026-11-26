@@ -856,7 +856,8 @@ scenario(test, 'S-24', 'The calendar, preps and the Inbox on a busy day', () => 
       await expect(today.choiceSays(first, fill(x.accepted, { n: s.first.members.length, pick: s.first.pick, why: s.first.why }))).toBeVisible()
       for (const m of s.first.members) await expect(today.choiceMeeting(first, m)).toBeVisible()
       const keeps = await sameButtons(first, fill(x.keep, { name: s.first.pick }))
-      expect(keeps.map((b) => b.name)).toEqual(s.first.members.map((m) => fill(x.keep, { name: m })))
+      // A Keep each, then one to keep them all (TC-026 step 5a).
+      expect(keeps.map((b) => b.name)).toEqual([...s.first.members.map((m) => fill(x.keep, { name: m })), fill(x.keepAll, { n: s.first.members.length })])
       // The invites: one where you go (Decline), one at a free time between the two lines of meetings at once (Accept).
       for (const inv of [s.busy, s.free]) {
         const name = fill(x.invite, inv)
@@ -876,7 +877,7 @@ scenario(test, 'S-24', 'The calendar, preps and the Inbox on a busy day', () => 
       await expect(today.choiceButton(first, x.declineThem)).toBeFocused()
       await today.choiceButton(first, x.cancel).click()
       await expect(today.choiceButton(first, fill(x.keep, { name: s.first.keep }))).toBeFocused()
-      await expect(today.choiceAllButtons(first)).toHaveCount(s.first.members.length)
+      await expect(today.choiceAllButtons(first)).toHaveCount(s.first.members.length + 1) // each Keep and Keep all
       // Accept without Microsoft 365: Sending…, the buttons off, then the notice says why; nothing answered.
       expect(data.exists(data.env.ECHOCTL_CONFIG_DIR, data.text.m365.token)).toBe(false)
       const freeLine = fill(x.invite, s.free)
