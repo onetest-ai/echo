@@ -91,7 +91,7 @@
   },
   {
    "id": "F-STT-11",
-   "feature": "A call that has ended gives the next recording (back to back) the computer first: its rest is decoded with the same loaded model, between the next call's utterances, or with Whisper (the GPU) once that recording stops — the same transcript, only later",
+   "feature": "A call that has ended gives the next recording (back to back) the computer first: one loaded copy of a model for both; the rest of the ended call decoded with Whisper (heavy) once that recording stops — its model kept loaded meanwhile — with Parakeet or Nemotron (light) and its speaker detection between the next call's utterances; the same transcript, only later",
    "priority": "high",
    "check": "agent",
    "axes": []

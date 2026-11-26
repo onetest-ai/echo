@@ -107,6 +107,7 @@ fn pieces(wav: &Path) -> Result<impl FnMut() -> Result<Vec<f32>>> {
     let mut samples = reader.into_samples::<i16>();
     let mut done = 0;
     Ok(move || -> Result<Vec<f32>> {
+        crate::live::between_utterances(); // a call recorded meanwhile (back to back) goes first
         if let Some(all) = whole.as_mut() {
             let piece = all[done.min(all.len())..(done + 10 * RATE).min(all.len())].to_vec();
             done += piece.len();

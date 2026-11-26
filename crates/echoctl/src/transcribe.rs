@@ -439,7 +439,8 @@ impl Engine {
         })
     }
 
-    /// Whisper: its work is on the GPU (Metal), which no priority shares out (`live::turn`).
+    /// Whisper: heavy (on a Mac it fills the GPU for each utterance), where Parakeet and Nemotron are light
+    /// (`live::turn`).
     pub(crate) fn is_whisper(&self) -> bool {
         matches!(self, Engine::Whisper(_))
     }
@@ -661,15 +662,15 @@ fn nemo_sentences(words: &[crate::nemo::Word]) -> Vec<Piece> {
     out
 }
 
-/// The engines this process has loaded, by model file and threads, while some transcriber holds them.
-type Loaded = Mutex<Vec<((PathBuf, usize), Weak<Engine>)>>;
+/// The engines this process has loaded, by model file, threads and GPU use, while some transcriber holds them.
+type Loaded = Mutex<Vec<((PathBuf, usize, bool), Weak<Engine>)>>;
 static LOADED: Loaded = Mutex::new(Vec::new());
 
 /// The model at `path`, loaded once in this process: a call that starts while another one still finishes its
 /// transcript decodes with the same engine, never a second copy in memory. Unloaded when the last transcriber holding
 /// it is dropped, as before.
 fn loaded_engine(path: &Path, threads: usize) -> Result<Arc<Engine>> {
-    shared(&LOADED, (path.to_path_buf(), threads), || Engine::load(path, threads))
+    shared(&LOADED, (path.to_path_buf(), threads, crate::gpu::allowed()), || Engine::load(path, threads))
 }
 
 /// The value under `key` while something still holds it, else `load`'s (held only by its callers). The lock is held
@@ -695,7 +696,7 @@ enum Backend {
         server: crate::remote::Client,
         /// This computer's model, loaded the first time the server can't be reached.
         fallback: Option<PathBuf>,
-        local: OnceLock<Option<Engine>>,
+        local: OnceLock<Option<Arc<Engine>>>,
         threads: usize,
         /// The server failed: decode here until then.
         down_until: Mutex<Option<Instant>>,
@@ -726,6 +727,8 @@ pub(crate) struct Transcriber {
     /// Set once its call has ended (`finishing`): what is left is decoded after the calls being recorded (`live::turn`);
     /// the flag tells it to give up while it waits.
     finishing: OnceLock<Arc<std::sync::atomic::AtomicBool>>,
+    /// It said once that it waits (`live::turn`).
+    waited: std::sync::atomic::AtomicBool,
 }
 
 /// Per-track decoding state, reused across utterances.
@@ -792,7 +795,7 @@ impl Transcriber {
         Ok(match &self.backend {
             Backend::Local(e) => {
                 let e = read(e).clone();
-                let _turn = crate::live::turn(self.finishing.get(), e.is_whisper())?;
+                let _turn = crate::live::turn(self.finishing.get(), e.is_whisper(), &self.waited)?;
                 self.local(&e, ts, chunk, lang)?
             }
             Backend::Remote { server, fallback, local, threads, down_until } => {
@@ -811,9 +814,10 @@ impl Transcriber {
                     }
                     let engine = local.get_or_init(|| {
                         let path = fallback.as_ref()?;
-                        Engine::load(path, *threads).map_err(|e| eprintln!("  this computer's model: {e:#}")).ok()
+                        loaded_engine(path, *threads).map_err(|e| eprintln!("  this computer's model: {e:#}")).ok()
                     });
                     if let Some(e) = engine {
+                        let _turn = crate::live::turn(self.finishing.get(), e.is_whisper(), &self.waited)?;
                         break self.local(e, ts, chunk, lang)?;
                     }
                     // No model here: the WAVs keep the audio, so wait for the server.
@@ -1167,6 +1171,7 @@ pub(crate) fn final_transcriber(cfg: &Config, model_override: Option<&str>, prom
         threads,
         generation: AtomicU64::new(0),
         finishing: OnceLock::new(),
+        waited: std::sync::atomic::AtomicBool::new(false),
     };
     if let (None, Some(server)) = (model_override, crate::remote::Client::configured()) {
         let fallback = models::for_call(code, cfg.model.as_deref()).map(models::model_path).filter(|p| p.exists());

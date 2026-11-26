@@ -207,26 +207,32 @@ impl Drop for Turn {
 }
 
 /// An utterance is about to be decoded. A call being recorded decodes at once. A call that has ended (`finishing`, its
-/// give-up flag) waits its turn, so the next call — back to back — has the computer first: with Whisper until no call
-/// is being recorded (its work is on the GPU, which no priority shares out), with another engine while a call being
-/// recorded decodes. Its transcript is the same, only later.
-pub(crate) fn turn(finishing: Option<&Arc<AtomicBool>>, whisper: bool) -> Result<Turn> {
+/// give-up flag) waits its turn, so the next call — back to back — has the computer first: with Whisper (heavy: on a
+/// Mac it fills the GPU) until no call is being recorded, with Parakeet or Nemotron (light) while a call being recorded
+/// decodes. Its transcript is the same, only later; `said` is set once it has said so.
+pub(crate) fn turn(finishing: Option<&Arc<AtomicBool>>, whisper: bool, said: &AtomicBool) -> Result<Turn> {
     let Some(quit) = finishing else {
         DECODING.fetch_add(1, Ordering::SeqCst);
         return Ok(Turn(true));
     };
-    let mut said = false;
     while !may_decode(whisper, RECORDING.load(Ordering::SeqCst), DECODING.load(Ordering::SeqCst)) {
         if quit.load(Ordering::SeqCst) || quitting() {
             bail!("given up: nobody waits for this transcript");
         }
-        if !said {
+        if !said.swap(true, Ordering::SeqCst) {
             eprintln!("  a call is being recorded: the rest of this one waits {}", if whisper { "until it ends" } else { "between its utterances" });
-            said = true;
         }
         std::thread::sleep(TURN_WAIT);
     }
     Ok(Turn(false))
+}
+
+/// Work after a call other than decoding (speaker detection) goes on between the utterances of a call being recorded,
+/// as Parakeet's rest does (`turn`); at once when none is, or when the app quits.
+pub(crate) fn between_utterances() {
+    while DECODING.load(Ordering::SeqCst) > 0 && !quitting() {
+        std::thread::sleep(TURN_WAIT);
+    }
 }
 
 /// May a call that has ended decode now, with `recording` calls being recorded and `decoding` of their utterances
@@ -702,8 +708,20 @@ mod tests {
     #[test]
     fn a_finishing_call_waiting_its_turn_gives_up_when_told() {
         let quit = Arc::new(AtomicBool::new(true));
-        let _decoding = crate::live::turn(None, false).unwrap(); // a call being recorded decodes at once…
-        assert!(crate::live::turn(Some(&quit), false).is_err()); // …and the ended one, waiting behind it, gives up
+        let said = AtomicBool::new(false);
+        let _decoding = crate::live::turn(None, false, &said).unwrap(); // a call being recorded decodes at once…
+        assert!(crate::live::turn(Some(&quit), false, &said).is_err()); // …and the ended one, waiting behind it, gives up
+    }
+
+    #[test]
+    fn a_finishing_call_decodes_once_the_utterance_being_decoded_is_done() {
+        let said = AtomicBool::new(false);
+        let decoding = crate::live::turn(None, false, &said).unwrap();
+        let waiting = std::thread::spawn(|| crate::live::turn(Some(&Arc::new(AtomicBool::new(false))), false, &AtomicBool::new(false)).map(|_| ()));
+        std::thread::sleep(Duration::from_millis(300));
+        assert!(!waiting.is_finished(), "it waits while the call being recorded decodes");
+        drop(decoding);
+        assert!(waiting.join().unwrap().is_ok());
     }
 
     #[test]
