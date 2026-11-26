@@ -88,6 +88,13 @@
    "priority": "medium",
    "check": "agent",
    "axes": []
+  },
+  {
+   "id": "F-STT-11",
+   "feature": "A call that has ended gives the next recording (back to back) the computer first: its rest is decoded with the same loaded model, between the next call's utterances, or with Whisper (the GPU) once that recording stops — the same transcript, only later",
+   "priority": "high",
+   "check": "agent",
+   "axes": []
   }
  ]
 }

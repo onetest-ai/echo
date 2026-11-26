@@ -7,7 +7,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, OnceLock, RwLock};
+use std::sync::{Arc, Mutex, OnceLock, RwLock, Weak};
 use std::time::{Duration, Instant};
 
 use anyhow::{bail, Context, Result};
@@ -439,6 +439,11 @@ impl Engine {
         })
     }
 
+    /// Whisper: its work is on the GPU (Metal), which no priority shares out (`live::turn`).
+    pub(crate) fn is_whisper(&self) -> bool {
+        matches!(self, Engine::Whisper(_))
+    }
+
     pub(crate) fn state(&self) -> Result<EngineState> {
         Ok(match self {
             Engine::Whisper(w) => EngineState::Whisper(w.state()?),
@@ -656,6 +661,30 @@ fn nemo_sentences(words: &[crate::nemo::Word]) -> Vec<Piece> {
     out
 }
 
+/// The engines this process has loaded, by model file and threads, while some transcriber holds them.
+type Loaded = Mutex<Vec<((PathBuf, usize), Weak<Engine>)>>;
+static LOADED: Loaded = Mutex::new(Vec::new());
+
+/// The model at `path`, loaded once in this process: a call that starts while another one still finishes its
+/// transcript decodes with the same engine, never a second copy in memory. Unloaded when the last transcriber holding
+/// it is dropped, as before.
+fn loaded_engine(path: &Path, threads: usize) -> Result<Arc<Engine>> {
+    shared(&LOADED, (path.to_path_buf(), threads), || Engine::load(path, threads))
+}
+
+/// The value under `key` while something still holds it, else `load`'s (held only by its callers). The lock is held
+/// while loading: two transcribers starting together load one copy.
+fn shared<K: PartialEq, T>(cache: &Mutex<Vec<(K, Weak<T>)>>, key: K, load: impl FnOnce() -> Result<T>) -> Result<Arc<T>> {
+    let mut held = cache.lock().unwrap_or_else(|e| e.into_inner());
+    held.retain(|(_, w)| w.strong_count() > 0);
+    if let Some(v) = held.iter().find(|(k, _)| *k == key).and_then(|(_, w)| w.upgrade()) {
+        return Ok(v);
+    }
+    let v = Arc::new(load()?);
+    held.push((key, Arc::downgrade(&v)));
+    Ok(v)
+}
+
 /// Where utterances are decoded: this computer, or a transcription server on the local network
 /// (`remote.rs`) with this computer as the fallback while it can't be reached.
 enum Backend {
@@ -694,6 +723,9 @@ pub(crate) struct Transcriber {
     threads: usize,
     /// Bumped by each model swap: a track's decoding state from another model is made again.
     generation: AtomicU64,
+    /// Set once its call has ended (`finishing`): what is left is decoded after the calls being recorded (`live::turn`);
+    /// the flag tells it to give up while it waits.
+    finishing: OnceLock<Arc<std::sync::atomic::AtomicBool>>,
 }
 
 /// Per-track decoding state, reused across utterances.
@@ -717,6 +749,11 @@ impl Transcriber {
         *self.language.lock().unwrap_or_else(|e| e.into_inner())
     }
 
+    /// Its call has ended: the rest yields to the calls being recorded (`live::turn`); `quit` makes it give up.
+    pub(crate) fn finishing(&self, quit: Arc<std::sync::atomic::AtomicBool>) {
+        let _ = self.finishing.set(quit);
+    }
+
     /// The model the call is transcribed with now.
     pub(crate) fn model_name(&self) -> String {
         self.model.lock().unwrap_or_else(|e| e.into_inner()).clone()
@@ -737,9 +774,9 @@ impl Transcriber {
         if *self.model.lock().unwrap_or_else(|e| e.into_inner()) == m.name {
             return;
         }
-        match Engine::load(&models::model_path(m), self.threads) {
+        match loaded_engine(&models::model_path(m), self.threads) {
             Ok(e) => {
-                *engine.write().unwrap_or_else(|e| e.into_inner()) = Arc::new(e);
+                *engine.write().unwrap_or_else(|e| e.into_inner()) = e;
                 *self.model.lock().unwrap_or_else(|e| e.into_inner()) = m.name.to_string();
                 self.generation.fetch_add(1, Ordering::SeqCst);
                 eprintln!("  model: {} (for {code})", m.name);
@@ -755,6 +792,7 @@ impl Transcriber {
         Ok(match &self.backend {
             Backend::Local(e) => {
                 let e = read(e).clone();
+                let _turn = crate::live::turn(self.finishing.get(), e.is_whisper())?;
                 self.local(&e, ts, chunk, lang)?
             }
             Backend::Remote { server, fallback, local, threads, down_until } => {
@@ -1128,6 +1166,7 @@ pub(crate) fn final_transcriber(cfg: &Config, model_override: Option<&str>, prom
         follows_language: model_override.is_none(),
         threads,
         generation: AtomicU64::new(0),
+        finishing: OnceLock::new(),
     };
     if let (None, Some(server)) = (model_override, crate::remote::Client::configured()) {
         let fallback = models::for_call(code, cfg.model.as_deref()).map(models::model_path).filter(|p| p.exists());
@@ -1157,8 +1196,8 @@ pub(crate) fn final_transcriber(cfg: &Config, model_override: Option<&str>, prom
         bail!("model {model_name} is not downloaded — run `echoctl model download {model_name}`");
     }
     eprintln!("  model: {model_name}");
-    let engine = Engine::load(&model_path, threads)?;
-    Ok((transcriber(Backend::Local(RwLock::new(Arc::new(engine))), &model_name), model_name))
+    let engine = loaded_engine(&model_path, threads)?;
+    Ok((transcriber(Backend::Local(RwLock::new(engine)), &model_name), model_name))
 }
 
 /// Order the segments, drop the mic's echo of the remote side, name the remote speaker when the
@@ -1277,6 +1316,26 @@ pub fn shutdown() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_model_is_loaded_once_while_held_and_again_after_it_was_let_go() {
+        let cache = Mutex::new(Vec::new());
+        let loads = std::cell::Cell::new(0);
+        let load = || {
+            loads.set(loads.get() + 1);
+            Ok(loads.get())
+        };
+        let a = shared(&cache, ("parakeet", 4), load).unwrap();
+        let b = shared(&cache, ("parakeet", 4), load).unwrap(); // a call starting while another still finishes
+        assert!(Arc::ptr_eq(&a, &b));
+        assert_eq!(loads.get(), 1);
+        let other = shared(&cache, ("turbo", 4), load).unwrap();
+        assert_eq!((*other, loads.get()), (2, 2));
+        drop((a, b));
+        let again = shared(&cache, ("parakeet", 4), load).unwrap(); // let go: unloaded, loaded anew
+        assert_eq!((*again, loads.get()), (3, 3));
+        assert!(shared(&cache, ("broken", 4), || anyhow::bail!("no file")).is_err());
+    }
 
     #[test]
     fn vad_finds_speech_between_silence() {

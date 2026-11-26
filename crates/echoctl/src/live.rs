@@ -19,7 +19,7 @@
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::Duration;
@@ -170,6 +170,69 @@ pub fn busy() -> Busy {
 /// its worker let go of its model.
 pub fn shutdown() {
     FINISHING.shutdown(ABANDON_WAIT);
+}
+
+/// Workers of calls being recorded (until they see their call ended), and their decodes under way: what a call that has
+/// ended waits for (`turn`).
+static RECORDING: AtomicUsize = AtomicUsize::new(0);
+static DECODING: AtomicUsize = AtomicUsize::new(0);
+/// How often a call that has ended looks whether it may decode.
+const TURN_WAIT: Duration = Duration::from_millis(50);
+
+/// A worker of a call being recorded, counted in `RECORDING` until dropped.
+struct Recording;
+
+impl Recording {
+    fn enter() -> Recording {
+        RECORDING.fetch_add(1, Ordering::SeqCst);
+        Recording
+    }
+}
+
+impl Drop for Recording {
+    fn drop(&mut self) {
+        RECORDING.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+/// One utterance's turn: a call being recorded's decode, counted in `DECODING` until dropped.
+pub(crate) struct Turn(bool);
+
+impl Drop for Turn {
+    fn drop(&mut self) {
+        if self.0 {
+            DECODING.fetch_sub(1, Ordering::SeqCst);
+        }
+    }
+}
+
+/// An utterance is about to be decoded. A call being recorded decodes at once. A call that has ended (`finishing`, its
+/// give-up flag) waits its turn, so the next call — back to back — has the computer first: with Whisper until no call
+/// is being recorded (its work is on the GPU, which no priority shares out), with another engine while a call being
+/// recorded decodes. Its transcript is the same, only later.
+pub(crate) fn turn(finishing: Option<&Arc<AtomicBool>>, whisper: bool) -> Result<Turn> {
+    let Some(quit) = finishing else {
+        DECODING.fetch_add(1, Ordering::SeqCst);
+        return Ok(Turn(true));
+    };
+    let mut said = false;
+    while !may_decode(whisper, RECORDING.load(Ordering::SeqCst), DECODING.load(Ordering::SeqCst)) {
+        if quit.load(Ordering::SeqCst) || quitting() {
+            bail!("given up: nobody waits for this transcript");
+        }
+        if !said {
+            eprintln!("  a call is being recorded: the rest of this one waits {}", if whisper { "until it ends" } else { "between its utterances" });
+            said = true;
+        }
+        std::thread::sleep(TURN_WAIT);
+    }
+    Ok(Turn(false))
+}
+
+/// May a call that has ended decode now, with `recording` calls being recorded and `decoding` of their utterances
+/// being decoded?
+fn may_decode(whisper: bool, recording: usize, decoding: usize) -> bool {
+    if whisper { recording == 0 } else { decoding == 0 }
 }
 
 /// The app is quitting (`shutdown`): a transcript given up isn't made again now.
@@ -404,7 +467,8 @@ fn slices(base: u64, parts: &[(u64, u64)]) -> Vec<(f64, std::ops::Range<usize>)>
     parts.iter().map(|&(a, b)| (a as f64 / RATE as f64, (a - base) as usize..(b - base) as usize)).collect()
 }
 
-fn run(dir: &Path, cfg: &Config, prompt: Option<String>, remote_name: Option<String>, done: &AtomicBool, quit: &AtomicBool) -> Result<(Vec<Segment>, String)> {
+fn run(dir: &Path, cfg: &Config, prompt: Option<String>, remote_name: Option<String>, done: &AtomicBool, quit: &Arc<AtomicBool>) -> Result<(Vec<Segment>, String)> {
+    let mut recording = Some(Recording::enter());
     let (tr, model) = final_transcriber(cfg, None, prompt, THREADS, Some(dir))?;
     let out = dir.join(FILE);
     let mut tracks = [
@@ -423,6 +487,9 @@ fn run(dir: &Path, cfg: &Config, prompt: Option<String>, remote_name: Option<Str
         }
         // Read before draining: once `done` is seen, what is on disk is the whole track.
         let last = done.load(Ordering::SeqCst);
+        if last && recording.take().is_some() {
+            tr.finishing(quit.clone()); // the call has ended: the rest after the calls being recorded (`turn`)
+        }
         let mut behind = false;
         for t in tracks.iter_mut() {
             let name = if t.speaker == "remote" { remote_name.as_deref() } else { None };
@@ -619,6 +686,25 @@ pub fn replay(wav: &Path, out_dir: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_call_that_has_ended_decodes_after_the_call_being_recorded() {
+        // Whisper (the GPU): only once no call is being recorded.
+        assert!(may_decode(true, 0, 0));
+        assert!(!may_decode(true, 1, 0));
+        assert!(!may_decode(true, 1, 1));
+        // Another engine: between the utterances of the call being recorded.
+        assert!(may_decode(false, 1, 0));
+        assert!(!may_decode(false, 1, 1));
+        assert!(may_decode(false, 0, 0));
+    }
+
+    #[test]
+    fn a_finishing_call_waiting_its_turn_gives_up_when_told() {
+        let quit = Arc::new(AtomicBool::new(true));
+        let _decoding = crate::live::turn(None, false).unwrap(); // a call being recorded decodes at once…
+        assert!(crate::live::turn(Some(&quit), false).is_err()); // …and the ended one, waiting behind it, gives up
+    }
 
     #[test]
     fn a_dropped_worker_is_told_to_stop() {
