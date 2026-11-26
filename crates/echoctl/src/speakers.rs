@@ -79,22 +79,70 @@ pub fn label(dir: &Path, segs: &mut Vec<Segment>, me: Option<&str>) -> Result<()
     Ok(())
 }
 
-/// The speaker model's turns on `<dir>/remote.wav` (None without the model or the audio).
+/// The speaker turns on `<dir>/remote.wav`: from the transcription server when one is connected (it has the models;
+/// this computer may have none), else this computer's speaker model (None without it or the audio).
 fn diarize(dir: &Path) -> Result<Option<Vec<crate::nemo::Turn>>> {
-    let Some(model) = models::speakers_model() else { return Ok(None) };
     let wav = dir.join("remote.wav");
     if !wav.exists() {
         return Ok(None);
     }
+    if let Some(server) = crate::remote::Client::configured().filter(|c| c.is_echo()) {
+        let t = Instant::now();
+        match server.speakers(&pcm16(&wav)?) {
+            Ok(turns) => {
+                eprintln!("  speaker model: {:.1}s on the transcription server", t.elapsed().as_secs_f64());
+                return Ok(Some(turns));
+            }
+            Err(e) => eprintln!("  speaker detection on the transcription server: {e:#} — on this computer"),
+        }
+    }
+    let Some(model) = models::speakers_model() else { return Ok(None) };
     let t = Instant::now();
-    let gpu = cfg!(target_os = "macos") && crate::gpu::allowed();
-    let diarizer = crate::nemo::Diarizer::load(&model, gpu)?;
-    let turns = diarizer.run(pieces(&wav)?)?;
+    let turns = run_model(&model, pieces(&wav)?)?;
     if std::env::var_os("ECHOCTL_DEBUG").is_some() {
         eprintln!("  debug: speaker turns {}", turns.iter().map(|(a, b, w)| format!("{w}:{a:.1}-{b:.1}")).collect::<Vec<_>>().join(" "));
     }
     eprintln!("  speaker model: {:.1}s", t.elapsed().as_secs_f64());
     Ok(Some(turns))
+}
+
+/// The speaker model at `model` over the audio `next` hands out in pieces (an empty one ends it).
+fn run_model(model: &Path, next: impl FnMut() -> Result<Vec<f32>>) -> Result<Vec<crate::nemo::Turn>> {
+    let gpu = cfg!(target_os = "macos") && crate::gpu::allowed();
+    crate::nemo::Diarizer::load(model, gpu)?.run(next)
+}
+
+/// The speaker turns in a whole track (16 kHz mono), for a client of the transcription server (`remote.rs`); None
+/// without the speaker model here. Between the utterances of a call this computer records (it comes first); given up
+/// once `stop` is set (the app quitting).
+pub fn turns_of(audio: &[f32], stop: &std::sync::atomic::AtomicBool) -> Result<Option<Vec<crate::nemo::Turn>>> {
+    let Some(model) = models::speakers_model() else { return Ok(None) };
+    let mut at = 0;
+    run_model(&model, || {
+        crate::live::between_utterances();
+        if stop.load(std::sync::atomic::Ordering::SeqCst) {
+            bail!("the server is stopping");
+        }
+        let piece = audio[at.min(audio.len())..(at + 10 * RATE).min(audio.len())].to_vec();
+        at += piece.len();
+        Ok(piece)
+    })
+    .map(Some)
+}
+
+/// The WAV's samples as 16 kHz mono 16-bit little-endian PCM, for the server: the recorder's own format read as it
+/// is (no float copy of a long track), anything else converted.
+fn pcm16(wav: &Path) -> Result<Vec<u8>> {
+    let reader = hound::WavReader::open(wav).with_context(|| format!("reading {}", wav.display()))?;
+    let spec = reader.spec();
+    if spec.sample_rate == RATE as u32 && spec.channels == 1 && spec.bits_per_sample == 16 && spec.sample_format == hound::SampleFormat::Int {
+        let mut out = Vec::with_capacity(reader.len() as usize * 2);
+        for s in reader.into_samples::<i16>() {
+            out.extend(s?.to_le_bytes());
+        }
+        return Ok(out);
+    }
+    Ok(load_16k(wav)?.iter().flat_map(|s| ((s.clamp(-1.0, 1.0) * i16::MAX as f32) as i16).to_le_bytes()).collect())
 }
 
 /// The WAV in 10 s pieces (the recorder writes 16 kHz mono 16-bit; anything else is converted

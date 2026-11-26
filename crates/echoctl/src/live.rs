@@ -227,6 +227,11 @@ pub(crate) fn turn(finishing: Option<&Arc<AtomicBool>>, whisper: bool, said: &At
     Ok(Turn(false))
 }
 
+/// A call is being recorded here (its live transcription runs).
+pub(crate) fn recording() -> bool {
+    RECORDING.load(Ordering::SeqCst) > 0
+}
+
 /// Work after a call other than decoding (speaker detection) goes on between the utterances of a call being recorded,
 /// as Parakeet's rest does (`turn`); at once when none is, or when the app quits.
 pub(crate) fn between_utterances() {

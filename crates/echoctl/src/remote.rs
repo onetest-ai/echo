@@ -12,10 +12,18 @@
 //!   https); it keeps no audio and no text and logs no content.
 //!
 //! Protocol (ours, versioned by the path):
-//! - `GET /v1/hello` → `{name, model, engine, version}`
+//! - `GET /v1/hello` (`X-Echo-Language: <code>` optional; an older server ignores it) → `{name, model, engine, version,
+//!   speakers}`: `model` is the one it transcribes a call in that language with (else its default language), `speakers`
+//!   whether it detects speakers
 //! - `POST /v1/utterance`: a little-endian u32 length, that many bytes of JSON
 //!   (`{languages, prompt}`; an older client's `prev` is ignored), then the samples as 16-bit little-endian PCM →
 //!   `{lang_id, lang, segs: [[start, end, text]], words, ranked}` (`ranked`: the detection, when several languages were allowed).
+//!   Decoded with the server's model for the call's language (`models::for_call`), as on this computer.
+//! - `POST /v1/speakers`: a whole remote track as 16-bit little-endian PCM (16 kHz mono) → `{turns: [[start, end,
+//!   speaker]]}` from the server's speaker model; 503 without one.
+//!
+//! A client needs no model of its own: decoding and speaker detection both go to the server, this computer's models
+//! only while it can't be reached.
 //!
 //! Both need `Authorization: Bearer <key>`; a wrong key gets 401 after a 1 s pause.
 //!
@@ -54,6 +62,14 @@ const IDLE_UNLOAD: Duration = Duration::from_secs(10 * 60);
 const LET_GO_WITHIN: Duration = Duration::from_secs(30);
 /// A queued utterance can wait behind others' on the server.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(180);
+/// A whole remote track for speaker detection: up to 4 hours of 16-bit 16 kHz audio.
+const MAX_TRACK: usize = 4 * 3600 * 16_000 * 2;
+/// The answer to a track while another one's speakers are being detected.
+const BUSY: &str = "busy detecting another call's speakers";
+/// The call's language in a hello (a header: an older server ignores it, where a query would be a 404).
+const LANGUAGE_HEADER: &str = "X-Echo-Language";
+/// Speaker detection over a long call, queued behind others'.
+const SPEAKERS_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 
 // ── client ──────────────────────────────────────────────────────────────────────────────────
 
@@ -93,6 +109,9 @@ pub struct Hello {
     pub model: String,
     pub engine: String,
     pub version: String,
+    /// It detects speakers (`/v1/speakers`); an older server doesn't say.
+    #[serde(default)]
+    pub speakers: bool,
 }
 
 pub struct Client {
@@ -152,13 +171,24 @@ impl Client {
     }
 
     pub fn hello(&self) -> Result<Hello> {
+        self.hello_for(None)
+    }
+
+    /// An Echo server (not an OpenAI-compatible one): it has `/v1/speakers`.
+    pub fn is_echo(&self) -> bool {
+        self.openai.is_none()
+    }
+
+    /// The server, and the model it transcribes a call in `lang` with.
+    pub fn hello_for(&self, lang: Option<&str>) -> Result<Hello> {
         if let Some(model) = &self.openai {
             return self.openai_hello(model);
         }
-        let mut r = self
-            .agent
-            .get(format!("{}/v1/hello", self.url))
-            .header("Authorization", format!("Bearer {}", self.key))
+        let mut req = self.agent.get(format!("{}/v1/hello", self.url)).header("Authorization", format!("Bearer {}", self.key));
+        if let Some(l) = lang {
+            req = req.header(LANGUAGE_HEADER, l);
+        }
+        let mut r = req
             .config()
             .timeout_global(Some(Duration::from_secs(10)))
             .build()
@@ -183,7 +213,7 @@ impl Client {
         let body = r.body_mut().read_to_string()?;
         Self::check(r.status().as_u16(), &body)?;
         let host = self.url.split("://").nth(1).unwrap_or(&self.url).split('/').next().unwrap_or("").to_string();
-        Ok(Hello { name: host, model: model.to_string(), engine: "OpenAI-compatible".into(), version: String::new() })
+        Ok(Hello { name: host, model: model.to_string(), engine: "OpenAI-compatible".into(), version: String::new(), speakers: false })
     }
 
     /// The models an OpenAI-compatible server lists.
@@ -234,6 +264,42 @@ impl Client {
         openai_decode(decode, chunk.len() as f64 / 16000.0, lang, prompt)
     }
 
+    /// The speaker turns in a whole remote track (`pcm`: 16 kHz mono, 16-bit little-endian), detected on the server —
+    /// asked only when it says it can (an older server can't).
+    pub fn speakers(&self, pcm: &[u8]) -> Result<Vec<crate::nemo::Turn>> {
+        if pcm.len() > MAX_TRACK {
+            bail!("the track is longer than the server takes (4 hours)");
+        }
+        if !self.hello()?.speakers {
+            bail!("the server doesn't detect speakers (no speaker model there, or an older Echo)");
+        }
+        // Another client's track is being done (one at a time): wait our turn.
+        let asked = Instant::now();
+        loop {
+            match self.speakers_once(pcm) {
+                Err(e) if format!("{e:#}").contains(BUSY) && asked.elapsed() < SPEAKERS_TIMEOUT => std::thread::sleep(Duration::from_secs(5)),
+                r => return r,
+            }
+        }
+    }
+
+    fn speakers_once(&self, pcm: &[u8]) -> Result<Vec<crate::nemo::Turn>> {
+        let mut r = self
+            .agent
+            .post(format!("{}/v1/speakers", self.url))
+            .header("Authorization", format!("Bearer {}", self.key))
+            .header("Content-Type", "application/octet-stream")
+            .config()
+            .timeout_global(Some(SPEAKERS_TIMEOUT))
+            .build()
+            .send(pcm)
+            .with_context(|| format!("could not reach {}", self.url))?;
+        let text = r.body_mut().read_to_string()?;
+        Self::check(r.status().as_u16(), &text)?;
+        let v: Turns = serde_json::from_str(&text).context("unexpected answer from the server")?;
+        Ok(v.turns)
+    }
+
     /// Decode one utterance on the server in `lang`, the call's (see `Engine::utterance`).
     pub fn utterance(&self, chunk: &[f32], lang: i32, prompt: Option<&str>) -> Result<(String, Decoded)> {
         if let Some(model) = &self.openai {
@@ -277,6 +343,12 @@ struct Answer {
     words: Vec<Vec<[f64; 2]>>,
     #[serde(default)]
     ranked: Vec<(String, f32)>,
+}
+
+/// The server's speaker turns (`/v1/speakers`).
+#[derive(Serialize, Deserialize)]
+struct Turns {
+    turns: Vec<crate::nemo::Turn>,
 }
 
 /// 16 kHz mono 16-bit PCM as a WAV file.
@@ -549,6 +621,8 @@ struct Loaded {
 
 /// The server's model, loaded at the first request; one utterance at a time.
 static LOADED: Mutex<Option<Loaded>> = Mutex::new(None);
+/// Speaker detection for a client, one track at a time; emptied at quit like `LOADED`.
+static SPEAKING: Mutex<Option<()>> = Mutex::new(Some(()));
 /// Wrong keys are answered one at a time, each after a pause.
 static AUTH_FAIL: Mutex<()> = Mutex::new(());
 static CONNECTIONS: AtomicUsize = AtomicUsize::new(0);
@@ -560,6 +634,9 @@ static QUITTING: AtomicBool = AtomicBool::new(false);
 pub fn shutdown() {
     if !let_go(&LOADED, &QUITTING, LET_GO_WITHIN) {
         eprintln!("transcription server: quitting while an utterance is still being decoded");
+    }
+    if !let_go(&SPEAKING, &QUITTING, LET_GO_WITHIN) {
+        eprintln!("transcription server: quitting while speakers are still being detected");
     }
 }
 
@@ -694,7 +771,7 @@ fn handle(stream: &TcpStream, key: &str) -> Result<()> {
     r.read_line(&mut line)?;
     let mut parts = line.split_whitespace();
     let (method, path) = (parts.next().unwrap_or("").to_string(), parts.next().unwrap_or("").to_string());
-    let (mut auth, mut length, mut seen) = (String::new(), 0usize, line.len());
+    let (mut auth, mut length, mut seen, mut language) = (String::new(), 0usize, line.len(), None::<String>);
     loop {
         let mut h = String::new();
         if r.read_line(&mut h)? == 0 {
@@ -712,6 +789,7 @@ fn handle(stream: &TcpStream, key: &str) -> Result<()> {
             match name.trim().to_ascii_lowercase().as_str() {
                 "authorization" => auth = value.trim().strip_prefix("Bearer ").unwrap_or("").to_string(),
                 "content-length" => length = value.trim().parse().unwrap_or(usize::MAX),
+                "x-echo-language" => language = Some(value.trim().to_ascii_lowercase()),
                 _ => {}
             }
         }
@@ -723,9 +801,40 @@ fn handle(stream: &TcpStream, key: &str) -> Result<()> {
     }
     match (method.as_str(), path.as_str()) {
         ("GET", "/v1/hello") => {
-            let model = Config::load().ok().and_then(|c| c.model).unwrap_or_default();
-            let hello = Hello { name: computer_name(), model, engine: crate::gpu::engine_status(), version: env!("CARGO_PKG_VERSION").into() };
+            let lang = language.as_deref().filter(|l| whisper_rs::get_lang_id(l).is_some());
+            let model = server_model(lang).map(|(name, _)| name).unwrap_or_default();
+            let speakers = models::speakers_model().is_some();
+            let hello = Hello { name: computer_name(), model, engine: crate::gpu::engine_status(), version: env!("CARGO_PKG_VERSION").into(), speakers };
             respond(stream, 200, &serde_json::to_string(&hello)?)
+        }
+        ("POST", "/v1/speakers") => {
+            if length > MAX_TRACK {
+                return respond(stream, 413, "track too long (4 hours at most)");
+            }
+            if !length.is_multiple_of(2) {
+                return respond(stream, 400, "odd number of sample bytes");
+            }
+            if models::speakers_model().is_none() {
+                return respond(stream, 503, "the server has no speaker model downloaded");
+            }
+            // One track at a time, taken before the upload: a queue of tracks never sits in memory.
+            let g = match SPEAKING.try_lock() {
+                Ok(g) => g,
+                Err(TryLockError::Poisoned(e)) => e.into_inner(),
+                Err(TryLockError::WouldBlock) => return respond(stream, 503, BUSY),
+            };
+            if QUITTING.load(Ordering::SeqCst) || g.is_none() {
+                return respond(stream, 503, "the server is stopping");
+            }
+            let audio = read_pcm(&mut r, length)?;
+            if QUITTING.load(Ordering::SeqCst) {
+                return respond(stream, 503, "the server is stopping"); // a long upload outlasted the quit's wait
+            }
+            match crate::speakers::turns_of(&audio, &QUITTING) {
+                Ok(Some(turns)) => respond(stream, 200, &serde_json::to_string(&Turns { turns })?),
+                Ok(None) => respond(stream, 503, "the server has no speaker model downloaded"),
+                Err(e) => respond(stream, 503, &format!("{e:#}")),
+            }
         }
         ("POST", "/v1/utterance") => {
             if length > MAX_BODY {
@@ -764,6 +873,39 @@ fn parse_body(body: &[u8]) -> Result<(Request, Vec<f32>)> {
     Ok((req, pcm.as_chunks::<2>().0.iter().map(|&b| i16::from_le_bytes(b) as f32 / i16::MAX as f32).collect()))
 }
 
+/// `length` bytes of 16-bit little-endian PCM as samples, read in pieces (no second copy of the bytes).
+fn read_pcm(r: &mut impl Read, length: usize) -> Result<Vec<f32>> {
+    let mut audio = Vec::with_capacity(length / 2);
+    let mut buf = vec![0u8; 1 << 16];
+    let mut left = length;
+    while left > 0 {
+        let n = r.read(&mut buf[..left.min(1 << 16)])?;
+        if n == 0 {
+            bail!("the track ended early");
+        }
+        let mut chunk = &buf[..n];
+        // A read can end mid-sample: keep the odd byte for the next one.
+        if chunk.len() % 2 == 1 {
+            let extra = r.read(&mut buf[n..n + 1])?;
+            if extra == 0 {
+                bail!("the track ended early");
+            }
+            chunk = &buf[..n + 1];
+        }
+        audio.extend(chunk.as_chunks::<2>().0.iter().map(|&b| i16::from_le_bytes(b) as f32 / i16::MAX as f32));
+        left -= chunk.len();
+    }
+    Ok(audio)
+}
+
+/// The model this server transcribes a call in `lang` with — its default language when none — as it would its own
+/// (`models::for_call`): its name and file, when downloaded.
+fn server_model(lang: Option<&str>) -> Option<(String, std::path::PathBuf)> {
+    let cfg = Config::load().ok()?;
+    let code = lang.map(str::to_string).unwrap_or_else(|| crate::call_language::default_language(&cfg));
+    models::for_call(&code, cfg.model.as_deref()).map(|m| (m.name.to_string(), models::model_path(m))).filter(|(_, p)| p.exists())
+}
+
 fn decode_request(body: &[u8]) -> Result<Answer> {
     let (req, audio) = parse_body(body)?;
     let lang = |l: &str| whisper_rs::get_lang_id(l).ok_or_else(|| anyhow::Error::new(Refused(format!("unknown language '{l}'"))));
@@ -776,15 +918,11 @@ fn decode_request(body: &[u8]) -> Result<Answer> {
     if QUITTING.load(Ordering::SeqCst) {
         bail!("the server is stopping"); // its model was let go (`shutdown`)
     }
-    let model = Config::load().ok().and_then(|c| c.model).unwrap_or_default();
+    let Some((model, path)) = server_model(whisper_rs::get_lang_str(call)) else { bail!("the server has no speech model downloaded") };
     if g.as_ref().is_some_and(|l| l.model != model) {
-        *g = None; // the active model was changed here
+        *g = None; // another language's model, or the active one changed here
     }
     if g.is_none() {
-        let path = models::active_model_path()?;
-        if !path.exists() {
-            bail!("the server has no speech model downloaded");
-        }
         eprintln!("transcription server: loading {model}");
         let engine = Engine::load(&path, crate::transcribe::final_threads())?;
         let state = engine.state()?;
@@ -837,6 +975,35 @@ mod tests {
         assert_eq!(calls, vec![("uk".into(), None), ("uk".into(), hint())]);
         let (calls, _, _) = openai_requests("Yes.", 0.5, "en");
         assert_eq!(calls, vec![("en".into(), hint())], "a short utterance: one hinted request, as before");
+    }
+
+    #[test]
+    fn a_track_read_in_odd_pieces_comes_out_whole() {
+        // A reader that hands out 1 and 3 bytes at a time: samples split across reads.
+        struct Dribble(Vec<u8>, usize);
+        impl Read for Dribble {
+            fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+                let n = [1, 3][self.1 % 2].min(buf.len()).min(self.0.len());
+                self.1 += 1;
+                buf[..n].copy_from_slice(&self.0[..n]);
+                self.0.drain(..n);
+                Ok(n)
+            }
+        }
+        let samples: Vec<i16> = vec![0, 1000, -1000, i16::MAX, -7];
+        let bytes: Vec<u8> = samples.iter().flat_map(|s| s.to_le_bytes()).collect();
+        let got = read_pcm(&mut Dribble(bytes.clone(), 0), bytes.len()).unwrap();
+        assert_eq!(got.iter().map(|x| (x * i16::MAX as f32).round() as i16).collect::<Vec<_>>(), samples);
+        assert!(read_pcm(&mut Dribble(bytes[..4].to_vec(), 0), bytes.len()).is_err()); // ended early
+    }
+
+    #[test]
+    fn an_older_servers_hello_says_nothing_of_speakers_and_turns_round_trip() {
+        let old: Hello = serde_json::from_str(r#"{"name":"mini","model":"large-v3-turbo-q5_0","engine":"Metal","version":"0.10.10"}"#).unwrap();
+        assert!(!old.speakers);
+        let turns = Turns { turns: vec![(0.0, 2.5, 0), (2.5, 4.0, 1)] };
+        let back: Turns = serde_json::from_str(&serde_json::to_string(&turns).unwrap()).unwrap();
+        assert_eq!(back.turns, turns.turns);
     }
 
     #[test]

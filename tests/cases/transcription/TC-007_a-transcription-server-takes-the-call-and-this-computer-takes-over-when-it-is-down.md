@@ -4,7 +4,7 @@ title: A transcription server (another Echo) transcribes a call; when it is down
 priority: medium
 type: functional
 module: transcription
-requirements: [F-STT-05]
+requirements: [F-STT-05, F-STT-12]
 tags: [transcription, server, network, fallback]
 run: agent
 platform: macos
@@ -32,10 +32,10 @@ data: small
 
 | # | Action | Expected Result |
 |---|---|---|
-| 1 | `echoctl server use <URL> --key <KEY>` | It prints "transcribing on <server name> (<model>, whisper.cpp, …)" (the key is checked before it is kept) |
+| 1 | `echoctl server use <URL> --key <KEY>` | It prints "transcribing on <server name> (<model>, …)": the server's model for this computer's default language — for English `parakeet-tdt-0.6b-v3` when the server has it (the key is checked before it is kept) |
 | 2 | `echoctl server status` | "transcribing on <URL> — <server name> (…)" |
 | 3 | `make_audio.py build very-short $ECHOCTL_HOME/calls/<day>_120000-very-short-stt`; `echoctl transcribe <that folder>` | Exit 0, "done in …s"; the audio is deleted |
-| 4 | `make_audio.py score <that folder>`; `head -6 <that folder>/transcript.md` | `pass` true, `wer` ≤ 0.15, `transcribed_in_silence` []; the header reads "**Model:** large-v3-turbo-q5_0 on <server name>" |
+| 4 | `make_audio.py score <that folder>`; `head -6 <that folder>/transcript.md` | `pass` true, `wer` ≤ 0.15, `transcribed_in_silence` []; the header reads "**Model:** <the server's model for English> on <server name>" (`parakeet-tdt-0.6b-v3` when the server has it, else its own) |
 | 5 | The server's owner runs `echoctl server share off`; wait until `curl -s -o /dev/null -w '%{http_code}' <URL>/` gets no connection | (`000`) |
 | 6 | Build `very-short` into `<day>_123000-very-short-fallback`; `echoctl transcribe <that folder>` | Its output has "transcription server: could not reach <URL>: …" ending with why: "Connection refused" (the host answers, nothing listens) or "timeout: connect" (the host doesn't answer, as a 100.64.x address may not), and "model: large-v3-turbo-q5_0 (server not reachable)"; exit 0 |
 | 7 | `make_audio.py score <that folder>`; `head -6 <that folder>/transcript.md` | `pass` true, `wer` ≤ 0.15; the header reads "**Model:** large-v3-turbo-q5_0 (server not reachable)"; no `transcribe.error` |
