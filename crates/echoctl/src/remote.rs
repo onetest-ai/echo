@@ -64,6 +64,8 @@ const LET_GO_WITHIN: Duration = Duration::from_secs(30);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(180);
 /// A whole remote track for speaker detection: up to 4 hours of 16-bit 16 kHz audio.
 const MAX_TRACK: usize = 4 * 3600 * 16_000 * 2;
+/// The answer to a track while another one's speakers are being detected.
+const BUSY: &str = "busy detecting another call's speakers";
 /// The call's language in a hello (a header: an older server ignores it, where a query would be a 404).
 const LANGUAGE_HEADER: &str = "X-Echo-Language";
 /// Speaker detection over a long call, queued behind others'.
@@ -271,6 +273,17 @@ impl Client {
         if !self.hello()?.speakers {
             bail!("the server doesn't detect speakers (no speaker model there, or an older Echo)");
         }
+        // Another client's track is being done (one at a time): wait our turn.
+        let asked = Instant::now();
+        loop {
+            match self.speakers_once(pcm) {
+                Err(e) if format!("{e:#}").contains(BUSY) && asked.elapsed() < SPEAKERS_TIMEOUT => std::thread::sleep(Duration::from_secs(5)),
+                r => return r,
+            }
+        }
+    }
+
+    fn speakers_once(&self, pcm: &[u8]) -> Result<Vec<crate::nemo::Turn>> {
         let mut r = self
             .agent
             .post(format!("{}/v1/speakers", self.url))
@@ -808,12 +821,15 @@ fn handle(stream: &TcpStream, key: &str) -> Result<()> {
             let g = match SPEAKING.try_lock() {
                 Ok(g) => g,
                 Err(TryLockError::Poisoned(e)) => e.into_inner(),
-                Err(TryLockError::WouldBlock) => return respond(stream, 503, "busy detecting another call's speakers"),
+                Err(TryLockError::WouldBlock) => return respond(stream, 503, BUSY),
             };
             if QUITTING.load(Ordering::SeqCst) || g.is_none() {
                 return respond(stream, 503, "the server is stopping");
             }
             let audio = read_pcm(&mut r, length)?;
+            if QUITTING.load(Ordering::SeqCst) {
+                return respond(stream, 503, "the server is stopping"); // a long upload outlasted the quit's wait
+            }
             match crate::speakers::turns_of(&audio, &QUITTING) {
                 Ok(Some(turns)) => respond(stream, 200, &serde_json::to_string(&Turns { turns })?),
                 Ok(None) => respond(stream, 503, "the server has no speaker model downloaded"),
@@ -959,6 +975,26 @@ mod tests {
         assert_eq!(calls, vec![("uk".into(), None), ("uk".into(), hint())]);
         let (calls, _, _) = openai_requests("Yes.", 0.5, "en");
         assert_eq!(calls, vec![("en".into(), hint())], "a short utterance: one hinted request, as before");
+    }
+
+    #[test]
+    fn a_track_read_in_odd_pieces_comes_out_whole() {
+        // A reader that hands out 1 and 3 bytes at a time: samples split across reads.
+        struct Dribble(Vec<u8>, usize);
+        impl Read for Dribble {
+            fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+                let n = [1, 3][self.1 % 2].min(buf.len()).min(self.0.len());
+                self.1 += 1;
+                buf[..n].copy_from_slice(&self.0[..n]);
+                self.0.drain(..n);
+                Ok(n)
+            }
+        }
+        let samples: Vec<i16> = vec![0, 1000, -1000, i16::MAX, -7];
+        let bytes: Vec<u8> = samples.iter().flat_map(|s| s.to_le_bytes()).collect();
+        let got = read_pcm(&mut Dribble(bytes.clone(), 0), bytes.len()).unwrap();
+        assert_eq!(got.iter().map(|x| (x * i16::MAX as f32).round() as i16).collect::<Vec<_>>(), samples);
+        assert!(read_pcm(&mut Dribble(bytes[..4].to_vec(), 0), bytes.len()).is_err()); // ended early
     }
 
     #[test]

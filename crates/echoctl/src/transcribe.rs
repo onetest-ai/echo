@@ -799,7 +799,7 @@ impl Transcriber {
                 self.local(&e, ts, chunk, lang)?
             }
             Backend::Remote { server, fallback, local, threads, down_until } => {
-                let waiting = Instant::now();
+                let mut waiting = Instant::now();
                 loop {
                     let down = down_until.lock().unwrap_or_else(|e| e.into_inner()).is_some_and(|t| Instant::now() < t);
                     if !down {
@@ -834,6 +834,7 @@ impl Transcriber {
                     }
                     if wait {
                         std::thread::sleep(Duration::from_secs(1)); // looked at again: the call being recorded may end
+                        waiting = Instant::now(); // the server's own wait starts once that call has ended
                         continue;
                     }
                     if waiting.elapsed() > SERVER_WAIT {
