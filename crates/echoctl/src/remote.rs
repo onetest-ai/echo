@@ -12,8 +12,9 @@
 //!   https); it keeps no audio and no text and logs no content.
 //!
 //! Protocol (ours, versioned by the path):
-//! - `GET /v1/hello[?lang=<code>]` → `{name, model, engine, version, speakers}`: `model` is the one it transcribes a
-//!   call in that language with (else its default language), `speakers` whether it detects speakers
+//! - `GET /v1/hello` (`X-Echo-Language: <code>` optional; an older server ignores it) → `{name, model, engine, version,
+//!   speakers}`: `model` is the one it transcribes a call in that language with (else its default language), `speakers`
+//!   whether it detects speakers
 //! - `POST /v1/utterance`: a little-endian u32 length, that many bytes of JSON
 //!   (`{languages, prompt}`; an older client's `prev` is ignored), then the samples as 16-bit little-endian PCM →
 //!   `{lang_id, lang, segs: [[start, end, text]], words, ranked}` (`ranked`: the detection, when several languages were allowed).
@@ -63,6 +64,8 @@ const LET_GO_WITHIN: Duration = Duration::from_secs(30);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(180);
 /// A whole remote track for speaker detection: up to 4 hours of 16-bit 16 kHz audio.
 const MAX_TRACK: usize = 4 * 3600 * 16_000 * 2;
+/// The call's language in a hello (a header: an older server ignores it, where a query would be a 404).
+const LANGUAGE_HEADER: &str = "X-Echo-Language";
 /// Speaker detection over a long call, queued behind others'.
 const SPEAKERS_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 
@@ -179,11 +182,11 @@ impl Client {
         if let Some(model) = &self.openai {
             return self.openai_hello(model);
         }
-        let query = lang.map(|l| format!("?lang={l}")).unwrap_or_default();
-        let mut r = self
-            .agent
-            .get(format!("{}/v1/hello{query}", self.url))
-            .header("Authorization", format!("Bearer {}", self.key))
+        let mut req = self.agent.get(format!("{}/v1/hello", self.url)).header("Authorization", format!("Bearer {}", self.key));
+        if let Some(l) = lang {
+            req = req.header(LANGUAGE_HEADER, l);
+        }
+        let mut r = req
             .config()
             .timeout_global(Some(Duration::from_secs(10)))
             .build()
@@ -259,11 +262,14 @@ impl Client {
         openai_decode(decode, chunk.len() as f64 / 16000.0, lang, prompt)
     }
 
-    /// The speaker turns in a whole remote track (16 kHz mono), detected on the server.
-    pub fn speakers(&self, audio: &[f32]) -> Result<Vec<crate::nemo::Turn>> {
-        let mut body = Vec::with_capacity(audio.len() * 2);
-        for s in audio {
-            body.extend(((s.clamp(-1.0, 1.0) * i16::MAX as f32) as i16).to_le_bytes());
+    /// The speaker turns in a whole remote track (`pcm`: 16 kHz mono, 16-bit little-endian), detected on the server —
+    /// asked only when it says it can (an older server can't).
+    pub fn speakers(&self, pcm: &[u8]) -> Result<Vec<crate::nemo::Turn>> {
+        if pcm.len() > MAX_TRACK {
+            bail!("the track is longer than the server takes (4 hours)");
+        }
+        if !self.hello()?.speakers {
+            bail!("the server doesn't detect speakers (no speaker model there, or an older Echo)");
         }
         let mut r = self
             .agent
@@ -273,7 +279,7 @@ impl Client {
             .config()
             .timeout_global(Some(SPEAKERS_TIMEOUT))
             .build()
-            .send(&body[..])
+            .send(pcm)
             .with_context(|| format!("could not reach {}", self.url))?;
         let text = r.body_mut().read_to_string()?;
         Self::check(r.status().as_u16(), &text)?;
@@ -752,7 +758,7 @@ fn handle(stream: &TcpStream, key: &str) -> Result<()> {
     r.read_line(&mut line)?;
     let mut parts = line.split_whitespace();
     let (method, path) = (parts.next().unwrap_or("").to_string(), parts.next().unwrap_or("").to_string());
-    let (mut auth, mut length, mut seen) = (String::new(), 0usize, line.len());
+    let (mut auth, mut length, mut seen, mut language) = (String::new(), 0usize, line.len(), None::<String>);
     loop {
         let mut h = String::new();
         if r.read_line(&mut h)? == 0 {
@@ -770,6 +776,7 @@ fn handle(stream: &TcpStream, key: &str) -> Result<()> {
             match name.trim().to_ascii_lowercase().as_str() {
                 "authorization" => auth = value.trim().strip_prefix("Bearer ").unwrap_or("").to_string(),
                 "content-length" => length = value.trim().parse().unwrap_or(usize::MAX),
+                "x-echo-language" => language = Some(value.trim().to_ascii_lowercase()),
                 _ => {}
             }
         }
@@ -779,27 +786,35 @@ fn handle(stream: &TcpStream, key: &str) -> Result<()> {
         std::thread::sleep(Duration::from_secs(1));
         return respond(stream, 401, "wrong API key");
     }
-    let (path, query) = path.split_once('?').unwrap_or((path.as_str(), ""));
-    match (method.as_str(), path) {
+    match (method.as_str(), path.as_str()) {
         ("GET", "/v1/hello") => {
-            let lang = query.split('&').find_map(|kv| kv.strip_prefix("lang=")).filter(|l| whisper_rs::get_lang_id(l).is_some());
+            let lang = language.as_deref().filter(|l| whisper_rs::get_lang_id(l).is_some());
             let model = server_model(lang).map(|(name, _)| name).unwrap_or_default();
             let speakers = models::speakers_model().is_some();
             let hello = Hello { name: computer_name(), model, engine: crate::gpu::engine_status(), version: env!("CARGO_PKG_VERSION").into(), speakers };
             respond(stream, 200, &serde_json::to_string(&hello)?)
         }
         ("POST", "/v1/speakers") => {
-            if length > MAX_TRACK || !length.is_multiple_of(2) {
-                return respond(stream, 413, "track too large");
+            if length > MAX_TRACK {
+                return respond(stream, 413, "track too long (4 hours at most)");
             }
-            let mut body = vec![0u8; length];
-            r.read_exact(&mut body)?;
-            let audio: Vec<f32> = body.as_chunks::<2>().0.iter().map(|&b| i16::from_le_bytes(b) as f32 / i16::MAX as f32).collect();
-            let g = SPEAKING.lock().unwrap_or_else(|e| e.into_inner());
+            if !length.is_multiple_of(2) {
+                return respond(stream, 400, "odd number of sample bytes");
+            }
+            if models::speakers_model().is_none() {
+                return respond(stream, 503, "the server has no speaker model downloaded");
+            }
+            // One track at a time, taken before the upload: a queue of tracks never sits in memory.
+            let g = match SPEAKING.try_lock() {
+                Ok(g) => g,
+                Err(TryLockError::Poisoned(e)) => e.into_inner(),
+                Err(TryLockError::WouldBlock) => return respond(stream, 503, "busy detecting another call's speakers"),
+            };
             if QUITTING.load(Ordering::SeqCst) || g.is_none() {
                 return respond(stream, 503, "the server is stopping");
             }
-            match crate::speakers::turns_of(&audio) {
+            let audio = read_pcm(&mut r, length)?;
+            match crate::speakers::turns_of(&audio, &QUITTING) {
                 Ok(Some(turns)) => respond(stream, 200, &serde_json::to_string(&Turns { turns })?),
                 Ok(None) => respond(stream, 503, "the server has no speaker model downloaded"),
                 Err(e) => respond(stream, 503, &format!("{e:#}")),
@@ -840,6 +855,31 @@ fn parse_body(body: &[u8]) -> Result<(Request, Vec<f32>)> {
         return Err(bad("odd number of sample bytes"));
     }
     Ok((req, pcm.as_chunks::<2>().0.iter().map(|&b| i16::from_le_bytes(b) as f32 / i16::MAX as f32).collect()))
+}
+
+/// `length` bytes of 16-bit little-endian PCM as samples, read in pieces (no second copy of the bytes).
+fn read_pcm(r: &mut impl Read, length: usize) -> Result<Vec<f32>> {
+    let mut audio = Vec::with_capacity(length / 2);
+    let mut buf = vec![0u8; 1 << 16];
+    let mut left = length;
+    while left > 0 {
+        let n = r.read(&mut buf[..left.min(1 << 16)])?;
+        if n == 0 {
+            bail!("the track ended early");
+        }
+        let mut chunk = &buf[..n];
+        // A read can end mid-sample: keep the odd byte for the next one.
+        if chunk.len() % 2 == 1 {
+            let extra = r.read(&mut buf[n..n + 1])?;
+            if extra == 0 {
+                bail!("the track ended early");
+            }
+            chunk = &buf[..n + 1];
+        }
+        audio.extend(chunk.as_chunks::<2>().0.iter().map(|&b| i16::from_le_bytes(b) as f32 / i16::MAX as f32));
+        left -= chunk.len();
+    }
+    Ok(audio)
 }
 
 /// The model this server transcribes a call in `lang` with — its default language when none — as it would its own

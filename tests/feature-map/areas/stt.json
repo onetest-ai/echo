@@ -98,7 +98,7 @@
   },
   {
    "id": "F-STT-12",
-   "feature": "A computer using a transcription server needs no model of its own: the server decodes each call with its model for the call's language and tells the remote speakers apart; this computer's models are used only while the server can't be reached, and a call that has ended waits for it",
+   "feature": "A computer using a transcription server needs no model of its own: the server decodes each call with its model for the call's language and tells the remote speakers apart; this computer's models are used only while the server can't be reached — not by a call that has ended while another one is being recorded, which waits for the server",
    "priority": "high",
    "check": "agent",
    "axes": []

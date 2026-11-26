@@ -814,7 +814,12 @@ impl Transcriber {
                     }
                     // A call that has ended waits for the server rather than load this computer's model beside the
                     // call being recorded (`live::turn`): sending costs this computer nothing.
-                    let engine = if self.finishing.get().is_some() { &None } else { local.get_or_init(|| {
+                    let finishing = self.finishing.get();
+                    if finishing.is_some_and(|q| q.load(Ordering::SeqCst)) || crate::live::quitting() {
+                        bail!("given up: nobody waits for this transcript");
+                    }
+                    let wait = finishing.is_some() && crate::live::recording();
+                    let engine = if wait { &None } else { local.get_or_init(|| {
                         let path = fallback.as_ref()?;
                         loaded_engine(path, *threads).map_err(|e| eprintln!("  this computer's model: {e:#}")).ok()
                     }) };
@@ -824,8 +829,12 @@ impl Transcriber {
                     }
                     // No model here: the WAVs keep the audio, so wait for the server.
                     if waiting.elapsed() < Duration::from_secs(1) {
-                        let why = if self.finishing.get().is_some() { "the call has ended" } else { "no speech model on this computer" };
+                        let why = if wait { "a call is being recorded" } else { "no speech model on this computer" };
                         eprintln!("  {why}: waiting for the transcription server");
+                    }
+                    if wait {
+                        std::thread::sleep(Duration::from_secs(1)); // looked at again: the call being recorded may end
+                        continue;
                     }
                     if waiting.elapsed() > SERVER_WAIT {
                         bail!("the transcription server can't be reached and this computer has no speech model");
