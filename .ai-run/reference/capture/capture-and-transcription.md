@@ -109,7 +109,11 @@ audio is kept (`keep_audio`), and noted through `calls::update_meta`.
 
 - The server the user connected: `remote::Client::configured` (`remote::connect`, `remote::connect_openai` for an
   OpenAI-compatible one; `remote::disconnect`).
-- Protocol: `/v1/hello`, `/v1/utterance` (`remote::Answer`).
+- Protocol: `/v1/hello[?lang=<code>]` (the model it uses for that language, `speakers`), `/v1/utterance`
+  (`remote::Answer`; decoded with the server's model for the call's language, `remote::server_model`), `/v1/speakers`
+  (a whole remote track in, `remote::Turns` out; `speakers::turns_of`).
+- A client needs no model: `speakers::diarize` asks the server first; a call that has ended waits for the server
+  rather than load this computer's model (`Transcriber::utterance`).
 - `remote::Refused` is the final answer (a wrong key, a bad request); `transcribe::Transcriber::utterance` falls back to
   this computer's model on any other error.
 

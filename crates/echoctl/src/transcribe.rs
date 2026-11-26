@@ -812,17 +812,20 @@ impl Transcriber {
                             }
                         }
                     }
-                    let engine = local.get_or_init(|| {
+                    // A call that has ended waits for the server rather than load this computer's model beside the
+                    // call being recorded (`live::turn`): sending costs this computer nothing.
+                    let engine = if self.finishing.get().is_some() { &None } else { local.get_or_init(|| {
                         let path = fallback.as_ref()?;
                         loaded_engine(path, *threads).map_err(|e| eprintln!("  this computer's model: {e:#}")).ok()
-                    });
+                    }) };
                     if let Some(e) = engine {
                         let _turn = crate::live::turn(self.finishing.get(), e.is_whisper(), &self.waited)?;
                         break self.local(e, ts, chunk, lang)?;
                     }
                     // No model here: the WAVs keep the audio, so wait for the server.
                     if waiting.elapsed() < Duration::from_secs(1) {
-                        eprintln!("  no speech model on this computer: waiting for the transcription server");
+                        let why = if self.finishing.get().is_some() { "the call has ended" } else { "no speech model on this computer" };
+                        eprintln!("  {why}: waiting for the transcription server");
                     }
                     if waiting.elapsed() > SERVER_WAIT {
                         bail!("the transcription server can't be reached and this computer has no speech model");
@@ -1175,7 +1178,7 @@ pub(crate) fn final_transcriber(cfg: &Config, model_override: Option<&str>, prom
     };
     if let (None, Some(server)) = (model_override, crate::remote::Client::configured()) {
         let fallback = models::for_call(code, cfg.model.as_deref()).map(models::model_path).filter(|p| p.exists());
-        let name = match server.hello() {
+        let name = match server.hello_for(Some(code)) {
             Ok(h) => format!("{} on {}", h.model, h.name),
             Err(e) => {
                 eprintln!("  transcription server: {e:#}");
