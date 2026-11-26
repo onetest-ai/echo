@@ -1,5 +1,14 @@
 [
   {
+    "version": "0.10.11",
+    "items": [
+      { "icon": "record", "title": "Screen sharing works between calls", "text": "On back-to-back calls your current call gets the computer first while Echo finishes the last one, so sharing your screen in Teams no longer fails.", "open": "calls" },
+      { "icon": "sparkle", "title": "A transcription server does it all", "text": "A computer using another Echo to transcribe needs no models of its own: it gets the right model for each language and speakers told apart.", "open": "settings" },
+      { "icon": "calendar", "title": "Keep both overlapping meetings", "text": "When two meetings overlap and you can join both, keep them both in the day's choices.", "open": "today" },
+      { "icon": "fix", "title": "Other calls keep their own name", "text": "A call you take while a calendar meeting goes on is no longer filed as that meeting.", "open": "calls" }
+    ]
+  },
+  {
     "version": "0.10.10",
     "items": [
       { "icon": "fix", "title": "Updates found on busy networks", "text": "Check for updates finds new versions even when GitHub limits your network, and says in plain words why a check couldn't be done.", "open": "settings" }
